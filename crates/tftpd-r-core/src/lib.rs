@@ -54,7 +54,7 @@ pub mod server;
 pub mod session;
 
 pub use config::{ConfigError, ServerConfig};
-pub use error::{DecodeError, EncodeError, ErrorCode, ServerError};
+pub use error::{is_privileged_port, DecodeError, EncodeError, ErrorCode, ServerError};
 pub use events::{EventBus, EventKind, EventSink, SessionId, TftpEvent};
 pub use filesystem::{FileError, OpenedFile, Sandbox, SandboxError};
 pub use protocol::{Mode, Packet, Request};

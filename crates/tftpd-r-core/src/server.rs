@@ -93,14 +93,10 @@ impl TftpServer {
         let sandbox = Arc::new(Sandbox::new(&config.root_dir, config.max_file_bytes)?);
         let socket = UdpSocket::bind(config.bind_address)
             .await
-            .map_err(|source| ServerError::Bind {
-                addr: config.bind_address,
-                source,
-            })?;
-        let local_addr = socket.local_addr().map_err(|source| ServerError::Bind {
-            addr: config.bind_address,
-            source,
-        })?;
+            .map_err(|source| ServerError::bind(config.bind_address, source))?;
+        let local_addr = socket
+            .local_addr()
+            .map_err(|source| ServerError::bind(config.bind_address, source))?;
         let config = Arc::new(config);
         // The socket is already bound, so the initial observable state is
         // `Running`; the supervisor re-announces it once it is scheduled.

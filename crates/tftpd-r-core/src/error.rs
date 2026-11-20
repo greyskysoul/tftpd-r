@@ -106,6 +106,11 @@ pub enum EncodeError {
     PayloadTooLarge,
 }
 
+/// Lowest port number that requires administrator/root privileges.
+pub const FIRST_PRIVILEGED_PORT: u16 = 1;
+/// Highest privileged (well-known) port number.
+pub const LAST_PRIVILEGED_PORT: u16 = 1023;
+
 /// Fatal errors returned when starting the server.
 #[derive(Debug, thiserror::Error)]
 pub enum ServerError {
@@ -123,7 +128,118 @@ pub enum ServerError {
         /// Underlying OS error.
         source: std::io::Error,
     },
+    /// A privileged port could not be bound because the process lacks rights.
+    ///
+    /// This is a distinct variant so the GUI and the daemon can show an
+    /// actionable, non-forcing hint instead of a generic bind failure. The
+    /// server never retries on another port and never elevates itself.
+    #[error(
+        "cannot bind UDP {addr}: permission denied; port {port} is privileged and needs administrator/root privileges. Run with sufficient privileges or choose an unprivileged port such as 6969 (the configuration is not changed automatically)",
+        port = .addr.port()
+    )]
+    PrivilegedPort {
+        /// Requested bind address.
+        addr: SocketAddr,
+        /// Underlying OS error.
+        source: std::io::Error,
+    },
     /// A per-transfer socket could not be created.
     #[error("failed to create transfer socket: {0}")]
     TransferSocket(std::io::Error),
+}
+
+impl ServerError {
+    /// Classify a bind failure.
+    ///
+    /// A permission error on a privileged port becomes
+    /// [`ServerError::PrivilegedPort`] so front-ends can suggest an
+    /// unprivileged port; everything else stays a plain [`ServerError::Bind`].
+    #[must_use]
+    pub fn bind(addr: SocketAddr, source: std::io::Error) -> Self {
+        if is_privileged_port(addr.port()) && is_permission_denied(&source) {
+            Self::PrivilegedPort { addr, source }
+        } else {
+            Self::Bind { addr, source }
+        }
+    }
+}
+
+/// Whether a port needs elevated privileges to bind.
+#[must_use]
+pub fn is_privileged_port(port: u16) -> bool {
+    (FIRST_PRIVILEGED_PORT..=LAST_PRIVILEGED_PORT).contains(&port)
+}
+
+/// Whether an OS error means "this process may not bind that address".
+///
+/// `std` normally maps `EACCES`/`WSAEACCES` to `PermissionDenied`; the raw
+/// codes are checked as well so the classification does not depend on the
+/// platform's error mapping.
+fn is_permission_denied(error: &std::io::Error) -> bool {
+    if error.kind() == std::io::ErrorKind::PermissionDenied {
+        return true;
+    }
+    match error.raw_os_error() {
+        #[cfg(windows)]
+        Some(10013) => true, // WSAEACCES
+        #[cfg(unix)]
+        Some(13) => true, // EACCES
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::ErrorKind;
+
+    fn addr(text: &str) -> SocketAddr {
+        text.parse().expect("socket address")
+    }
+
+    #[test]
+    fn permission_denied_on_port_69_gets_an_actionable_hint() {
+        let error = ServerError::bind(
+            addr("127.0.0.1:69"),
+            std::io::Error::from(ErrorKind::PermissionDenied),
+        );
+        assert!(matches!(error, ServerError::PrivilegedPort { .. }));
+        let text = error.to_string();
+        assert!(text.contains("administrator"), "missing hint: {text}");
+        assert!(text.contains("6969"), "missing port suggestion: {text}");
+        assert!(
+            text.contains("not changed automatically"),
+            "the hint must not imply an automatic fallback: {text}"
+        );
+    }
+
+    #[test]
+    fn permission_denied_on_a_high_port_stays_a_plain_bind_error() {
+        let error = ServerError::bind(
+            addr("127.0.0.1:6969"),
+            std::io::Error::from(ErrorKind::PermissionDenied),
+        );
+        assert!(matches!(error, ServerError::Bind { .. }));
+        assert!(!error.to_string().contains("privileged"));
+    }
+
+    #[test]
+    fn other_errors_on_a_privileged_port_stay_plain_bind_errors() {
+        let error = ServerError::bind(
+            addr("127.0.0.1:69"),
+            std::io::Error::from(ErrorKind::AddrInUse),
+        );
+        assert!(matches!(error, ServerError::Bind { .. }));
+        assert!(!error.to_string().contains("privileged"));
+    }
+
+    #[test]
+    fn privileged_port_range_is_one_to_1023() {
+        assert!(is_privileged_port(1));
+        assert!(is_privileged_port(69));
+        assert!(is_privileged_port(1023));
+        assert!(!is_privileged_port(0));
+        assert!(!is_privileged_port(1024));
+        assert!(!is_privileged_port(6969));
+    }
 }

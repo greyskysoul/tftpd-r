@@ -116,7 +116,7 @@ fn serve_starts_and_keeps_running() {
     fs::write(root.join("hello.txt"), b"hello").expect("write file");
     let config_path = dir.path().join("config.toml");
     let config = example_config_with_root(&root).replace(
-        "bind_address = \"127.0.0.1:6969\"",
+        "bind_address = \"127.0.0.1:69\"",
         "bind_address = \"127.0.0.1:0\"",
     );
     fs::write(&config_path, config).expect("write config");

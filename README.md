@@ -60,9 +60,10 @@ Not implemented in this release (deliberate, tracked in `docs/adr/`):
 - `netascii` mode (`docs/adr/0006-octet-only.md`).
 
 Requirements accepted for the next release — port 69 as the default with a
-non-forcing hint when privileges are missing, multi-select bind addresses, and
-INI configuration stored at `~/.tftpdr.ini` — are recorded in
-[docs/roadmap.md](docs/roadmap.md). They are **not** part of 0.1.0.
+non-forcing hint when privileges are missing, and multi-select bind addresses —
+are recorded in [docs/roadmap.md](docs/roadmap.md). They are **not** part of
+0.1.0. Configuration stays TOML; an INI format with a fixed location was
+considered and dropped.
 
 ## Requirements
 
@@ -103,11 +104,16 @@ Copy-Item config.example.toml config.toml
 cargo run -p tftpd-r-daemon -- check-config --config config.toml
 
 # 3. Run the server in the foreground; Ctrl-C (or Ctrl-Break) stops it gracefully.
-cargo run -p tftpd-r-daemon -- serve --config config.toml
+#    The example configuration uses the standard TFTP port 69, which needs
+#    administrator/root. For an unprivileged trial run, override the port:
+cargo run -p tftpd-r-daemon -- serve --config config.toml --bind 127.0.0.1:6969
 ```
 
-Then point any TFTP client at `127.0.0.1:6969` and request `hello.txt`. The
-server is read-only: uploads are refused.
+Then point any TFTP client at `127.0.0.1:69` (or `127.0.0.1:6969` with the
+override) and request `hello.txt`. The server is read-only: uploads are
+refused. Binding port 69 without the required privileges fails with a message
+that suggests an unprivileged port; the server never falls back or elevates on
+its own.
 
 CLI summary:
 
@@ -182,7 +188,7 @@ the daemon (`print-default-config` prints exactly that file). Fields:
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| `bind_address` | `127.0.0.1:6969` | UDP. Keep loopback unless intentionally serving a LAN. Port 69 needs administrator/root. |
+| `bind_address` | `127.0.0.1:69` | UDP. Keep loopback unless intentionally serving a LAN. Port 69 needs administrator/root; an unprivileged run must choose another port (for example `6969`) and is told so on failure. |
 | `root_dir` | `tftp-root` | Must exist and be a directory. |
 | `allow_upload` | `false` | Must stay `false` in this release; `true` is a validation error. |
 | `overwrite` | `false` | Requires uploads; rejected in this release. |
@@ -199,8 +205,10 @@ Unknown keys are rejected so typos do not silently fall back to defaults.
 
 ## Ports and firewall
 
-- The server listens on **UDP** `bind_address` (default `127.0.0.1:6969`). Port
-  `69` is privileged on Windows and Linux; use `6969` for unprivileged runs.
+- The server listens on **UDP** `bind_address` (default `127.0.0.1:69`). Port
+  `69` is privileged on Windows and Linux and is the product default; a start
+  without administrator/root fails with a hint that names an unprivileged port
+  (for example `6969`) but changes nothing automatically.
 - Each transfer uses an additional **ephemeral UDP port** (the transfer ID) in
   the same address family as the listener. A firewall must allow inbound UDP to
   the listening port *and* the return traffic from those ephemeral ports. On

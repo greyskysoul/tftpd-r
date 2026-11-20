@@ -9,8 +9,12 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-/// Default bind address: loopback only, unprivileged port.
-pub const DEFAULT_BIND_ADDRESS: (IpAddr, u16) = (IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 6969);
+/// Default bind address: loopback only, standard TFTP port 69.
+///
+/// Port 69 is privileged on Windows (administrator token) and Unix (root or
+/// `CAP_NET_BIND_SERVICE`). A start without those privileges fails with an
+/// actionable hint; the server never falls back to another port on its own.
+pub const DEFAULT_BIND_ADDRESS: (IpAddr, u16) = (IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 69);
 
 /// Minimum allowed `block_size` (RFC 2348).
 pub const MIN_CONFIG_BLOCK_SIZE: u16 = 8;
@@ -297,6 +301,8 @@ mod tests {
         assert!(!config.allow_upload);
         assert!(!config.overwrite);
         assert!(config.bind_address.ip().is_loopback());
+        assert_eq!(config.bind_address.port(), 69);
+        assert!(crate::error::is_privileged_port(config.bind_address.port()));
     }
 
     #[test]
@@ -332,6 +338,7 @@ surprise = true
         assert!(!parsed.allow_upload);
         assert!(!parsed.overwrite);
         assert!(parsed.bind_address.ip().is_loopback());
+        assert_eq!(parsed.bind_address.port(), 69);
     }
 
     #[test]

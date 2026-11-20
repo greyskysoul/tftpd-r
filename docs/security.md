@@ -18,7 +18,14 @@ risks. It is intentionally specific about what is **not** protected.
 - Do not expose the service directly to the Internet. The protocol has no
   anti-spoofing or authentication; request spoofing and response amplification
   are inherent to UDP/TFTP.
-- Port 69 requires administrator/root. The example uses `6969`, which does not.
+- The default listen address is `127.0.0.1:69`. Port 69 is privileged
+  (administrator on Windows, root or `CAP_NET_BIND_SERVICE` on Linux). The
+  application never elevates itself, never retries on another port and never
+  rewrites the configuration: a permission failure is reported with a hint to
+  choose an unprivileged port such as `6969`. Running the service with elevated
+  rights is an explicit operator decision and widens the impact of any future
+  vulnerability; preferring a high port or a port-forwarding/firewall rule is
+  safer for long-running deployments.
 
 ## Threat model
 

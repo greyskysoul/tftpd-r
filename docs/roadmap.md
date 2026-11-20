@@ -8,6 +8,11 @@ single `bind_address` defaulting to `127.0.0.1:6969`, and a GUI that loads
 Anything listed here is unimplemented until the code, tests, ADR and docs say
 otherwise.
 
+The configuration format stays **TOML**. An INI configuration with fixed
+locations (`~/.tftpdr.ini`) was considered for `0.2.0` and then dropped; the
+daemon keeps `--config <path>` with TOML and the GUI keeps loading
+`config.toml` from the working directory.
+
 ## R1 — Default bind port 69, with a non-forcing hint
 
 - The default bind port becomes **69**, the standard TFTP port (currently
@@ -65,32 +70,4 @@ Open questions to settle before implementation:
 - What does the GUI show when only some of the selected addresses bound
   successfully (partial success)?
 
-## R3 — INI configuration with fixed locations
 
-- User configuration is stored as **INI** instead of the current TOML.
-- The daemon accepts the INI path as a CLI argument.
-- The GUI does not take a path argument: it always reads and writes
-  `<user home>/.tftpdr.ini` (on Windows `%USERPROFILE%\.tftpdr.ini`).
-- The GUI therefore no longer reads `config.toml` from the working directory.
-
-Implementation notes:
-
-- `ServerConfig` deserialisation, `config.example.toml` (renamed to an INI
-  example), the embedded default that `print-default-config` prints and the
-  tests that compare them all change together; `validate()` stays the single
-  source of truth.
-- The INI editor has to keep the current guarantees: unknown keys rejected,
-  typed values validated, no silently substituted defaults.
-- What happens to an existing `config.toml` (error with a migration hint, or a
-  documented converter) has to be decided; the current behaviour of failing
-  loudly on unknown keys is the precedent.
-- Needs an ADR covering the format change, the two fixed locations and the
-  migration story, plus README/security/testing updates.
-
-Open questions to settle before implementation:
-
-- INI section and key names (flat `key=value` versus a `[server]` section).
-- CLI flag for the daemon: reuse `--config` for a path with any extension, or a
-  new `--ini` flag.
-- Whether a portable/next-to-binary configuration is ever supported (out of
-  scope unless requested).

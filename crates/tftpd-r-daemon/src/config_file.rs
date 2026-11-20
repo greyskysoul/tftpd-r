@@ -91,7 +91,7 @@ mod tests {
         let on_disk = include_str!("../../../config.example.toml");
         assert_eq!(DEFAULT_CONFIG_TOML, on_disk);
         assert!(DEFAULT_CONFIG_TOML.contains("allow_upload = false"));
-        assert!(DEFAULT_CONFIG_TOML.contains("bind_address = \"127.0.0.1:6969\""));
+        assert!(DEFAULT_CONFIG_TOML.contains("bind_address = \"127.0.0.1:69\""));
     }
 
     #[test]
@@ -108,7 +108,7 @@ mod tests {
         let parsed =
             ServerConfig::from_toml_str(&text).expect("default configuration must be valid");
         assert!(!parsed.allow_upload);
-        assert_eq!(parsed.bind_address.port(), 6969);
+        assert_eq!(parsed.bind_address.port(), 69);
     }
 
     #[test]
