@@ -1,0 +1,151 @@
+// Modal "About" dialog.
+import { Icons, MaterialIcon } from "icons.slint";
+import { Theme } from "theme.slint";
+import { IconButton, SmallButton } from "widgets.slint";
+
+export component AboutDialog inherits Rectangle {
+    in property <string> app-version: "0.1.0";
+
+    callback close-requested();
+
+    width: 100%;
+    height: 100%;
+    background: Theme.scrim;
+
+    TouchArea {
+        clicked => { root.close-requested(); }
+    }
+
+    card := Rectangle {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        width: 560px;
+        height: 440px;
+
+        background: Theme.panel-bg;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: Theme.panel-border-strong;
+
+        // Keep clicks inside the card from reaching the scrim below it.
+        TouchArea {
+            clicked => {}
+        }
+
+        VerticalLayout {
+            padding: 20px;
+            spacing: 12px;
+
+            HorizontalLayout {
+                cross-axis-alignment: center;
+                spacing: 7px;
+                Text {
+                    text: "关于";
+                    color: Theme.text-strong;
+                    font-size: 16px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                IconButton {
+                    icon-data: Icons.close;
+                    button-size: 28px;
+                    icon-size: 17px;
+                    clicked => { root.close-requested(); }
+                }
+            }
+
+            Rectangle { height: 1px; background: Theme.panel-border; }
+
+            HorizontalLayout {
+                cross-axis-alignment: center;
+                spacing: 14px;
+                Rectangle {
+                    width: 54px;
+                    height: 54px;
+                    border-radius: 13px;
+                    background: Theme.toolbar-brand;
+                    MaterialIcon {
+                        path-data: Icons.dns;
+                        tint: #ffffff;
+                        icon-size: 32px;
+                        x: 11px;
+                        y: 11px;
+                    }
+                }
+                VerticalLayout {
+                    spacing: 2px;
+                    Text {
+                        text: "TftpdR";
+                        color: Theme.text-strong;
+                        font-size: 22px;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: "版本 " + root.app-version;
+                        color: Theme.text-muted;
+                        font-size: 12px;
+                    }
+                }
+            }
+
+            Text {
+                text: "TftpdR 中的 R 代表 Rust。这是一个只读 TFTP 服务端，守护进程与桌面面板共享同一套协议内核与配置校验规则。";
+                color: Theme.text;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+
+            VerticalLayout {
+                spacing: 6px;
+                HorizontalLayout {
+                    cross-axis-alignment: center;
+                    spacing: 7px;
+                    MaterialIcon { path-data: Icons.check-circle; tint: Theme.success; icon-size: 14px; }
+                    Text { text: "RFC 1350 RRQ 下载，WRQ 显式拒绝（只读）"; color: Theme.text; font-size: 11px; }
+                }
+                HorizontalLayout {
+                    cross-axis-alignment: center;
+                    spacing: 7px;
+                    MaterialIcon { path-data: Icons.check-circle; tint: Theme.success; icon-size: 14px; }
+                    Text { text: "blksize / timeout / tsize 选项协商与重传"; color: Theme.text; font-size: 11px; }
+                }
+                HorizontalLayout {
+                    cross-axis-alignment: center;
+                    spacing: 7px;
+                    MaterialIcon { path-data: Icons.check-circle; tint: Theme.success; icon-size: 14px; }
+                    Text { text: "组件级路径沙箱，拒绝越权、符号链接与设备名"; color: Theme.text; font-size: 11px; }
+                }
+            }
+
+            Rectangle { height: 1px; background: Theme.panel-border; }
+
+            VerticalLayout {
+                spacing: 3px;
+                Text {
+                    text: "图标：Google Material Design Icons（Apache License 2.0）";
+                    color: Theme.text-muted;
+                    font-size: 10px;
+                }
+                Text {
+                    text: "许可证：MIT OR Apache-2.0 · 上传功能未实现，服务端默认只读";
+                    color: Theme.text-muted;
+                    font-size: 10px;
+                }
+            }
+
+            Rectangle { vertical-stretch: 1; background: transparent; }
+
+            HorizontalLayout {
+                cross-axis-alignment: center;
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                SmallButton {
+                    label: "关闭";
+                    primary: true;
+                    button-width: 72px;
+                    clicked => { root.close-requested(); }
+                }
+            }
+        }
+    }
+}

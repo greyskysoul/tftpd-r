@@ -1,27 +1,54 @@
-import { Button } from "std-widgets.slint";
-import { Dashboard } from "dashboard.slint";
-import { SettingsPage } from "settings.slint";
-import { LogsPage } from "logs.slint";
-import { LogRow, TransferRow } from "models.slint";
+// TftpdR panel layout:
+//   toolbar  (start/restart, stop, settings, about)
+//   main     (activity log on top, transfer table below)
+//   status   (service state left; bind address + current root right)
+// Settings, About and the recent-root drop-down are in-window overlays.
+import { LogRow, RecentDir, TransferRow } from "models.slint";
+import { Theme } from "theme.slint";
+import { TitleBar } from "titlebar.slint";
+import { TopToolbar } from "toolbar.slint";
+import { StatusBar } from "statusbar.slint";
+import { LogsPanel } from "logs.slint";
+import { TransfersPanel } from "transfers.slint";
+import { RootMenu } from "root-menu.slint";
+import { SettingsDialog } from "settings.slint";
+import { AboutDialog } from "about.slint";
 
 export component AppWindow inherits Window {
-    title: "TftpdR";
-    width: 1040px;
-    height: 720px;
-    background: #f1f5f9;
+    title: "TftpdR · TFTP 服务端";
+    preferred-width: 1120px;
+    preferred-height: 780px;
+    min-width: 900px;
+    min-height: 600px;
+    background: Theme.app-bg;
 
-    in-out property <int> current-page: 0;
-    in-out property <string> status-text: "Stopped";
+    // Frameless window: the title bar and window buttons are drawn by
+    // `titlebar.slint`, while winit still provides edge/corner resizing for
+    // this many pixels around the client area.
+    no-frame: true;
+    resize-border-width: 6px;
+
     in-out property <int> status-kind: 0;
-    in-out property <bool> can-start: true;
-    in-out property <bool> can-stop: false;
-    in-out property <string> bind-text: "—";
-    in-out property <string> root-text: "—";
-    in-out property <string> session-count: "0";
+    in-out property <string> status-text: "已停止";
+    in-out property <string> status-detail: "";
+    in-out property <bool> primary-enabled: true;
+    in-out property <bool> primary-is-restart: false;
+    in-out property <bool> stop-enabled: false;
+    in-out property <string> bind-text: "127.0.0.1:6969";
+    in-out property <string> root-text: "tftp-root";
     in-out property <string> throughput-text: "—";
-    in-out property <string> error-text: "";
+    in-out property <string> active-text: "0 个进行中";
+
+    in-out property <bool> window-maximized: false;
+    in-out property <bool> settings-open: false;
+    in-out property <bool> about-open: false;
+    in-out property <bool> recent-menu-open: false;
+    in-out property <string> app-version: "0.1.0";
+
+    in-out property <[RecentDir]> recent-dirs: [];
     in-out property <[TransferRow]> transfers: [];
     in-out property <[LogRow]> logs: [];
+
     in-out property <string> settings-bind: "127.0.0.1:6969";
     in-out property <string> settings-root: "tftp-root";
     in-out property <string> settings-block-size: "512";
@@ -29,97 +56,104 @@ export component AppWindow inherits Window {
     in-out property <string> settings-max-sessions: "16";
     in-out property <string> settings-error: "";
 
-    callback start-requested();
+    callback primary-requested();
     callback stop-requested();
     callback apply-settings();
+    callback cancel-settings();
     callback clear-logs();
+    callback recent-selected(string);
+    callback minimize-requested();
+    callback maximize-requested();
+    callback close-requested();
 
     VerticalLayout {
-        Rectangle {
-            height: 60px;
-            background: #0f172a;
-            HorizontalLayout {
-                padding-left: 20px;
-                padding-right: 20px;
-                spacing: 8px;
-                Text {
-                    text: "TftpdR";
-                    color: white;
-                    font-size: 20px;
-                    font-weight: 700;
-                    vertical-alignment: center;
-                }
-                Rectangle { width: 16px; background: transparent; }
-                Button {
-                    text: "Dashboard";
-                    clicked => { root.current-page = 0; }
-                }
-                Button {
-                    text: "Settings";
-                    clicked => { root.current-page = 1; }
-                }
-                Button {
-                    text: "Logs";
-                    clicked => { root.current-page = 2; }
-                }
-                Rectangle { horizontal-stretch: 1; background: transparent; }
-                Text {
-                    text: "Rust · Slint · no WebView";
-                    color: #94a3b8;
-                    font-size: 12px;
-                    vertical-alignment: center;
-                }
+        TitleBar {
+            maximized: root.window-maximized;
+            minimize-requested => { root.minimize-requested(); }
+            maximize-requested => { root.maximize-requested(); }
+            close-requested => { root.close-requested(); }
+        }
+
+        TopToolbar {
+            status-text: root.status-text;
+            status-kind: root.status-kind;
+            primary-enabled: root.primary-enabled;
+            primary-is-restart: root.primary-is-restart;
+            stop-enabled: root.stop-enabled;
+            settings-active: root.settings-open;
+            about-active: root.about-open;
+            primary-requested => { root.primary-requested(); }
+            stop-requested => { root.stop-requested(); }
+            settings-requested => {
+                root.about-open = false;
+                root.settings-open = !root.settings-open;
+            }
+            about-requested => {
+                root.settings-open = false;
+                root.about-open = !root.about-open;
             }
         }
+
         VerticalLayout {
-            if root.current-page == 0 : Dashboard {
-                status-text: root.status-text;
-                status-kind: root.status-kind;
-                can-start: root.can-start;
-                can-stop: root.can-stop;
-                bind-text: root.bind-text;
-                root-text: root.root-text;
-                session-count: root.session-count;
-                throughput-text: root.throughput-text;
-                error-text: root.error-text;
-                transfers: root.transfers;
-                start-requested => { root.start-requested(); }
-                stop-requested => { root.stop-requested(); }
-            }
-            if root.current-page == 1 : SettingsPage {
-                bind-address <=> root.settings-bind;
-                root-dir <=> root.settings-root;
-                block-size <=> root.settings-block-size;
-                timeout-secs <=> root.settings-timeout;
-                max-sessions <=> root.settings-max-sessions;
-                error-text: root.settings-error;
-                apply-requested => { root.apply-settings(); }
-            }
-            if root.current-page == 2 : LogsPage {
+            padding: 14px;
+            spacing: 12px;
+
+            LogsPanel {
+                vertical-stretch: 4;
                 rows: root.logs;
                 clear-requested => { root.clear-logs(); }
             }
-        }
-        Rectangle {
-            height: 30px;
-            background: #e2e8f0;
-            HorizontalLayout {
-                padding-left: 20px;
-                padding-right: 20px;
-                Text {
-                    text: "Default mode: read-only RRQ · loopback binding · uploads disabled";
-                    color: #64748b;
-                    font-size: 11px;
-                    vertical-alignment: center;
-                }
-                Rectangle { horizontal-stretch: 1; background: transparent; }
-                Text {
-                    text: root.error-text == "" ? root.status-text : root.error-text;
-                    color: #64748b;
-                    font-size: 11px;
-                    vertical-alignment: center;
-                }
+
+            TransfersPanel {
+                vertical-stretch: 5;
+                rows: root.transfers;
+                active-text: root.active-text;
+                throughput-text: root.throughput-text;
             }
         }
+
+        StatusBar {
+            bind-text: root.bind-text;
+            root-text: root.root-text;
+            detail-text: root.status-detail;
+            root-clicked => { root.recent-menu-open = !root.recent-menu-open; }
+        }
+    }
+
+    if root.recent-menu-open : RootMenu {
+        items: root.recent-dirs;
+        dismissed => { root.recent-menu-open = false; }
+        selected(path) => {
+            root.recent-menu-open = false;
+            root.recent-selected(path);
+        }
+    }
+
+    if root.settings-open : SettingsDialog {
+        bind-address <=> root.settings-bind;
+        root-dir <=> root.settings-root;
+        block-size <=> root.settings-block-size;
+        timeout-secs <=> root.settings-timeout;
+        max-sessions <=> root.settings-max-sessions;
+        error-text: root.settings-error;
+        apply-requested => { root.apply-settings(); }
+        cancel-requested => { root.cancel-settings(); }
+    }
+
+    if root.about-open : AboutDialog {
+        app-version: root.app-version;
+        close-requested => { root.about-open = false; }
+    }
+
+    // A one-pixel dark frame keeps the frameless window visually contained
+    // against light desktops and matches the dark header.
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        border-width: 1px;
+        border-color: Theme.window-border;
     }
 }

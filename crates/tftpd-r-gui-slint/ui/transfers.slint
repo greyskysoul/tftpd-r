@@ -1,0 +1,192 @@
+// Active transfer table (lower pane of the main area).
+import { ScrollView } from "std-widgets.slint";
+import { Icons, MaterialIcon } from "icons.slint";
+import { TransferRow } from "models.slint";
+import { Theme } from "theme.slint";
+import { Panel } from "widgets.slint";
+
+export component TransfersPanel inherits Panel {
+    in property <[TransferRow]> rows;
+    in property <string> active-text: "0 个进行中";
+    in property <string> throughput-text: "—";
+
+    min-height: 170px;
+
+    VerticalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 10px;
+        padding-bottom: 8px;
+        spacing: 8px;
+
+        HorizontalLayout {
+            cross-axis-alignment: center;
+            spacing: 7px;
+            MaterialIcon {
+                path-data: Icons.file-download;
+                tint: Theme.accent;
+                icon-size: 17px;
+            }
+            Text {
+                text: "传输列表";
+                color: Theme.text-strong;
+                font-size: 14px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.active-text;
+                color: Theme.text-faint;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            MaterialIcon {
+                path-data: Icons.speed;
+                tint: Theme.text-faint;
+                icon-size: 14px;
+            }
+            Text {
+                text: root.throughput-text;
+                color: Theme.text-muted;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+        }
+
+        // Table header
+        Rectangle {
+            height: 26px;
+            border-radius: 5px;
+            background: Theme.header-bg;
+            HorizontalLayout {
+                cross-axis-alignment: center;
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 8px;
+                Text { text: "文件"; color: Theme.text-faint; font-size: 11px; font-weight: 600; horizontal-stretch: 3; vertical-alignment: center; }
+                Text { text: "客户端"; color: Theme.text-faint; font-size: 11px; font-weight: 600; width: 150px; vertical-alignment: center; }
+                Text { text: "进度"; color: Theme.text-faint; font-size: 11px; font-weight: 600; width: 160px; vertical-alignment: center; }
+                Text { text: "大小"; color: Theme.text-faint; font-size: 11px; font-weight: 600; width: 150px; vertical-alignment: center; }
+                Text { text: "状态"; color: Theme.text-faint; font-size: 11px; font-weight: 600; width: 80px; vertical-alignment: center; }
+            }
+        }
+
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                spacing: 0px;
+                if root.rows.length == 0 : Rectangle {
+                    height: 120px;
+                    VerticalLayout {
+                        alignment: center;
+                        cross-axis-alignment: center;
+                        spacing: 6px;
+                        MaterialIcon {
+                            path-data: Icons.swap-vert;
+                            tint: Theme.panel-border-strong;
+                            icon-size: 30px;
+                        }
+                        Text {
+                            text: "暂无传输。服务启动后，客户端下载文件会显示在这里。";
+                            color: Theme.text-faint;
+                            font-size: 12px;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+                for row in root.rows : Rectangle {
+                    height: 48px;
+                    clip: true;
+                    VerticalLayout {
+                        alignment: center;
+                        HorizontalLayout {
+                            cross-axis-alignment: center;
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 8px;
+                            Rectangle {
+                                horizontal-stretch: 3;
+                                height: 20px;
+                                clip: true;
+                                Text {
+                                    text: row.file;
+                                    color: Theme.text-strong;
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    width: 100%;
+                                    height: 100%;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            Rectangle {
+                                width: 150px;
+                                height: 20px;
+                                clip: true;
+                                Text {
+                                    text: row.peer;
+                                    color: Theme.text-muted;
+                                    font-size: 11px;
+                                    width: 100%;
+                                    height: 100%;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            VerticalLayout {
+                                width: 160px;
+                                spacing: 3px;
+                                alignment: center;
+                                Rectangle {
+                                    height: 6px;
+                                    border-radius: 3px;
+                                    background: Theme.track;
+                                    Rectangle {
+                                        width: parent.width * row.progress;
+                                        height: 6px;
+                                        border-radius: 3px;
+                                        background: row.progress >= 1 ? Theme.success : Theme.accent;
+                                    }
+                                }
+                                Text {
+                                    text: row.percent;
+                                    color: Theme.text-faint;
+                                    font-size: 10px;
+                                }
+                            }
+                            Rectangle {
+                                width: 150px;
+                                height: 20px;
+                                clip: true;
+                                Text {
+                                    text: row.bytes;
+                                    color: Theme.text-muted;
+                                    font-size: 11px;
+                                    width: 100%;
+                                    height: 100%;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            Rectangle {
+                                width: 80px;
+                                height: 20px;
+                                border-radius: 4px;
+                                background: row.progress >= 1 ? #dcfce7 : #eff6ff;
+                                Text {
+                                    text: row.status;
+                                    color: row.progress >= 1 ? #15803d : #1d4ed8;
+                                    font-size: 10px;
+                                    font-weight: 600;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    width: 100%;
+                                    height: 100%;
+                                }
+                            }
+                        }
+                        Rectangle { height: 1px; background: #f1f5f9; }
+                    }
+                }
+            }
+        }
+    }
+}

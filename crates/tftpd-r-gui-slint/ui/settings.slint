@@ -1,88 +1,184 @@
-import { Button, CheckBox, LineEdit } from "std-widgets.slint";
+// Modal settings dialog. Values are validated by the Rust side with the same
+// `ServerConfig::validate` rules as the daemon; a successful save closes the
+// dialog, an invalid value keeps it open and shows the error inline.
+import { Icons, MaterialIcon } from "icons.slint";
+import { Theme } from "theme.slint";
+import {
+    DisabledCheckRow,
+    IconButton,
+    SmallButton,
+    TextField,
+} from "widgets.slint";
 
-export component SettingsPage inherits Rectangle {
-    in-out property <string> bind-address;
-    in-out property <string> root-dir;
-    in-out property <string> block-size;
-    in-out property <string> timeout-secs;
-    in-out property <string> max-sessions;
-    in property <string> error-text;
+export component SettingsDialog inherits Rectangle {
+    in-out property <string> bind-address: "127.0.0.1:6969";
+    in-out property <string> root-dir: "tftp-root";
+    in-out property <string> block-size: "512";
+    in-out property <string> timeout-secs: "3";
+    in-out property <string> max-sessions: "16";
+    in property <string> error-text: "";
+
     callback apply-requested();
+    callback cancel-requested();
 
-    background: transparent;
+    width: 100%;
+    height: 100%;
+    background: Theme.scrim;
 
-    VerticalLayout {
-        padding: 20px;
-        spacing: 14px;
+    TouchArea {
+        clicked => { root.cancel-requested(); }
+    }
 
-        Rectangle {
-            background: white;
-            border-radius: 10px;
-            border-width: 1px;
-            border-color: #e2e8f0;
-            VerticalLayout {
-                padding: 18px;
-                spacing: 12px;
+    card := Rectangle {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        width: 640px;
+        // The validation error box only appears on failure; give it room
+        // instead of letting the fixed-height card clip the footer.
+        height: root.error-text == "" ? 448px : 500px;
+
+        background: Theme.panel-bg;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: Theme.panel-border-strong;
+
+        // Consume clicks inside the card so only the surrounding scrim closes
+        // the dialog. Without this, clicking the padding between fields would
+        // fall through to the scrim.
+        TouchArea {
+            clicked => {}
+        }
+
+        VerticalLayout {
+            padding: 20px;
+            spacing: 12px;
+
+            HorizontalLayout {
+                cross-axis-alignment: center;
+                spacing: 7px;
+                MaterialIcon {
+                    path-data: Icons.settings;
+                    tint: Theme.accent;
+                    icon-size: 19px;
+                }
                 Text {
-                    text: "Server settings";
+                    text: "服务设置";
+                    color: Theme.text-strong;
                     font-size: 16px;
-                    font-weight: 600;
-                    color: #0f172a;
+                    font-weight: 700;
+                    vertical-alignment: center;
                 }
-                Text {
-                    text: "Values are validated with the same rules as the daemon configuration file. Changes take effect the next time the server starts.";
-                    color: #64748b;
-                    font-size: 12px;
-                    wrap: word-wrap;
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                IconButton {
+                    icon-data: Icons.close;
+                    button-size: 28px;
+                    icon-size: 17px;
+                    clicked => { root.cancel-requested(); }
                 }
-                VerticalLayout {
+            }
+
+            Text {
+                text: "配置项与守护进程使用的 TOML 配置遵循同一套校验规则。修改在下次启动或重启服务后生效。";
+                color: Theme.text-muted;
+                font-size: 11px;
+                wrap: word-wrap;
+            }
+
+            Rectangle { height: 1px; background: Theme.panel-border; }
+
+            VerticalLayout {
+                spacing: 9px;
+
+                HorizontalLayout {
+                    cross-axis-alignment: center;
                     spacing: 10px;
-                    HorizontalLayout {
-                        spacing: 10px;
-                        Text { text: "Bind address"; width: 170px; color: #334155; font-size: 13px; vertical-alignment: center; }
-                        LineEdit { text <=> root.bind-address; horizontal-stretch: 1; }
-                    }
-                    HorizontalLayout {
-                        spacing: 10px;
-                        Text { text: "Root directory"; width: 170px; color: #334155; font-size: 13px; vertical-alignment: center; }
-                        LineEdit { text <=> root.root-dir; horizontal-stretch: 1; }
-                    }
-                    HorizontalLayout {
-                        spacing: 10px;
-                        Text { text: "Max block size"; width: 170px; color: #334155; font-size: 13px; vertical-alignment: center; }
-                        LineEdit { text <=> root.block-size; horizontal-stretch: 1; }
-                    }
-                    HorizontalLayout {
-                        spacing: 10px;
-                        Text { text: "Timeout (seconds)"; width: 170px; color: #334155; font-size: 13px; vertical-alignment: center; }
-                        LineEdit { text <=> root.timeout-secs; horizontal-stretch: 1; }
-                    }
-                    HorizontalLayout {
-                        spacing: 10px;
-                        Text { text: "Max concurrent sessions"; width: 170px; color: #334155; font-size: 13px; vertical-alignment: center; }
-                        LineEdit { text <=> root.max-sessions; horizontal-stretch: 1; }
-                    }
-                }
-                CheckBox {
-                    text: "Allow uploads (WRQ) — not implemented in this release";
-                    checked: false;
-                    enabled: false;
-                }
-                if root.error-text != "" : Text {
-                    text: root.error-text;
-                    color: #b91c1c;
-                    font-size: 13px;
-                    wrap: word-wrap;
+                    Text { text: "绑定地址"; width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                    TextField { text <=> root.bind-address; placeholder: "127.0.0.1:6969"; horizontal-stretch: 1; }
                 }
                 HorizontalLayout {
-                    Rectangle { horizontal-stretch: 1; background: transparent; }
-                    Button {
-                        text: "Apply settings";
-                        clicked => { root.apply-requested(); }
+                    cross-axis-alignment: center;
+                    spacing: 10px;
+                    Text { text: "根目录"; width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                    TextField { text <=> root.root-dir; placeholder: "tftp-root"; horizontal-stretch: 1; }
+                }
+                HorizontalLayout {
+                    cross-axis-alignment: center;
+                    spacing: 10px;
+                    Text { text: "最大块大小"; width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                    TextField { text <=> root.block-size; placeholder: "512"; horizontal-stretch: 1; }
+                }
+                HorizontalLayout {
+                    cross-axis-alignment: center;
+                    spacing: 10px;
+                    Text { text: "超时（秒）"; width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                    TextField { text <=> root.timeout-secs; placeholder: "3"; horizontal-stretch: 1; }
+                }
+                HorizontalLayout {
+                    cross-axis-alignment: center;
+                    spacing: 10px;
+                    Text { text: "最大并发会话"; width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                    TextField { text <=> root.max-sessions; placeholder: "16"; horizontal-stretch: 1; }
+                }
+            }
+
+            DisabledCheckRow {
+                label: "允许上传（WRQ）— 本版本尚未实现";
+            }
+
+            if root.error-text != "" : Rectangle {
+                background: #fef2f2;
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: #fecaca;
+                height: 34px;
+                HorizontalLayout {
+                    cross-axis-alignment: center;
+                    padding-left: 9px;
+                    padding-right: 9px;
+                    spacing: 6px;
+                    MaterialIcon {
+                        path-data: Icons.error;
+                        tint: Theme.danger;
+                        icon-size: 15px;
+                    }
+                    Text {
+                        text: root.error-text;
+                        color: #b91c1c;
+                        font-size: 11px;
+                        horizontal-stretch: 1;
+                        wrap: word-wrap;
                     }
                 }
             }
+
+            Rectangle { vertical-stretch: 1; background: transparent; }
+
+            Rectangle { height: 1px; background: Theme.panel-border; }
+
+            HorizontalLayout {
+                cross-axis-alignment: center;
+                spacing: 8px;
+                Text {
+                    text: "只读模式：上传已在协议层禁用。";
+                    color: Theme.text-faint;
+                    font-size: 10px;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                SmallButton {
+                    label: "取消";
+                    tint: Theme.text-muted;
+                    button-width: 72px;
+                    clicked => { root.cancel-requested(); }
+                }
+                SmallButton {
+                    label: "保存设置";
+                    icon-data: Icons.check;
+                    primary: true;
+                    button-width: 96px;
+                    clicked => { root.apply-requested(); }
+                }
+            }
         }
-        Rectangle { vertical-stretch: 1; background: transparent; }
     }
 }

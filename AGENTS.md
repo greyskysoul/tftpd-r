@@ -6,20 +6,20 @@
 
 ## 1. 项目定位与当前状态
 
-纯 Rust 的**只读** TFTP（RFC 1350）服务端，Cargo Workspace 分为协议核心、无头 daemon 和 Slint 原生 GUI。GUI 采用 winit + 软件渲染器，**不依赖 WebView**；协议核心不依赖 GUI、daemon 或 IPC。
+纯 Rust 的**只读** TFTP（RFC 1350）服务端，Cargo Workspace 分为协议核心、无头 daemon 和 Slint GUI。GUI 采用 winit + 软件渲染器；协议核心不依赖 GUI、daemon 或 IPC。
 
 当前状态（2026-11-20，已验证）：
 
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
-| Phase 0–5 | ✅ 已完成 | workspace、codec/沙箱、RRQ 引擎、daemon、Embedded GUI、文档/ADR/CI 文件 |
+| Phase 0–5 | ✅ 已完成 | workspace、codec/沙箱、RRQ 引擎、daemon、GUI 面板重设计（无边框自定义标题栏与窗口控件、工具栏状态徽标、状态栏、日志/传输列表、设置/关于、最近根目录）、文档/ADR/CI 文件 |
 | Phase 6 IPC | ⏳ 未开始 | GUI 仅 Embedded 模式；无 named pipe / daemon 控制 |
 | Phase 7 WRQ 上传 | ⏳ 未开始 | 默认且唯一行为是只读；`allow_upload=true` 被配置校验拒绝 |
-| Phase 8 发布/目标机 | ⏳ 部分完成 | Release 构建通过；MSVC、外部客户端、LAN/防火墙、GUI 人工验收未做 |
+| Phase 8 发布/目标机 | ⏳ 部分完成 | Release 构建通过；本机 2× DPI 截图验证了中文/图标/主要交互，但 MSVC、外部客户端、LAN/防火墙、真实键盘/IME 与目标机人工验收未做 |
 
-已验证环境：Windows 11（10.0.26300）+ Rust 1.100.0 `x86_64-pc-windows-gnu` + MinGW-w64 GCC 15.3 + Slint 1.19.0。**未验证**：MSVC 工具链、Linux 运行、真实/外部 TFTP 客户端互操作、Windows Service、RDP、69 端口权限、GUI 中文字体与交互验收。不要在文档或回复中把这些写成已通过。
+已验证环境：Windows 11（10.0.26300）+ Rust 1.100.0 `x86_64-pc-windows-gnu` + MinGW-w64 GCC 15.3 + Slint 1.19.0。**未验证**：MSVC 工具链、Linux 运行、真实/外部 TFTP 客户端互操作、Windows Service、RDP、69 端口权限、真实键盘/IME 输入、其他 DPI/语言下的字体渲染与无障碍。不要在文档或回复中把这些写成已通过。
 
-最近一次完整验证结果：`cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`（97 passed）、`cargo build --workspace --release` 全部通过；daemon 端到端以 `/image.bin` 形式下载 5000 字节并 Ctrl-Break 优雅退出；GUI `--smoke-test` 退出码 0。执行新改动后必须重新运行并更新真实数字。
+最近一次完整验证结果：`cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`（105 passed）、`cargo build --workspace --release` 全部通过；daemon 端到端以 `/image.bin` 形式下载 5000 字节并 Ctrl-Break 优雅退出；GUI debug/release `--smoke-test` 退出码均为 0；GUI 面板的启动/停止/重启、真实 2 MiB TFTP 传输、设置/关于对话框、最近根目录切换、自定义窗口控件（最小化/最大化/还原/关闭）和窗口关闭均在本机按 `docs/testing.md` 的人工步骤验证。执行新改动后必须重新运行并更新真实数字。
 
 ## 2. 仓库地图
 
@@ -44,8 +44,10 @@
 │   │   ├── src/{main,cli,config_file,logging,shutdown}.rs
 │   │   └── tests/cli.rs           # 运行编译后的二进制
 │   └── tftpd-r-gui-slint/        # Slint 面板 + EmbeddedController
-│       ├── src/{main,controller}.rs
-│       ├── ui/{app,dashboard,settings,logs,models}.slint
+│       ├── src/{main,controller,recent}.rs
+│       ├── ui/{app,titlebar,toolbar,statusbar,logs,transfers,settings,about,
+│       │       root-menu,widgets,theme,icons,models}.slint
+│       ├── ui/icons/{LICENSE,README.md}   # Material Design 图标来源与 Apache-2.0
 │       └── build.rs
 ├── .github/workflows/ci.yml       # 已编写，尚未在托管 runner 实际运行
 └── （未跟踪）计划文档 .md          # 只用本地编辑，禁止提交
@@ -126,7 +128,7 @@ cargo test --workspace
 cargo build --workspace --release
 ```
 
-当前基线是 **97 tests passed**（core 单元 53、RRQ UDP 集成 26、daemon 单元 10、daemon CLI 集成 5、GUI 控制器 2、doctest 1）。新增测试后更新 `docs/testing.md` 和本文件的数字。
+当前基线是 **105 tests passed**（core 单元 53、RRQ UDP 集成 26、daemon 单元 10、daemon CLI 集成 5、GUI 单元 10（控制器 4 + 最近目录 6）、doctest 1）。新增测试后更新 `docs/testing.md` 和本文件的数字。
 
 其他有用命令：
 
@@ -151,7 +153,7 @@ cargo run -p tftpd-r-gui-slint -- --smoke-test
 - **路径沙箱**：`../`、`/../`、双分隔符、盘符、ADS、设备名、符号链接/reparse、大小写/前缀混淆、root 前缀正向与反向、大小限制。
 - **session/server**：重传、重复 ACK、错误 TID、重复 RRQ、零长度终止块、块号回绕、并发、取消/停止、超时耗尽、事件。
 - **daemon**：CLI 解析、配置错误退出码（0/1/2）、默认配置与示例一致、二进制冒烟。
-- **GUI**：控制器契约（start/stop/重复 start/无效配置）；事件洪泛与视觉/字体只能靠目标机人工验收，需在 `docs/testing.md` 如实标注。
+- **GUI**：控制器契约（start/stop/重复 start/无效配置/异步 restart/restart 失败上报）与 `recent.rs`（顺序、去重、上限、持久化、canonicalize、失效目录清理）；事件洪泛、真实键盘/IME、布局与字体只能靠目标机人工验收，需在 `docs/testing.md` 如实标注。
 - 时间相关测试目前使用真实计时器（1 s 级别），避免引入随机 sleep；新增测试尽量确定性。
 
 ## 6. 后续路线与优先级
@@ -178,6 +180,7 @@ cargo run -p tftpd-r-gui-slint -- --smoke-test
 - 在客户端 ERROR/日志中输出本地绝对路径或 OS 原始错误。
 - 重复 RRQ 时新建会话；或对错误 TID 无限回 ERROR 5。
 - UI 线程同步等待 stop/grace；或让后台任务直接改 Slint 属性。
+- 自定义无边框标题栏时让 `WindowMoveArea` 覆盖窗口按钮（Windows 上按下按钮会同时开始拖动并把最大化窗口还原）；最小化/最大化/关闭必须走 `slint::Window` API（`set_minimized`/`set_maximized`/`quit_event_loop`），不要只依赖 Slint 的 `minimized`/`maximized` window property。
 - 无上限的事件/日志/会话/请求缓冲。
 - 未经 ADR 与安全审查新增 `unsafe`、上传、IPC、服务注册或公网默认监听。
 - 提交本地计划文档、便携工具链、构建产物；或在 CI/README 中宣称未验证的平台/客户端已通过。

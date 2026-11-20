@@ -140,7 +140,14 @@ is network ACL/firewall or loopback-only binding, not the protocol implementatio
 | Transfer duration | `max_transfer_duration_secs` (default 1 hour) |
 | Event ring | `event_buffer` (default 1024; oldest dropped, counted) |
 | GUI log model | 500 rows |
+| GUI recent roots | 8 canonicalised paths in a per-user local state file |
 | Shutdown drain | `shutdown_grace_secs` (default 5) |
+
+The GUI writes a single local state file (`recent-dirs.txt`) under the current
+user's profile. It contains up to eight absolute directory paths, no credentials,
+and is treated as advisory: unreadable or unwritable state never prevents the
+panel from starting. It is not read by the TFTP server and does not affect the
+sandbox root unless the operator selects one of those directories.
 
 ## Logging and error hygiene
 

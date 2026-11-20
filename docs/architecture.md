@@ -125,6 +125,40 @@ to `tracing` records; the GUI uses `EventBus`, a bounded ring guarded by a
 - `Progress` events are throttled per session so a fast transfer cannot flood the
   ring or the UI.
 
+## GUI structure and state
+
+The GUI crate stays deliberately small:
+
+- `ui/app.slint` composes the window from `titlebar.slint`, `toolbar.slint`,
+  `logs.slint`, `transfers.slint`, `statusbar.slint` and three overlays:
+  `root-menu.slint` (recent root directories), `settings.slint` and
+  `about.slint`.
+- The window is frameless (`no-frame: true`). `titlebar.slint` draws the title
+  and minimize / maximize-restore / close controls, and uses `WindowMoveArea`
+  for dragging. `resize-border-width` keeps the native edge/corner resize
+  behaviour, and a one-pixel dark frame drawn by `app.slint` bounds the client
+  area. The drag area stops before the window buttons so pressing a button
+  cannot also start a window move.
+- `ui/widgets.slint` holds the icon-over-label toolbar button, compact buttons,
+  the text field and panel primitives; `ui/theme.slint` centralises the palette;
+  `ui/icons.slint` embeds Material Design icon path data, so no image decoder or
+  extra image files are needed at runtime.
+- The service status is a dedicated chip at the far left of the toolbar; the
+  status bar keeps the read-only hint or the last error, the bind address and
+  the clickable root selector.
+- `src/main.rs` owns the Slint models (`LogRow`, `TransferRow`, `RecentDir`),
+  translates `TftpEvent`s and `ServerStatus` into UI state, and keeps the UI
+  thread free of blocking calls. Window controls call `slint::Window` methods
+  (`set_minimized`, `set_maximized`) on the UI thread; close requests quit the
+  event loop so the normal window-close shutdown path runs.
+- `src/recent.rs` persists at most eight canonicalised root directories
+  (most-recent first). It is local UI state, not part of `ServerConfig`, and
+  write failures are ignored so a read-only profile still runs the panel.
+
+Dialogs and the drop-down are sibling rectangles inside the same Slint window
+rather than separate native windows; this keeps the software renderer and DPI
+handling simple and guarantees they render above the main layout.
+
 ## GUI threading
 
 - Slint runs on the main/UI thread. All UI property access happens in callbacks
@@ -135,8 +169,20 @@ to `tracing` records; the GUI uses `EventBus`, a bounded ring guarded by a
 - `stop()` spawns the potentially slow `ServerHandle::stop()` and returns; the
   timer observes `Stopping → Stopped`. Window close calls
   `EmbeddedController::shutdown`, which blocks only after the UI loop has exited.
+- `restart()` queues the new configuration, stops the running handle and starts
+  the replacement from `poll_status` once the old server reaches `Stopped`. While
+  a restart is pending a stale `Running` watch value is reported as `Stopping`,
+  and a failed replacement is surfaced through `take_error()` instead of leaving
+  a half-started server.
+- Selecting a recent root while the server runs updates the configuration for
+  the next start/restart only; the status bar keeps showing the root of the
+  running server and the log states that a restart is required.
 - Log rows are capped at 500 in the model; the event ring is independently
-  bounded.
+  bounded. Logs are displayed newest-first so the latest event stays visible
+  without programmatic scrolling.
+- The title-bar maximize icon follows `Window::is_maximized()` on the UI timer;
+  the OS window state is authoritative rather than a UI-side toggle. Minimize,
+  maximize and close are plain UI-thread calls and never wait for the server.
 
 ## Configuration and validation
 

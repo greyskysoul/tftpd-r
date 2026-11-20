@@ -1,0 +1,210 @@
+// Reusable widgets for the TftpdR panel: panels, icon buttons and the large
+// icon-over-label toolbar button.
+import { Icons, MaterialIcon } from "icons.slint";
+import { Theme } from "theme.slint";
+
+export component Panel inherits Rectangle {
+    background: Theme.panel-bg;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: Theme.panel-border;
+    clip: true;
+}
+
+// Toolbar button with a large Material icon above its label.
+export component ToolButton inherits Rectangle {
+    in property <string> label;
+    in property <string> icon-data: Icons.play-arrow;
+    in property <color> icon-tint: Theme.toolbar-icon;
+    in property <color> label-tint: Theme.toolbar-label;
+    in property <bool> available: true;
+    in property <bool> active: false;
+    callback clicked();
+
+    width: 84px;
+    height: 62px;
+    border-radius: 10px;
+    background: !self.available ? transparent
+        : touchArea.pressed ? rgba(255, 255, 255, 0.14)
+        : touchArea.has-hover || self.active ? rgba(255, 255, 255, 0.08)
+        : transparent;
+
+    VerticalLayout {
+        alignment: center;
+        cross-axis-alignment: center;
+        padding-top: 6px;
+        spacing: 3px;
+        MaterialIcon {
+            path-data: root.icon-data;
+            tint: !root.available ? Theme.toolbar-icon-disabled : root.icon-tint;
+            icon-size: 26px;
+        }
+        Text {
+            text: root.label;
+            color: !root.available ? Theme.toolbar-icon-disabled : root.label-tint;
+            font-size: 12px;
+            font-weight: 600;
+            horizontal-alignment: center;
+        }
+    }
+
+    touchArea := TouchArea {
+        enabled: root.available;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Compact button used in panel headers and dialog footers.
+export component SmallButton inherits Rectangle {
+    in property <string> label;
+    in property <string> icon-data: "";
+    in property <bool> primary: false;
+    in property <bool> available: true;
+    in property <color> tint: Theme.text;
+    in property <length> button-width: 84px;
+    callback clicked();
+
+    width: self.button-width;
+    height: 30px;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: self.primary ? Theme.accent : Theme.panel-border-strong;
+    background: !self.available ? #f1f5f9
+        : touchArea.pressed ? (self.primary ? Theme.accent-strong : #e2e8f0)
+        : touchArea.has-hover ? (self.primary ? #3b82f6 : Theme.row-hover)
+        : (self.primary ? Theme.accent : Theme.panel-bg);
+
+    HorizontalLayout {
+        alignment: center;
+        cross-axis-alignment: center;
+        padding-left: 10px;
+        padding-right: 12px;
+        spacing: 5px;
+        if root.icon-data != "" : MaterialIcon {
+            path-data: root.icon-data;
+            tint: root.primary ? #ffffff : root.tint;
+            icon-size: 15px;
+        }
+        Text {
+            text: root.label;
+            color: !root.available ? Theme.text-faint : root.primary ? #ffffff : root.tint;
+            font-size: 12px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+
+    touchArea := TouchArea {
+        enabled: root.available;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Single-line text input with the panel's border and focus colors. The plain
+// TextInput builtin is used so the field does not depend on the std-widgets
+// style (the panel uses its own visual language).
+export component TextField inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder;
+    in property <bool> available: true;
+
+    height: 30px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : Theme.panel-border-strong;
+    background: root.available ? Theme.panel-bg : #f8fafc;
+    clip: true;
+
+    Text {
+        visible: root.text == "" && !input.has-focus;
+        text: root.placeholder;
+        color: Theme.text-faint;
+        font-size: 12px;
+        x: 9px;
+        y: (root.height - self.height) / 2;
+        width: root.width - 18px;
+        height: self.font-size + 6px;
+    }
+
+    input := TextInput {
+        x: 9px;
+        y: 0;
+        width: root.width - 18px;
+        height: root.height;
+        text <=> root.text;
+        color: Theme.text-strong;
+        font-size: 12px;
+        single-line: true;
+        enabled: root.available;
+        vertical-alignment: center;
+        selection-background-color: #bfdbfe;
+        selection-foreground-color: #0f172a;
+    }
+}
+
+// Read-only checkbox row used for "uploads are not implemented" notices.
+export component DisabledCheckRow inherits Rectangle {
+    in property <string> label;
+
+    height: 22px;
+
+    HorizontalLayout {
+        cross-axis-alignment: center;
+        spacing: 7px;
+        Rectangle {
+            width: 15px;
+            height: 15px;
+            border-radius: 3px;
+            border-width: 1px;
+            border-color: Theme.panel-border-strong;
+            background: #f8fafc;
+            MaterialIcon {
+                path-data: Icons.check;
+                tint: Theme.panel-border-strong;
+                icon-size: 11px;
+                x: 2px;
+                y: 2px;
+            }
+        }
+        Text {
+            text: root.label;
+            color: Theme.text-faint;
+            font-size: 11px;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// Square, icon-only button (dialog close, table actions).
+export component IconButton inherits Rectangle {
+    in property <string> icon-data;
+    in property <color> tint: Theme.text-muted;
+    in property <length> button-size: 30px;
+    in property <length> icon-size: 18px;
+    in property <bool> available: true;
+    callback clicked();
+
+    width: self.button-size;
+    height: self.button-size;
+    border-radius: 7px;
+    background: !self.available ? transparent
+        : touchArea.pressed ? #e2e8f0
+        : touchArea.has-hover ? #f1f5f9
+        : transparent;
+
+    MaterialIcon {
+        path-data: root.icon-data;
+        tint: root.available ? root.tint : Theme.text-faint;
+        icon-size: root.icon-size;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+    }
+
+    touchArea := TouchArea {
+        enabled: root.available;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}

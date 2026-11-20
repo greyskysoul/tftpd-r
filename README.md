@@ -1,9 +1,7 @@
 # TftpdR
 
 TftpdR is a read-only TFTP (RFC 1350) server written in Rust, with a headless
-daemon and a native [Slint](https://slint.dev/) desktop panel. The GUI uses a
-native window and rendering backend — **no WebView / WebView2 is involved** — but
-see [Runtime dependencies](#runtime-dependencies) before repeating that claim.
+daemon and a native [Slint](https://slint.dev/) desktop panel.
 
 > **Status: MVP (Phase 0–5 vertical slice).** RRQ downloads, option negotiation,
 > the path sandbox, the daemon CLI and the embedded-mode GUI are implemented and
@@ -31,8 +29,11 @@ Implemented:
   limit and bounded event ring.
 - Headless daemon: TOML configuration, `check-config`, `print-default-config`,
   structured logs and Ctrl-C / Ctrl-Break / SIGTERM graceful shutdown.
-- Slint GUI (embedded mode): start/stop, status, active transfers, activity log,
-  settings validation. Layout is in `crates/tftpd-r-gui-slint/ui/`.
+- Slint GUI (embedded mode): frameless window with a custom dark title bar and
+  window controls; toolbar with a prominent service-status chip plus
+  start/restart, stop, settings and about; status bar with bind address and a
+  clickable recently-used root selector; activity log and active transfers;
+  settings validation. Layout and icons are in `crates/tftpd-r-gui-slint/ui/`.
 
 Not implemented in this release (deliberate, tracked in `docs/adr/`):
 
@@ -56,7 +57,6 @@ Not implemented in this release (deliberate, tracked in `docs/adr/`):
   default `x86_64-pc-windows-msvc` toolchain, or MinGW-w64 for
   `x86_64-pc-windows-gnu`. The verification described in
   [docs/testing.md](docs/testing.md) used the GNU toolchain with MinGW-w64.
-- No WebView2, Node.js or browser is needed at runtime by the GUI.
 
 ## Build
 
@@ -115,13 +115,47 @@ cargo run -p tftpd-r-gui-slint
 ```
 
 The GUI loads `config.toml` from the current directory when present; otherwise it
-uses safe defaults. Start the server from the dashboard, edit settings on the
-Settings tab (validated with the same rules as the daemon) and watch activity on
-the Logs tab. Settings changes are stored for the next start; the currently
-running server is not reconfigured in place.
+uses safe defaults. The panel is in Chinese and is organized as follows:
+
+- **Window**: frameless, with a custom title bar on the same dark background as
+  the toolbar. The title bar holds the app name, a drag area
+  (`WindowMoveArea`) and minimize / maximize-restore / close controls; the
+  window keeps a resize border (`resize-border-width`) and a one-pixel dark
+  frame so it stays visually contained.
+- **Toolbar**: the service status chip (服务状态: 已停止 / 启动中 / 运行中 /
+  停止中 / 启动失败) is at the far left, followed by 启动 / 停止 / 设置 / 关于,
+  each with a large icon above its label. 停止 is disabled until the server
+  starts. While the server is running, 启动 turns into 重启; it stops the
+  current instance and starts a new one with the saved settings (the stop is
+  asynchronous, so the UI never blocks).
+- **Main area**: the activity log (newest event first) above the active transfer
+  table (file, client, progress, size, state).
+- **Status bar**: a read-only hint, or the last error when there is one, on the
+  left; bind address and the current, absolute root directory on the right.
+  Click the root path to choose another directory from the recently used list.
+- **Settings dialog**: validated with the same `ServerConfig::validate` rules as
+  the daemon. Changes are stored for the next start or restart; the running
+  server is not reconfigured in place. **About** shows the version, feature
+  summary and third-party icon attribution.
+
+Recently used roots are kept (most recent first, at most 8) in
+`%APPDATA%\TftpdR\recent-dirs.txt` on Windows and
+`$XDG_CONFIG_HOME/tftpd-r/recent-dirs.txt` (or `~/.config/tftpd-r/`) elsewhere.
+The file only stores local paths; write failures are ignored so the panel still
+works in read-only profiles.
 
 Closing the window stops the embedded server and waits for active transfers,
 bounded by `shutdown_grace_secs`.
+
+### Icons
+
+Toolbar, panel and dialog icons come from
+[google/material-design-icons](https://github.com/google/material-design-icons)
+(24×24 `materialicons` style, Apache License 2.0). Only the vector path data is
+embedded as Slint `Path` commands, so the icons stay sharp at any scale. Source
+URLs per icon and the full license text are in
+[`crates/tftpd-r-gui-slint/ui/icons/README.md`](crates/tftpd-r-gui-slint/ui/icons/README.md)
+and [`LICENSE`](crates/tftpd-r-gui-slint/ui/icons/LICENSE).
 
 ## Configuration
 
@@ -188,17 +222,21 @@ cargo build --workspace --release
 The test suite includes codec boundary tests, configuration/path-sandbox tests,
 26 loopback-UDP RRQ integration tests (including block-number wraparound,
 shutdown cancellation and legacy `/file` requests), daemon CLI/config
-integration tests and GUI controller tests. See [docs/testing.md](docs/testing.md)
-for what was actually executed and what still needs manual/target-machine
-verification.
+integration tests and GUI tests for the embedded controller (start/stop,
+asynchronous restart, failed restart) and the recent-root persistence. See
+[docs/testing.md](docs/testing.md) for what was actually executed and what still
+needs manual/target-machine verification.
 
 ## Runtime dependencies
 
-The GUI uses Slint's `winit` backend with the **software renderer**, so it does
-not require WebView2 or a GPU/OpenGL driver for rendering. It still depends on
-the normal Windows system DLLs and on the CRT that the Rust toolchain links
-against; "no system DLLs" is not claimed. Binary size and memory usage have not
-been measured as acceptance criteria and are therefore not published here.
+Both binaries link only against Windows system DLLs and the CRT provided by the
+Rust toolchain, so no additional runtime or redistributable has to be installed.
+The verification build used the GNU toolchain and therefore links `msvcrt.dll`;
+an MSVC build would typically link the Visual C++ runtime instead.
+
+Release-binary sizes measured on the verification machine are recorded in
+[docs/testing.md](docs/testing.md). They are informational only and are not an
+acceptance criterion.
 
 ## Documentation
 
@@ -210,9 +248,10 @@ been measured as acceptance criteria and are therefore not published here.
   from the original implementation plan.
 - [AGENTS.md](AGENTS.md) — development guide for follow-up coding agents:
   invariants, workflow, verification commands and roadmap (in Chinese).
-  — the original implementation blueprint (Chinese).
 
 ## License
 
 MIT OR Apache-2.0 (see `Cargo.toml`; no license files are bundled yet — add them
-before distributing binaries).
+before distributing binaries). The bundled Material Design icon path data is
+Apache-2.0; its license and per-icon sources are under
+`crates/tftpd-r-gui-slint/ui/icons/`.

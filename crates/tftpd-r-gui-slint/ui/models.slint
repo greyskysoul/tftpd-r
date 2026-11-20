@@ -1,8 +1,11 @@
+// Row models shared between the Slint UI and the Rust glue in `src/main.rs`.
+
 export struct TransferRow {
     id: int,
     file: string,
     peer: string,
     bytes: string,
+    percent: string,
     progress: float,
     status: string,
 }
@@ -11,4 +14,11 @@ export struct LogRow {
     time: string,
     level: string,
     message: string,
+}
+
+// One entry of the "recent root directories" drop-down.
+export struct RecentDir {
+    path: string,
+    name: string,
+    active: bool,
 }

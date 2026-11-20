@@ -33,6 +33,8 @@ pub struct EmbeddedController {
     stop_task: Option<tokio::task::JoinHandle<()>>,
     status: ServerStatus,
     status_rx: Option<tokio::sync::watch::Receiver<ServerStatus>>,
+    pending_restart: Option<ServerConfig>,
+    last_error: Option<String>,
 }
 
 impl EmbeddedController {
@@ -55,6 +57,8 @@ impl EmbeddedController {
             stop_task: None,
             status: ServerStatus::Stopped,
             status_rx: None,
+            pending_restart: None,
+            last_error: None,
         })
     }
 
@@ -90,6 +94,28 @@ impl EmbeddedController {
         Ok(())
     }
 
+    /// Start the server, or stop and restart it when one is running.
+    ///
+    /// A restart is asynchronous: when a server is running (or still shutting
+    /// down) the new configuration is queued and applied from [`Self::poll_status`]
+    /// once the old server reached `Stopped`. Restart failures are reported by
+    /// [`Self::take_error`] on the polling cycle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ControllerError::Start`] when no server is running and the new
+    /// configuration cannot be started immediately.
+    pub fn restart(&mut self, config: ServerConfig) -> Result<(), ControllerError> {
+        if self.server.is_none() && !matches!(self.status, ServerStatus::Stopping) {
+            return self.start(config);
+        }
+        self.pending_restart = Some(config);
+        if self.server.is_some() {
+            self.stop();
+        }
+        Ok(())
+    }
+
     /// Request shutdown without blocking the UI thread. Returns `false` when no
     /// server is running.
     pub fn stop(&mut self) -> bool {
@@ -105,6 +131,9 @@ impl EmbeddedController {
     }
 
     /// Refresh and return the last known status.
+    ///
+    /// When a restart was requested, the queued configuration is started here
+    /// as soon as the previous server has stopped.
     pub fn poll_status(&mut self) -> ServerStatus {
         if let Some(receiver) = self.status_rx.as_mut() {
             // `borrow_and_update` works even after the watch sender is dropped
@@ -112,7 +141,40 @@ impl EmbeddedController {
             // final `Stopped` state is never lost.
             self.status = receiver.borrow_and_update().clone();
         }
+        // A queued restart means the old server is on its way out. The watch
+        // channel can still hold its last `Running` value for one tick; never
+        // report the controller as running while a restart is pending.
+        if self.pending_restart.is_some()
+            && matches!(
+                self.status,
+                ServerStatus::Starting | ServerStatus::Running { .. }
+            )
+        {
+            self.status = ServerStatus::Stopping;
+        }
+        self.complete_pending_restart();
         self.status.clone()
+    }
+
+    /// Take the error of the most recent failed queued restart, if any.
+    pub fn take_error(&mut self) -> Option<String> {
+        self.last_error.take()
+    }
+
+    fn complete_pending_restart(&mut self) {
+        if !matches!(
+            self.status,
+            ServerStatus::Stopped | ServerStatus::Failed { .. }
+        ) {
+            return;
+        }
+        let Some(config) = self.pending_restart.take() else {
+            return;
+        };
+        if let Err(error) = self.start(config) {
+            self.status = ServerStatus::Stopped;
+            self.last_error = Some(error.to_string());
+        }
     }
 
     /// Whether the server is starting or running.
@@ -127,6 +189,7 @@ impl EmbeddedController {
     /// Stop the server (if any) and wait for pending shutdown work, bounded by
     /// the server's configured grace period. Call once when the window closes.
     pub fn shutdown(&mut self) {
+        self.pending_restart = None;
         if let Some(handle) = self.server.take() {
             self.runtime.block_on(handle.stop());
         }
@@ -194,6 +257,81 @@ mod tests {
         invalid.root_dir = dir.path().join("missing");
         assert!(controller.start(invalid).is_err());
         assert!(!controller.is_running());
+        controller.shutdown();
+    }
+
+    #[test]
+    fn restart_waits_for_the_old_server_and_starts_the_new_one() {
+        let first = tempfile::tempdir().expect("first dir");
+        let second = tempfile::tempdir().expect("second dir");
+        fs::write(first.path().join("a.txt"), b"a").expect("write a");
+        fs::write(second.path().join("b.txt"), b"b").expect("write b");
+
+        let mut controller = EmbeddedController::new().expect("controller");
+        controller.start(config(first.path())).expect("start");
+        assert!(controller.is_running());
+
+        controller
+            .restart(config(second.path()))
+            .expect("queue restart");
+        // The old server is shutting down; the controller must report progress.
+        assert!(!controller.is_running());
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let status = controller.poll_status();
+            if matches!(status, ServerStatus::Running { .. }) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "restart did not complete: {status:?}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(controller.is_running());
+
+        assert!(controller.stop());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let status = controller.poll_status();
+            if matches!(status, ServerStatus::Stopped) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "server did not stop after restart: {status:?}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        controller.shutdown();
+    }
+
+    #[test]
+    fn failed_restart_is_reported_without_leaving_the_server_running() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut controller = EmbeddedController::new().expect("controller");
+        controller.start(config(dir.path())).expect("start");
+
+        let mut invalid = config(dir.path());
+        invalid.root_dir = dir.path().join("missing");
+        controller.restart(invalid).expect("queue restart");
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut error = None;
+        while error.is_none() {
+            controller.poll_status();
+            error = controller.take_error();
+            assert!(
+                Instant::now() < deadline,
+                "restart failure was not reported"
+            );
+            if error.is_none() {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+        assert!(!controller.is_running());
+        assert!(error.expect("error").contains("root"));
         controller.shutdown();
     }
 }

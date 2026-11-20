@@ -1,0 +1,113 @@
+// Custom title bar for the frameless main window. The whole bar is a window
+// drag area (WindowMoveArea) with the window buttons on top of it; the
+// resize border is provided by the window's `resize-border-width` property.
+import { Icons, MaterialIcon } from "icons.slint";
+import { Theme } from "theme.slint";
+
+// A Windows-style caption button: compact, square-ish and quiet until hovered.
+component WindowControl inherits Rectangle {
+    in property <string> icon-data;
+    in property <bool> danger: false;
+    callback clicked();
+
+    width: 40px;
+    height: 30px;
+    border-radius: 4px;
+    background: touchArea.pressed
+        ? (root.danger ? #b91c1c : #243041)
+        : touchArea.has-hover
+            ? (root.danger ? #e81123 : Theme.toolbar-hover)
+            : transparent;
+
+    MaterialIcon {
+        path-data: root.icon-data;
+        tint: root.danger && (touchArea.has-hover || touchArea.pressed)
+            ? #ffffff
+            : #cbd5e1;
+        icon-size: 14px;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+    }
+
+    touchArea := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component TitleBar inherits Rectangle {
+    in property <bool> maximized: false;
+
+    callback minimize-requested();
+    callback maximize-requested();
+    callback close-requested();
+
+    height: 36px;
+    background: Theme.titlebar-bg;
+
+    // Drag area limited to the left of the window buttons: if it covered the
+    // buttons as well, a press on maximize/close could also start a window
+    // move (which restores a maximized window on Windows).
+    WindowMoveArea {
+        enabled: true;
+        x: 0;
+        y: 0;
+        width: parent.width - 150px;
+        height: parent.height;
+    }
+
+    HorizontalLayout {
+        cross-axis-alignment: center;
+        padding-left: 12px;
+        padding-right: 4px;
+        spacing: 8px;
+
+        Rectangle {
+            width: 20px;
+            height: 20px;
+            border-radius: 5px;
+            background: Theme.toolbar-brand;
+            MaterialIcon {
+                path-data: Icons.dns;
+                tint: #ffffff;
+                icon-size: 13px;
+                x: 3.5px;
+                y: 3.5px;
+            }
+        }
+        Text {
+            text: "TftpdR";
+            color: #f8fafc;
+            font-size: 12px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+        Rectangle {
+            width: 1px;
+            height: 14px;
+            background: Theme.toolbar-divider;
+        }
+        Text {
+            text: "Rust TFTP 服务端";
+            color: Theme.text-faint;
+            font-size: 10px;
+            vertical-alignment: center;
+        }
+
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+
+        WindowControl {
+            icon-data: Icons.remove;
+            clicked => { root.minimize-requested(); }
+        }
+        WindowControl {
+            icon-data: root.maximized ? Icons.filter-none : Icons.crop-square;
+            clicked => { root.maximize-requested(); }
+        }
+        WindowControl {
+            icon-data: Icons.close;
+            danger: true;
+            clicked => { root.close-requested(); }
+        }
+    }
+}

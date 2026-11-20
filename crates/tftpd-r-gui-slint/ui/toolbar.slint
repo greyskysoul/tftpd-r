@@ -1,0 +1,111 @@
+// Toolbar with the primary server actions. The brand and window controls live
+// in the custom title bar above it, so both rows form one dark header block.
+import { Icons } from "icons.slint";
+import { Theme } from "theme.slint";
+import { ToolButton } from "widgets.slint";
+
+export component TopToolbar inherits Rectangle {
+    in property <bool> primary-enabled: true;
+    in property <bool> primary-is-restart: false;
+    in property <bool> stop-enabled: false;
+    in property <bool> settings-active: false;
+    in property <bool> about-active: false;
+    in property <string> status-text: "已停止";
+    in property <int> status-kind: 0;
+
+    callback primary-requested();
+    callback stop-requested();
+    callback settings-requested();
+    callback about-requested();
+
+    height: 72px;
+    background: Theme.toolbar-bg;
+
+    HorizontalLayout {
+        cross-axis-alignment: center;
+        padding-left: 14px;
+        padding-right: 16px;
+        spacing: 8px;
+
+        // Service status is the first thing in the toolbar so the running /
+        // stopped state is visible at a glance.
+        Rectangle {
+            width: 132px;
+            height: 44px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.05);
+
+            HorizontalLayout {
+                cross-axis-alignment: center;
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 8px;
+                Rectangle {
+                    width: 9px;
+                    height: 9px;
+                    border-radius: 5px;
+                    background: root.status-kind == 1 ? #22c55e
+                        : root.status-kind == 4 ? #ef4444
+                        : root.status-kind == 2 || root.status-kind == 3 ? #f59e0b
+                        : #94a3b8;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 0;
+                    Text {
+                        text: "服务状态";
+                        color: Theme.text-faint;
+                        font-size: 9px;
+                    }
+                    Text {
+                        text: root.status-text;
+                        color: root.status-kind == 1 ? #4ade80
+                            : root.status-kind == 4 ? #f87171
+                            : root.status-kind == 2 || root.status-kind == 3 ? #fbbf24
+                            : #cbd5e1;
+                        font-size: 13px;
+                        font-weight: 700;
+                    }
+                }
+            }
+        }
+
+        Rectangle { width: 1px; height: 30px; background: Theme.toolbar-divider; }
+        Rectangle { width: 4px; background: transparent; }
+
+        ToolButton {
+            label: root.primary-is-restart ? "重启" : "启动";
+            icon-data: root.primary-is-restart ? Icons.restart-alt : Icons.play-arrow;
+            icon-tint: root.primary-is-restart ? #fbbf24 : #4ade80;
+            label-tint: #e2e8f0;
+            available: root.primary-enabled;
+            clicked => { root.primary-requested(); }
+        }
+
+        ToolButton {
+            label: "停止";
+            icon-data: Icons.stop;
+            icon-tint: #f87171;
+            available: root.stop-enabled;
+            clicked => { root.stop-requested(); }
+        }
+
+        Rectangle { width: 6px; background: transparent; }
+
+        ToolButton {
+            label: "设置";
+            icon-data: Icons.settings;
+            active: root.settings-active;
+            clicked => { root.settings-requested(); }
+        }
+
+        ToolButton {
+            label: "关于";
+            icon-data: Icons.info;
+            active: root.about-active;
+            clicked => { root.about-requested(); }
+        }
+
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+    }
+}

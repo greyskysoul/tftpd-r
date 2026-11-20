@@ -1,0 +1,123 @@
+// Bottom status bar: a read-only hint (or the last error, when there is one)
+// on the left, bind address and current root directory on the right. The
+// service state itself lives prominently in the toolbar.
+import { Icons, MaterialIcon } from "icons.slint";
+import { Theme } from "theme.slint";
+
+export component StatusBar inherits Rectangle {
+    in property <string> bind-text: "—";
+    in property <string> root-text: "—";
+    in property <string> detail-text: "";
+
+    callback root-clicked();
+
+    height: 40px;
+    background: Theme.panel-bg;
+
+    Rectangle {
+        height: 1px;
+        background: Theme.panel-border;
+    }
+
+    HorizontalLayout {
+        cross-axis-alignment: center;
+        padding-left: 16px;
+        padding-right: 10px;
+        spacing: 10px;
+
+        Rectangle {
+            horizontal-stretch: 1;
+            height: 24px;
+            clip: true;
+
+            HorizontalLayout {
+                cross-axis-alignment: center;
+                spacing: 6px;
+
+                if root.detail-text != "" : MaterialIcon {
+                    path-data: Icons.error;
+                    tint: Theme.danger;
+                    icon-size: 14px;
+                }
+                if root.detail-text == "" : MaterialIcon {
+                    path-data: Icons.speed;
+                    tint: Theme.text-faint;
+                    icon-size: 14px;
+                }
+
+                if root.detail-text != "" : Text {
+                    text: root.detail-text;
+                    color: #b91c1c;
+                    font-size: 11px;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+                if root.detail-text == "" : Text {
+                    text: "RFC 1350 · 只读 RRQ · 上传已禁用";
+                    color: Theme.text-faint;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        MaterialIcon {
+            path-data: Icons.dns;
+            tint: Theme.text-faint;
+            icon-size: 15px;
+        }
+        Text {
+            text: root.bind-text;
+            color: Theme.text-muted;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+
+        Rectangle { width: 1px; height: 16px; background: Theme.panel-border; }
+
+        Rectangle {
+            height: 28px;
+            border-radius: 6px;
+            clip: true;
+            horizontal-stretch: 0;
+            background: rootTouchArea.pressed ? #e2e8f0
+                : rootTouchArea.has-hover ? #f1f5f9
+                : transparent;
+
+            HorizontalLayout {
+                cross-axis-alignment: center;
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 5px;
+                MaterialIcon {
+                    path-data: Icons.folder-open;
+                    tint: Theme.accent;
+                    icon-size: 15px;
+                }
+                Text {
+                    text: root.root-text;
+                    color: Theme.text;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                }
+                MaterialIcon {
+                    path-data: Icons.keyboard-arrow-down;
+                    tint: Theme.text-muted;
+                    icon-size: 16px;
+                }
+            }
+
+            rootTouchArea := TouchArea {
+                mouse-cursor: pointer;
+                // Open on press: the drop-down is then already visible when
+                // the button is released, so the release cannot be mistaken
+                // for a click that immediately dismisses it again.
+                pointer-event(event) => {
+                    if (event.kind == PointerEventKind.down) {
+                        root.root-clicked();
+                    }
+                }
+            }
+        }
+    }
+}
