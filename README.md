@@ -251,7 +251,7 @@ acceptance criterion.
 
 ## License
 
-MIT OR Apache-2.0 (see `Cargo.toml`; no license files are bundled yet — add them
-before distributing binaries). The bundled Material Design icon path data is
-Apache-2.0; its license and per-icon sources are under
-`crates/tftpd-r-gui-slint/ui/icons/`.
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or the
+[MIT license](LICENSE-MIT) at your option (see `Cargo.toml`). The bundled
+Material Design icon path data is Apache-2.0; its license and per-icon sources
+are under `crates/tftpd-r-gui-slint/ui/icons/`.
