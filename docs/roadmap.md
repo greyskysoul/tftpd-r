@@ -1,23 +1,26 @@
 # Roadmap and planned requirements
 
-This file records requirements that are **accepted but not implemented**. It is
-not a statement about the current release: `0.1.0` ships TOML configuration, a
-single `bind_address` defaulting to `127.0.0.1:6969`, and a GUI that loads
-`config.toml` from the working directory.
+This file records what shipped in the current release and the requirements that
+are **accepted but not implemented**. `0.2.0` ships TOML configuration with
+`port` + `bind_addresses` defaulting to `127.0.0.1:69`, a GUI that loads
+`config.toml` from the working directory, and the desktop-panel interaction
+changes linked below. `0.1.0` used a single `bind_address` defaulting to
+`127.0.0.1:6969`.
 
-Anything listed here is unimplemented until the code, tests, ADR and docs say
-otherwise.
+Anything in the "Next" section is unimplemented until the code, tests, ADR and
+docs say otherwise.
 
 The configuration format stays **TOML**. An INI configuration with fixed
 locations (`~/.tftpdr.ini`) was considered for `0.2.0` and then dropped; the
 daemon keeps `--config <path>` with TOML and the GUI keeps loading
 `config.toml` from the working directory.
 
-## Implemented on main (unreleased, target `0.2.0`)
+## Implemented in `0.2.0`
 
-The two requirements below are implemented on `main`; they are kept here as the
-accepted requirement record until `0.2.0` is released. See the linked ADRs for
-the decisions and deviations.
+The requirements below shipped in
+[`v0.2.0`](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.2.0); they are
+kept here as the accepted requirement record. See the linked ADRs for the
+decisions and deviations.
 
 ### R1 — Default bind port 69, with a non-forcing hint — implemented
 

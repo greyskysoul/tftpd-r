@@ -31,8 +31,8 @@ with network access; subsequent builds/tests ran with `--offline`.
 | `cargo build --workspace --release` | Pass (59.6 s in the final run) |
 
 The workspace was renamed from `rust-tftpd`/`tftp-*` to TftpdR/`tftpd-r-*` on
-2026-11-20. Every command in this section was re-run on 2026-11-20 after the GUI
-redesign; the results shown here are from that run (offline, GNU toolchain).
+2026-11-20. Every command in this section was re-run on 2026-11-20 for `0.2.0`;
+the results shown here are from that run (offline, GNU toolchain).
 The GUI crate now contributes 39 tests (24 before the first-run / auto-restart
 work): `product_icon_pixels_are_a_valid_rounded_tile` guards the embedded
 window-icon pixels (size, transparent corners, `#263238` tile, `#fafafa`
@@ -40,8 +40,9 @@ glyph); `SetupState` guards the one-time setup flag; the address-toggle and
 `RestartDisposition` tests cover the picker rules and the idle auto-restart
 decision, and one test performs a real embedded-server restart.
 
-Release artifacts on the verification machine (informational only; not an
-acceptance criterion and not a promise for other machines/toolchains):
+The `0.2.0` release artifacts built on the verification machine (informational
+only; not an acceptance criterion and not a promise for other
+machines/toolchains):
 `target/release/tftpd-r.exe` ≈ 2.07 MiB (2,174,976 bytes), `target/release/tftpd-r-gui.exe`
 ≈ 12.81 MiB (13,430,272 bytes; debug symbols stripped by the release profile).
 

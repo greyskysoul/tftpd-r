@@ -15,8 +15,8 @@
 | Phase 0–5 | ✅ 已完成 | workspace、codec/沙箱、RRQ 引擎、daemon、GUI 面板重设计（无边框自定义标题栏与窗口控件、工具栏状态徽标、状态栏、日志/传输列表、设置/关于、最近根目录）、文档/ADR/CI 文件 |
 | Phase 6 IPC | ⏳ 未开始 | GUI 仅 Embedded 模式；无 named pipe / daemon 控制 |
 | Phase 7 WRQ 上传 | ⏳ 未开始 | 默认且唯一行为是只读；`allow_upload=true` 被配置校验拒绝 |
-| Phase 8 发布/目标机 | 🟡 部分完成 | 0.1.0 已发布（[GitHub Release](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.1.0)，Windows/Linux × x64/arm64 四目标原生构建）；CI 在 windows-latest（MSVC x64）与 ubuntu-latest（GNU x64）上 fmt/clippy/test 全绿；目标机人工验收（真实/老式客户端、LAN/防火墙、RDP、IME、其他 DPI）未做 |
-| 0.2.0 R1/R2 | ✅ 已实现（未发布） | 默认端口 69 + 非强制提示（ADR 0007）；`port` + `bind_addresses` 多监听、GUI 多选地址选择器与目录选择器（ADR 0008）；首次启动自动打开设置（每用户一次）、选择器「全部网络」独占且不可清空、「全部网络」为首次启动默认、最近根目录可清空、空闲时配置/根目录变更自动重启（ADR 0009）；配置格式破坏性变更，`bind_address` 已删除 |
+| Phase 8 发布/目标机 | 🟡 部分完成 | [0.1.0](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.1.0) 与 [0.2.0](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.2.0) 已发布（Windows/Linux × x64/arm64 四目标原生构建）；CI 在 windows-latest（MSVC x64）与 ubuntu-latest（GNU x64）上 fmt/clippy/test 全绿；目标机人工验收（真实/老式客户端、LAN/防火墙、RDP、IME、其他 DPI）未做 |
+| 0.2.0 R1/R2 | ✅ 已发布（2026-11-20） | 默认端口 69 + 非强制提示（ADR 0007）；`port` + `bind_addresses` 多监听、GUI 多选地址选择器与目录选择器（ADR 0008）；首次启动自动打开设置（每用户一次）、选择器「全部网络」独占且不可清空、「全部网络」为首次启动默认、最近根目录可清空、空闲时配置/根目录变更自动重启（ADR 0009）；配置格式破坏性变更，`bind_address` 已删除 |
 
 已验证环境：Windows 11（10.0.26300）+ Rust 1.100.0 `x86_64-pc-windows-gnu` + MinGW-w64 GCC 15.3 + Slint 1.19.0；CI 另在 `windows-latest`（MSVC x64）与 `ubuntu-latest`（GNU x64）跑通 fmt/clippy/test，并在原生 arm64 runner 上构建 arm64 产物。**未验证**：MSVC、Linux 与 arm64 产物的**运行**（CI 只对 x64 跑测试，arm64 仅编译）、GUI 在 Linux 桌面上的运行、真实/外部 TFTP 客户端互操作、Windows Service、RDP、69 端口权限、真实键盘/IME 输入、其他 DPI/语言下的字体渲染与无障碍。不要在文档或回复中把这些写成已通过。
 
@@ -37,7 +37,7 @@
 │   ├── architecture.md            # crate 边界、生命周期、数据流、线程模型
 │   ├── security.md                # 威胁模型、沙箱、残余风险
 │   ├── testing.md                 # 实际执行记录与未验证项
-│   ├── roadmap.md                 # 0.2.0 已实现待发布项与后续未实现项
+│   ├── roadmap.md                 # 0.2.0 已发布项与后续未实现项
 │   └── adr/0001–0009              # 已接受的决策（IPC 延后、上传关闭、octet only、端口 69、多地址绑定、GUI 首次启动/自动重启等）
 ├── crates/
 │   ├── tftpd-r-core/             # 无 GUI/daemon/IPC 依赖
@@ -167,7 +167,7 @@ cargo run -p tftpd-r-gui-slint -- --smoke-test
 
 ## 6. 后续路线与优先级
 
-1. **0.2.0 需求（R1/R2 已在 main 实现，待发布；详见 [docs/roadmap.md](docs/roadmap.md)）**
+1. **0.2.0 需求（R1/R2 及 GUI 交互补充已在 0.2.0 发布；详见 [docs/roadmap.md](docs/roadmap.md)）**
    - **R1 默认端口 69 ✅**：默认端口 69；权限不足时提示可改用非特权端口（如 6969），不强制、不回退、不提权、不改写配置（ADR 0007）。
    - **R2 多选绑定地址 ✅**：`port` + `bind_addresses` 多监听；GUI 多选选择器自动导入网卡 IP，并始终提供「全部网络 (0.0.0.0)」与「本地回环 (127.0.0.1)」（ADR 0008）。绑定全有或全无，不做部分失败服务。
    - **GUI 交互补充 ✅**：无有效配置的首次启动自动打开设置（每 profile 一次）并预选「全部网络」，「全部网络」在 picker 中独占且不可清空，最近根目录可清空；保存设置或切换根目录时，服务运行中且无传输则自动重启，否则只保存并提示手动重启（ADR 0009）。核心/daemon 的回环默认不变。

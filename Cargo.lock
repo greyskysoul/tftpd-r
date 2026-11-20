@@ -4159,7 +4159,7 @@ checksum = "f18aa187839b2bdb1ad2fa35ead8c4c2976b64e4363c386d45ac0f7ee85c9233"
 
 [[package]]
 name = "tftpd-r-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "tempfile",
@@ -4172,7 +4172,7 @@ dependencies = [
 
 [[package]]
 name = "tftpd-r-daemon"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -4186,7 +4186,7 @@ dependencies = [
 
 [[package]]
 name = "tftpd-r-gui-slint"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "slint",
  "slint-build",

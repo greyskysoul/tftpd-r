@@ -68,8 +68,8 @@ Not implemented in this release (deliberate, tracked in `docs/adr/`):
 - `netascii` mode (`docs/adr/0006-octet-only.md`).
 
 Port 69 as the default (with a non-forcing hint when privileges are missing) and
-multi-select bind addresses are implemented on `main` for the unreleased `0.2.0`
-and recorded in [docs/roadmap.md](docs/roadmap.md) and
+multi-select bind addresses shipped in `0.2.0` and are recorded in
+[docs/roadmap.md](docs/roadmap.md) and
 [docs/adr/0007](docs/adr/0007-default-port-69.md) /
 [docs/adr/0008](docs/adr/0008-multiple-bind-addresses.md); the GUI first-run,
 history-clear and idle auto-restart behaviour is in
