@@ -140,7 +140,12 @@ export component TransfersPanel inherits Panel {
                                     height: 6px;
                                     border-radius: 3px;
                                     background: Theme.track;
+                                    // x/y are explicit: without them a sized
+                                    // child is centred and the bar appeared to
+                                    // grow from the middle towards both sides.
                                     Rectangle {
+                                        x: 0;
+                                        y: 0;
                                         width: parent.width * row.progress;
                                         height: 6px;
                                         border-radius: 3px;

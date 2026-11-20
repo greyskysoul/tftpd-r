@@ -3,7 +3,7 @@
 //   main     (activity log on top, transfer table below)
 //   status   (service state left; bind address + current root right)
 // Settings, About and the recent-root drop-down are in-window overlays.
-import { LogRow, RecentDir, TransferRow } from "models.slint";
+import { AddressOption, LogRow, RecentDir, TransferRow } from "models.slint";
 import { Theme } from "theme.slint";
 import { TitleBar } from "titlebar.slint";
 import { TopToolbar } from "toolbar.slint";
@@ -41,6 +41,9 @@ export component AppWindow inherits Window {
 
     in-out property <bool> window-maximized: false;
     in-out property <bool> settings-open: false;
+    // Also settable from Rust for the `TFTPD_R_GUI_PREVIEW=picker` development
+    // screenshot mode; the settings dialog resets it when it closes.
+    in-out property <bool> settings-picker-open: false;
     in-out property <bool> about-open: false;
     in-out property <bool> recent-menu-open: false;
     in-out property <string> app-version: "0.1.0";
@@ -49,7 +52,9 @@ export component AppWindow inherits Window {
     in-out property <[TransferRow]> transfers: [];
     in-out property <[LogRow]> logs: [];
 
-    in-out property <string> settings-bind: "127.0.0.1:6969";
+    in-out property <string> settings-port: "69";
+    in-out property <[AddressOption]> settings-address-options: [];
+    in-out property <string> settings-bind-summary: "";
     in-out property <string> settings-root: "tftp-root";
     in-out property <string> settings-block-size: "512";
     in-out property <string> settings-timeout: "3";
@@ -60,6 +65,8 @@ export component AppWindow inherits Window {
     callback stop-requested();
     callback apply-settings();
     callback cancel-settings();
+    callback address-toggled(string);
+    callback browse-root();
     callback clear-logs();
     callback recent-selected(string);
     callback minimize-requested();
@@ -87,6 +94,7 @@ export component AppWindow inherits Window {
             settings-requested => {
                 root.about-open = false;
                 root.settings-open = !root.settings-open;
+                root.settings-picker-open = false;
             }
             about-requested => {
                 root.settings-open = false;
@@ -130,14 +138,19 @@ export component AppWindow inherits Window {
     }
 
     if root.settings-open : SettingsDialog {
-        bind-address <=> root.settings-bind;
+        port <=> root.settings-port;
+        address-options <=> root.settings-address-options;
+        bind-summary <=> root.settings-bind-summary;
         root-dir <=> root.settings-root;
         block-size <=> root.settings-block-size;
         timeout-secs <=> root.settings-timeout;
         max-sessions <=> root.settings-max-sessions;
+        picker-open <=> root.settings-picker-open;
         error-text: root.settings-error;
         apply-requested => { root.apply-settings(); }
         cancel-requested => { root.cancel-settings(); }
+        address-toggled(address) => { root.address-toggled(address); }
+        browse-requested => { root.browse-root(); }
     }
 
     if root.about-open : AboutDialog {

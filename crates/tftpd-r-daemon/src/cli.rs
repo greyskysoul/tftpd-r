@@ -39,7 +39,8 @@ pub struct ServeArgs {
     /// Path to the TOML configuration file.
     #[arg(short, long, value_name = "FILE", default_value = "config.toml")]
     pub config: PathBuf,
-    /// Override the configured UDP bind address.
+    /// Override the configured UDP listen address and port (replaces the
+    /// configured address list with this single listener).
     #[arg(long, value_name = "ADDR")]
     pub bind: Option<SocketAddr>,
     /// Override the configured root directory.

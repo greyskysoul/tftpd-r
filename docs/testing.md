@@ -27,8 +27,8 @@ with network access; subsequent builds/tests ran with `--offline`.
 | --- | --- |
 | `cargo fmt --all -- --check` | Pass (exit 0) |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Pass (exit 0, no warnings) |
-| `cargo test --workspace` | **105 passed, 0 failed** |
-| `cargo build --workspace --release` | Pass (≈22 s incremental in the final run) |
+| `cargo test --workspace` | **131 passed, 0 failed** |
+| `cargo build --workspace --release` | Pass (1 m 28 s in the final run) |
 
 The workspace was renamed from `rust-tftpd`/`tftp-*` to TftpdR/`tftpd-r-*` on
 2026-11-20. Every command in this section was re-run on 2026-11-20 after the GUI
@@ -82,11 +82,11 @@ Test breakdown from `cargo test --workspace`:
 
 | Target | Tests | What is covered |
 | --- | --- | --- |
-| `tftpd-r-core` unit tests (`src/lib.rs` target) | 53 | codec round-trips and malformed/oversized packets; option negotiation ranges, duplicates and clamping; configuration defaults/ranges/TOML errors; path sandbox traversal, device names, legacy root-prefix mapping and root-directory rejection, symlink/reparse rejection, size limits; event ring drop/sequence/clear; error-code mapping |
-| `tftpd-r-core` integration `tests/rrq.rs` | 26 | real loopback UDP server and client: small/exact-multiple/empty files, missing file, traversal, legacy `/file` and `\file` requests, root-prefixed traversal rejection, `blksize`/`tsize`/`timeout` negotiation, clamping, invalid option, duplicate ACK, retransmission, unknown TID ERROR 5, duplicate RRQ resend without a new session, WRQ rejection, netascii rejection, unknown mode/malformed/oversized datagrams, size limit, concurrent transfers, lifecycle events, shutdown cancellation, idempotent stop, retry exhaustion, **block-number wrap 65535 → 0** with `blksize = 8` (65,537 blocks) |
+| `tftpd-r-core` unit tests (`src/lib.rs` target) | 63 | codec round-trips and malformed/oversized packets; option negotiation ranges, duplicates and clamping; configuration defaults/ranges/TOML errors, bind list emptiness/limit/multicast/broadcast rejection, wildcard collapsing and duplicate removal, shared-port summary; privileged-port bind classification and the non-forcing hint; path sandbox traversal, device names, legacy root-prefix mapping and root-directory rejection, symlink/reparse rejection, size limits; event ring drop/sequence/clear; error-code mapping |
+| `tftpd-r-core` integration `tests/rrq.rs` | 29 | real loopback UDP server and client: small/exact-multiple/empty files, missing file, traversal, legacy `/file` and `\file` requests, root-prefixed traversal rejection, `blksize`/`tsize`/`timeout` negotiation, clamping, invalid option, duplicate ACK, retransmission, unknown TID ERROR 5, duplicate RRQ resend without a new session, WRQ rejection, netascii rejection, unknown mode/malformed/oversized datagrams, size limit, concurrent transfers, lifecycle events, shutdown cancellation, idempotent stop, retry exhaustion, **block-number wrap 65535 → 0** with `blksize = 8` (65,537 blocks); multiple listeners on one resolved port (IPv6 checked when available), wildcard collapsing to one listener, and an unbindable address aborting the whole start |
 | `tftpd-r-daemon` unit tests | 10 | CLI parsing/defaults/overrides, embedded example template validity, config loading errors, unknown fields, override validation, status-channel failure path |
 | `tftpd-r-daemon` integration `tests/cli.rs` | 5 | binary `print-default-config` equals `config.example.toml`; `check-config` success/missing file/uploads-rejected exit code 2; `serve` refuses invalid config with exit code 1; `serve` stays running with a valid config |
-| `tftpd-r-gui-slint` unit tests | 10 | embedded controller start/stop, double-start rejection, invalid root, asynchronous restart (old server → new config) and failed-restart error reporting; recent-root ordering, de-duplication, cap, persistence, canonicalisation and stale-directory cleanup |
+| `tftpd-r-gui-slint` unit tests | 23 | embedded controller start/stop, double-start rejection, invalid root, asynchronous restart (old server → new config) and failed-restart error reporting; recent-root ordering, de-duplication, cap, persistence, canonicalisation and stale-directory cleanup; interface-address parsing/filtering/sorting; folder-selection validation; address picker model (two permanent entries, selected-but-undiscovered addresses preserved, duplicate removal, summaries), status-bar address summary and leaf-directory name |
 | `tftpd-r-core` doc test | 1 | crate-level usage example compiles |
 
 The block-wrap test transfers 65,537 blocks in roughly 3–4 seconds on the
@@ -174,6 +174,41 @@ verification machine.
      desktop input; this verifies the Slint handlers and state transitions, but
      it is not a substitute for a person clicking with a real mouse.
 
+### 0.2.0 changes (2026-11-20, second run)
+
+- **No console window.** Both binaries were checked at the PE-header level:
+  `tftpd-r-gui.exe` has subsystem 2 (Windows GUI), `tftpd-r.exe` has subsystem 3
+  (console). Debug and release `--smoke-test` still exit 0 with empty stderr, so
+  the windowed subsystem did not break startup or shutdown.
+- **Multi-listener daemon.** A temporary config with `port = 0` and
+  `bind_addresses = ["127.0.0.1", "192.168.3.17"]` started the daemon; the log
+  reported both listeners on the same resolved ephemeral port; a raw UDP client
+  downloaded a 5,000-byte file as `/image.bin` from **each** address with
+  identical bytes; Ctrl-Break produced `TFTP server stopped` and exit code 0.
+- **GUI status bar / settings / picker.** `PrintWindow` captures of the panel at
+  2× DPI showed: the stray horizontal line no longer crosses the status bar (the
+  border is pinned with explicit `x`/`y`), the status bar shows `tftp-root` (last
+  path component) instead of the absolute path, and the settings dialog with the
+  new port field, 绑定地址 picker, 浏览… button and transfer limits. Opening the
+  picker (`TFTPD_R_GUI_PREVIEW=picker`, a development-only environment variable)
+  showed `全部网络 (0.0.0.0)`, `本地回环 (127.0.0.1)`, `192.168.3.17` and two
+  global IPv6 addresses discovered through the .NET `NetworkInterface` API.
+  `Get-NetIPAddress` is denied in this agent sandbox (WMI/CIM access), which is
+  why discovery uses the .NET API instead.
+- **Progress bar and transfer log.** The progress fill and the status-bar border
+  shared the same centring bug; both now pin `x`/`y`. The table was rendered with
+  two synthetic rows (`TFTPD_R_GUI_PREVIEW=transfer`) and the capture shows the
+  blue fill anchored at the left edge (55 %) and an indeterminate row with an
+  empty track and `—`, so the fill no longer grows from the middle. A new real
+  transfer in the panel was not run in this session (the earlier run above
+  already recorded the live progress row and the `开始传输` / `传输完成` log
+  lines). Completion logging was additionally made unconditional so a finished
+  transfer always leaves a log line.
+- **Not re-verified:** clicking with a real mouse, the native folder dialog, the
+  bind-failure hint in the GUI, and a real multi-NIC selection. Synthetic mouse
+  input does not reach this winit window under the agent sandbox, so the dialogs
+  were opened through the preview variable instead of a click.
+
 ## Not verified (and therefore not claimed)
 
 - **External TFTP client interoperability** (tftp-hpa, Tftpd64, PXE firmware,
@@ -185,8 +220,15 @@ verification machine.
 - **Linux/macOS runtime.** CI runs the full suite on Linux, but the GUI has never
   been run on a Linux desktop, and macOS is untested.
 - **LAN/deployment behaviour:** binding `0.0.0.0`, Windows Defender Firewall
-  rules for TID ports, port 69 privileges, RDP sessions, concurrent real-world
-  clients.
+  rules for TID ports, RDP sessions, concurrent real-world clients. Port 69 was
+  actually bound by the daemon on this Windows machine (Windows normally allows
+  low ports), so the "permission denied" hint was exercised only by unit tests,
+  not by a real failed bind; the Linux root/`CAP_NET_BIND_SERVICE` path is
+  untested.
+- **GUI helper features:** the native folder dialog was not interacted with, and
+  address discovery was exercised only through the .NET API on this machine
+  (not on Linux, not with VPN adapters appearing/disappearing, and not through
+  the `hostname -I` fallback).
 - **Release artifacts:** sizes and checksums are recorded above; they are
   informational for the recorded build and are not a guarantee for other
   machines or toolchains.
@@ -214,8 +256,8 @@ verification machine.
 2. Launch the GUI with a real `config.toml`; check the custom title bar, the
    window controls (minimize / maximize-restore / close), edge and corner drag
    resizing, the service-status chip at the far left of the toolbar, the bind
-   address and root in the status bar, and that Chinese text renders without
-   missing glyphs.
+   address and the root *name* in the status bar, and that Chinese text renders
+   without missing glyphs. Confirm that no console window appears.
 3. Start the server, download a file with a real TFTP client, confirm the file
    hash matches and the transfer appears/disappears in the 传输列表 with a live
    progress bar.
@@ -225,7 +267,11 @@ verification machine.
 5. Stop the server during a large transfer; confirm the client sees an error and
    the UI reaches `已停止` without freezing.
 6. Open the settings dialog and type into every field (including Chinese IME
-   composition); save, then restart and confirm the new values are used.
+   composition); select several bind addresses (including a real LAN address),
+   use 浏览… to pick a root directory, save, then restart and confirm the new
+   values are used. Try port 69 without administrator/root and confirm the
+   failure hint appears without any automatic fallback; then switch to an
+   unprivileged port.
 7. Click the root path in the status bar and switch between at least two recent
    directories; confirm the status bar, log and served files follow the selected
    directory.

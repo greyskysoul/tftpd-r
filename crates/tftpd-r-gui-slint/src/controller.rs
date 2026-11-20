@@ -88,7 +88,7 @@ impl EmbeddedController {
         };
         self.status_rx = Some(handle.status_receiver());
         self.status = ServerStatus::Running {
-            local_addr: handle.local_addr(),
+            local_addrs: handle.local_addrs().to_vec(),
         };
         self.server = Some(handle);
         Ok(())
@@ -211,7 +211,8 @@ mod tests {
     fn config(root: &Path) -> ServerConfig {
         ServerConfig {
             root_dir: root.to_path_buf(),
-            bind_address: "127.0.0.1:0".parse().expect("addr"),
+            port: 0,
+            bind_addresses: vec!["127.0.0.1".parse().expect("addr")],
             timeout_secs: 1,
             max_retries: 1,
             shutdown_grace_secs: 2,
@@ -227,7 +228,11 @@ mod tests {
         controller.start(config(dir.path())).expect("start");
         assert!(controller.is_running());
         let status = controller.poll_status();
-        let address = status.local_addr().expect("running address");
+        let address = status
+            .local_addrs()
+            .first()
+            .copied()
+            .expect("running address");
         assert!(address.ip().is_loopback());
 
         assert!(matches!(

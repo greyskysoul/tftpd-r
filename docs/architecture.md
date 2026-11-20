@@ -44,32 +44,44 @@ started it must stay alive. See [`adr/0001-runtime-ownership.md`](adr/0001-runti
 
 `TftpServer::start(config, event_sink)`:
 
-1. Validates `ServerConfig` (including root directory existence).
+1. Validates `ServerConfig` (including root directory existence and the bind
+   address list).
 2. Canonicalises the root with `Sandbox::new`.
-3. Binds the main UDP socket (`bind_address`; port 0 is allowed for tests).
-4. Spawns the accept loop and returns a `ServerHandle`.
+3. Binds one UDP socket per effective bind address on the shared `port` (port 0
+   is allowed for tests: the first listener resolves the ephemeral port and the
+   rest reuse it). Binding is all-or-nothing; a failure drops the sockets bound
+   so far and returns the classified error.
+4. Spawns one accept loop per listener and returns a `ServerHandle` whose
+   `local_addrs()` reports the actual bound addresses.
 
-Status transitions: `Starting → Running → Stopping → Stopped`, or `Failed` if the
-accept loop cannot report its socket address. Binding/validation failures are
-returned synchronously from `start`, so no half-started listener exists.
+Status transitions: `Starting → Running { local_addrs } → Stopping → Stopped`,
+or `Failed` if the server task fails. Binding/validation failures are returned
+synchronously from `start`, so no half-started listener exists.
 
 `ServerHandle::stop()` is idempotent: it sends `Stopping`, cancels the
-`CancellationToken`, waits for the accept loop, then awaits the join handle. The
-accept loop cancels all sessions, drains them for `shutdown_grace_secs`, aborts
-the remainder and marks the server `Stopped`. Dropping a handle without `stop()`
-still cancels the token (sessions finish on their cancellation path), but does
-not wait for them.
+`CancellationToken`, waits for the supervisor (which joins every accept loop),
+then awaits the join handle. Each accept loop cancels its sessions, drains them
+for `shutdown_grace_secs` in parallel with the other loops, aborts the remainder
+and releases its socket. Dropping a handle without `stop()` still cancels the
+token (sessions finish on their cancellation path), but does not wait for them.
 
-## Accept loop and sessions
+## Accept loops and sessions
 
-- The main socket receives RRQ/WRQ and malformed datagrams. Request datagrams
-  larger than `MAX_REQUEST_BYTES` (1024) are rejected with ERROR 4.
-- A duplicate RRQ from a peer that already has a session does **not** create a
-  second session: the accept loop sends a `SessionSignal::Resend` to the
-  existing session, which retransmits its current packet. This keeps the TID
-  stable for the client and prevents task/port exhaustion from retried requests.
-- Each session gets its own ephemeral UDP socket (the TID) in the listener's
-  address family, an event session ID, a `JoinSet` slot and a semaphore permit.
+- One accept loop owns one listening socket. Each loop receives RRQ/WRQ and
+  malformed datagrams on its own address; request datagrams larger than
+  `MAX_REQUEST_BYTES` (1024) are rejected with ERROR 4.
+- The peer→session map, the per-peer session count, the global session
+  semaphore and the session-id counter are shared by all listeners. A duplicate
+  RRQ from a peer that already has a session does **not** create a second
+  session, even when the retry arrives on another listening address: the loop
+  sends a `SessionSignal::Resend` to the existing session, which retransmits its
+  current packet. This keeps the TID stable for the client and prevents
+  task/port exhaustion from retried requests.
+- Each session gets its own ephemeral UDP socket (the TID), an event session ID,
+  a `JoinSet` slot and a semaphore permit. A specific listener address is reused
+  as the session socket address, so a multi-homed client sees DATA from the
+  address it contacted; wildcard listeners bind `0.0.0.0`/`::` and let the OS
+  pick the source address.
 - Global concurrency is bounded by `max_sessions`; a per-IP cap of 8 further
   limits one peer. Rejected requests receive a small ERROR packet and an
   event/log entry.
@@ -144,20 +156,41 @@ The GUI crate stays deliberately small:
   `ui/icons.slint` embeds Material Design icon path data, so no image decoder or
   extra image files are needed at runtime.
 - The service status is a dedicated chip at the far left of the toolbar; the
-  status bar keeps the read-only hint or the last error, the bind address and
-  the clickable root selector.
-- `src/main.rs` owns the Slint models (`LogRow`, `TransferRow`, `RecentDir`),
-  translates `TftpEvent`s and `ServerStatus` into UI state, and keeps the UI
-  thread free of blocking calls. Window controls call `slint::Window` methods
-  (`set_minimized`, `set_maximized`) on the UI thread; close requests quit the
-  event loop so the normal window-close shutdown path runs.
+  status bar keeps the read-only hint or the last error, the bound address(es)
+  and the clickable root selector (last path component, full path in the
+  settings dialog and recent-directory menu).
+- The settings dialog edits `port`, the multi-select bind address list, the
+  root, the block size, the timeout and the maximum session count. The address
+  picker always offers `0.0.0.0` ("全部网络") and `127.0.0.1` ("本地回环"), merges
+  the discovered interface addresses and never drops a selected address that
+  discovery did not report. The root field has a 浏览… button backed by a native
+  directory dialog.
+- `src/main.rs` owns the Slint models (`LogRow`, `TransferRow`, `RecentDir`,
+  `AddressOption`), translates `TftpEvent`s and `ServerStatus` into UI state,
+  and keeps the UI thread free of blocking calls. Window controls call
+  `slint::Window` methods (`set_minimized`, `set_maximized`) on the UI thread;
+  close requests quit the event loop so the normal window-close shutdown path
+  runs.
+- `src/netif.rs` discovers interface addresses on a background thread; the UI
+  timer merges the result into the picker. It asks the platform runtime for the
+  list (Windows PowerShell + .NET `NetworkInterface`, `hostname -I` on Unix) and
+  parses only IP literals; failure is not fatal.
+- `src/folder_picker.rs` runs the native directory dialog in a helper process on
+  a background thread and validates that the result is a directory; the UI timer
+  applies it to the settings form. Both helpers are fixed, absolute commands
+  without a shell, with the initial directory passed via the environment.
 - `src/recent.rs` persists at most eight canonicalised root directories
   (most-recent first). It is local UI state, not part of `ServerConfig`, and
   write failures are ignored so a read-only profile still runs the panel.
+- The GUI is a windowed-subsystem binary on Windows (`windows_subsystem =
+  "windows"`), so starting the panel does not allocate a console window.
 
-Dialogs and the drop-down are sibling rectangles inside the same Slint window
-rather than separate native windows; this keeps the software renderer and DPI
-handling simple and guarantees they render above the main layout.
+Dialogs and the drop-downs (recent roots, bind address picker) are sibling
+rectangles inside the same Slint window rather than separate native windows;
+this keeps the software renderer and DPI handling simple and guarantees they
+render above the main layout. The layout relies on explicit positions for sized
+boxes that are not managed by a layout (borders and progress fills), because a
+sized child without `x`/`y` is centred by the renderer.
 
 ## GUI threading
 
@@ -190,6 +223,14 @@ handling simple and guarantees they render above the main layout.
 same `validate()` is used by the daemon, the GUI and tests, so a configuration
 accepted by one front-end is accepted by the other. CLI overrides are applied and
 re-validated. TOML syntax errors include the file path via `ConfigLoadError`.
+
+The listen configuration is `port` plus `bind_addresses` (a list of IP
+addresses). Exact duplicates are dropped and a wildcard (`0.0.0.0` / `::`)
+collapses the other addresses of its family in `effective_bind_addresses()`;
+multicast/broadcast entries and lists longer than 16 are rejected. The 0.1.0
+`bind_address` key is gone, so an old file fails with an unknown-field error
+instead of silently binding something else. Daemon `--bind` replaces the whole
+list with one address and port.
 
 ## Logging
 

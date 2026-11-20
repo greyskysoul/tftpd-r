@@ -22,3 +22,11 @@ export struct RecentDir {
     name: string,
     active: bool,
 }
+
+// One selectable bind address in the settings dialog. `address` is the
+// canonical IP literal the Rust side parses back into `ServerConfig`.
+export struct AddressOption {
+    label: string,
+    address: string,
+    selected: bool,
+}

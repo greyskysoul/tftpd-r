@@ -38,6 +38,10 @@ Implemented:
   (symlinks/junctions) are rejected. A leading `/` or `\` (legacy clients often
   send `get /file.bin`) is mapped to the configured root instead of being
   rejected; it cannot bypass the traversal checks.
+- One or more UDP listen addresses sharing a single port (default
+  `127.0.0.1:69`, the standard TFTP port). Binding is all-or-nothing; a
+  permission error on a privileged port produces a non-forcing hint to choose
+  an unprivileged port.
 - Bounded concurrency (global and per-peer), per-transfer deadline, file-size
   limit and bounded event ring.
 - Headless daemon: TOML configuration, `check-config`, `print-default-config`,
@@ -59,10 +63,12 @@ Not implemented in this release (deliberate, tracked in `docs/adr/`):
   management and user/role management.
 - `netascii` mode (`docs/adr/0006-octet-only.md`).
 
-Requirements accepted for the next release — port 69 as the default with a
-non-forcing hint when privileges are missing, and multi-select bind addresses —
-are recorded in [docs/roadmap.md](docs/roadmap.md). They are **not** part of
-0.1.0. Configuration stays TOML; an INI format with a fixed location was
+Port 69 as the default (with a non-forcing hint when privileges are missing) and
+multi-select bind addresses are implemented on `main` for the unreleased `0.2.0`
+and recorded in [docs/roadmap.md](docs/roadmap.md) and
+[docs/adr/0007](docs/adr/0007-default-port-69.md) /
+[docs/adr/0008](docs/adr/0008-multiple-bind-addresses.md). They are **not** part
+of 0.1.0. Configuration stays TOML; an INI format with a fixed location was
 considered and dropped.
 
 ## Requirements
@@ -155,12 +161,20 @@ uses safe defaults. The panel is in Chinese and is organized as follows:
 - **Main area**: the activity log (newest event first) above the active transfer
   table (file, client, progress, size, state).
 - **Status bar**: a read-only hint, or the last error when there is one, on the
-  left; bind address and the current, absolute root directory on the right.
-  Click the root path to choose another directory from the recently used list.
+  left; the bind address(es) and the current root directory (last path
+  component) on the right. Click the root name to choose another directory from
+  the recently used list.
 - **Settings dialog**: validated with the same `ServerConfig::validate` rules as
-  the daemon. Changes are stored for the next start or restart; the running
-  server is not reconfigured in place. **About** shows the version, feature
-  summary and third-party icon attribution.
+  the daemon. A port field plus a multi-select address picker (always offering
+  "全部网络 (0.0.0.0)" and "本地回环 (127.0.0.1)" and the addresses discovered on
+  this machine), a directory picker button for the root, and the transfer
+  limits. Every selected address shares the single port field. Changes are
+  stored for the next start or restart; the running server is not reconfigured
+  in place. **About** shows the version, feature summary and third-party icon
+  attribution.
+- **Activity log**: every transfer logs a start line and a completion or failure
+  line (file, peer, size and duration), even when the start event was already
+  evicted from the bounded event ring.
 
 Recently used roots are kept (most recent first, at most 8) in
 `%APPDATA%\TftpdR\recent-dirs.txt` on Windows and
@@ -188,7 +202,8 @@ the daemon (`print-default-config` prints exactly that file). Fields:
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| `bind_address` | `127.0.0.1:69` | UDP. Keep loopback unless intentionally serving a LAN. Port 69 needs administrator/root; an unprivileged run must choose another port (for example `6969`) and is told so on failure. |
+| `port` | `69` | UDP port shared by every listen address. On Linux port 69 needs root (`CAP_NET_BIND_SERVICE`); Windows normally allows it for a normal user unless the port is reserved. A process that may not bind it gets an actionable failure and must choose another port (for example `6969`); nothing changes automatically. |
+| `bind_addresses` | `["127.0.0.1"]` | One or more interface addresses (at most 16). `0.0.0.0`/`::` listen on every interface of that family; other addresses of the same family are then redundant and ignored. Multicast/broadcast are rejected. Keep loopback unless intentionally serving a LAN. |
 | `root_dir` | `tftp-root` | Must exist and be a directory. |
 | `allow_upload` | `false` | Must stay `false` in this release; `true` is a validation error. |
 | `overwrite` | `false` | Requires uploads; rejected in this release. |
@@ -202,22 +217,31 @@ the daemon (`print-default-config` prints exactly that file). Fields:
 | `event_buffer` | 1024 | In-memory event ring size (16..=65536). |
 
 Unknown keys are rejected so typos do not silently fall back to defaults.
+Configurations written for 0.1.0 still use `bind_address = "127.0.0.1:6969"`;
+that key was replaced by `port` plus `bind_addresses` and is now rejected with
+an unknown-field error. See [docs/roadmap.md](docs/roadmap.md) and
+[docs/adr/0008](docs/adr/0008-multiple-bind-addresses.md) for the rationale.
 
 ## Ports and firewall
 
-- The server listens on **UDP** `bind_address` (default `127.0.0.1:69`). Port
-  `69` is privileged on Windows and Linux and is the product default; a start
-  without administrator/root fails with a hint that names an unprivileged port
-  (for example `6969`) but changes nothing automatically.
+- The server listens on **UDP** on every configured `bind_addresses` entry at
+  `port` (default `127.0.0.1:69`). Port `69` is the product default: Linux
+  requires root or `CAP_NET_BIND_SERVICE`, while Windows normally allows a normal
+  user to bind it unless it is reserved by the system. A process that may not
+  bind the port gets a hint naming an unprivileged port (for example `6969`) but
+  nothing is changed automatically. If several addresses bind the same port, a
+  firewall rule is needed for each reachable address.
 - Each transfer uses an additional **ephemeral UDP port** (the transfer ID) in
-  the same address family as the listener. A firewall must allow inbound UDP to
-  the listening port *and* the return traffic from those ephemeral ports. On
-  Windows Defender Firewall this normally follows automatically for
-  stateful/loopback traffic, but a restrictive policy may require an explicit
-  rule; this was not tested in this repository.
+  the same address family as the listener that received the request. A firewall
+  must allow inbound UDP to the listening port *and* the return traffic from
+  those ephemeral ports. On Windows Defender Firewall this normally follows
+  automatically for stateful/loopback traffic, but a restrictive policy may
+  require an explicit rule; this was not tested in this repository.
 - Binding `0.0.0.0` (or `[::]`) exposes the service to the network; there is no
   authentication in TFTP, so only the exported tree and read-only access limit
-  what a client can reach.
+  what a client can reach. Binding a list of specific addresses never exposes
+  more interfaces than the listed ones, and a partial bind failure fails the
+  whole start instead of quietly serving fewer addresses.
 
 ## Security defaults
 
@@ -246,10 +270,12 @@ cargo build --workspace --release
 ```
 
 The test suite includes codec boundary tests, configuration/path-sandbox tests,
-26 loopback-UDP RRQ integration tests (including block-number wraparound,
-shutdown cancellation and legacy `/file` requests), daemon CLI/config
-integration tests and GUI tests for the embedded controller (start/stop,
-asynchronous restart, failed restart) and the recent-root persistence. See
+29 loopback-UDP RRQ integration tests (including block-number wraparound,
+shutdown cancellation, legacy `/file` requests, multiple listeners on one port
+and all-or-nothing binding), daemon CLI/config integration tests and GUI tests
+for the embedded controller (start/stop, asynchronous restart, failed restart),
+the recent-root persistence, interface-address parsing, folder-selection
+validation and the address-picker model. See
 [docs/testing.md](docs/testing.md) for what was actually executed and what still
 needs manual/target-machine verification.
 

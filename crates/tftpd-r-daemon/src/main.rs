@@ -37,7 +37,16 @@ fn check_config(args: &CheckConfigArgs) -> ExitCode {
     match config_file::load(&args.config) {
         Ok(config) => {
             println!("configuration OK: {}", args.config.display());
-            println!("  bind_address:            {}", config.bind_address);
+            println!("  port:                    {}", config.port);
+            println!(
+                "  bind_addresses:          {}",
+                config
+                    .bind_addresses
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
             println!("  root_dir:                {}", config.display_root());
             println!("  mode:                    read-only (uploads disabled)");
             println!("  block_size (max):        {}", config.block_size);
@@ -86,7 +95,7 @@ fn run_serve(args: ServeArgs) -> Result<()> {
 async fn serve_async(args: ServeArgs) -> Result<()> {
     let mut config = config_file::load(&args.config).context("could not load configuration")?;
     config_file::apply_overrides(&mut config, &args).context("invalid command line override")?;
-    let bind = config.bind_address;
+    let bind = config.bind_summary();
     let root = config.display_root();
 
     let events: Arc<dyn EventSink> = Arc::new(logging::TracingSink);
@@ -94,7 +103,15 @@ async fn serve_async(args: ServeArgs) -> Result<()> {
     let server = TftpServer::start(config, events)
         .await
         .context("could not start the TFTP server")?;
-    info!(local = %server.local_addr(), "server running; press Ctrl-C to stop");
+    info!(
+        local = %server
+            .local_addrs()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", "),
+        "server running; press Ctrl-C to stop"
+    );
 
     let mut status = server.status_receiver();
     let outcome = tokio::select! {
@@ -131,7 +148,7 @@ mod tests {
     #[test]
     fn wait_for_failure_reports_channel_closure() {
         let (tx, mut rx) = watch::channel(ServerStatus::Running {
-            local_addr: "127.0.0.1:1".parse().expect("addr"),
+            local_addrs: vec!["127.0.0.1:1".parse().expect("addr")],
         });
         drop(tx);
         let runtime = tokio::runtime::Builder::new_current_thread()

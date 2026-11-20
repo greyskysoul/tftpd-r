@@ -134,7 +134,7 @@ pub enum ServerError {
     /// actionable, non-forcing hint instead of a generic bind failure. The
     /// server never retries on another port and never elevates itself.
     #[error(
-        "cannot bind UDP {addr}: permission denied; port {port} is privileged and needs administrator/root privileges. Run with sufficient privileges or choose an unprivileged port such as 6969 (the configuration is not changed automatically)",
+        "cannot bind UDP {addr}: permission denied; port {port} is privileged and this process may not bind it. Run with sufficient rights (administrator/root) or choose an unprivileged port such as 6969 (the configuration is not changed automatically)",
         port = .addr.port()
     )]
     PrivilegedPort {

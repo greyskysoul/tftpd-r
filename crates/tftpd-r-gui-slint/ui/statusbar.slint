@@ -14,7 +14,12 @@ export component StatusBar inherits Rectangle {
     height: 40px;
     background: Theme.panel-bg;
 
+    // Explicit x/y: a sized child without a position is centred by the
+    // renderer, which drew this border through the middle of the bar.
     Rectangle {
+        x: 0;
+        y: 0;
+        width: 100%;
         height: 1px;
         background: Theme.panel-border;
     }

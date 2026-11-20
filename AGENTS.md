@@ -16,10 +16,11 @@
 | Phase 6 IPC | ⏳ 未开始 | GUI 仅 Embedded 模式；无 named pipe / daemon 控制 |
 | Phase 7 WRQ 上传 | ⏳ 未开始 | 默认且唯一行为是只读；`allow_upload=true` 被配置校验拒绝 |
 | Phase 8 发布/目标机 | 🟡 部分完成 | 0.1.0 已发布（[GitHub Release](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.1.0)，Windows/Linux × x64/arm64 四目标原生构建）；CI 在 windows-latest（MSVC x64）与 ubuntu-latest（GNU x64）上 fmt/clippy/test 全绿；目标机人工验收（真实/老式客户端、LAN/防火墙、RDP、IME、其他 DPI）未做 |
+| 0.2.0 R1/R2 | ✅ 已实现（未发布） | 默认端口 69 + 非强制提示（ADR 0007）；`port` + `bind_addresses` 多监听、GUI 多选地址选择器与目录选择器（ADR 0008）；配置格式破坏性变更，`bind_address` 已删除 |
 
 已验证环境：Windows 11（10.0.26300）+ Rust 1.100.0 `x86_64-pc-windows-gnu` + MinGW-w64 GCC 15.3 + Slint 1.19.0；CI 另在 `windows-latest`（MSVC x64）与 `ubuntu-latest`（GNU x64）跑通 fmt/clippy/test，并在原生 arm64 runner 上构建 arm64 产物。**未验证**：MSVC、Linux 与 arm64 产物的**运行**（CI 只对 x64 跑测试，arm64 仅编译）、GUI 在 Linux 桌面上的运行、真实/外部 TFTP 客户端互操作、Windows Service、RDP、69 端口权限、真实键盘/IME 输入、其他 DPI/语言下的字体渲染与无障碍。不要在文档或回复中把这些写成已通过。
 
-最近一次完整验证结果：`cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`（105 passed）、`cargo build --workspace --release` 全部通过；daemon 端到端以 `/image.bin` 形式下载 5000 字节并 Ctrl-Break 优雅退出；GUI debug/release `--smoke-test` 退出码均为 0；GUI 面板的启动/停止/重启、真实 2 MiB TFTP 传输、设置/关于对话框、最近根目录切换、自定义窗口控件（最小化/最大化/还原/关闭）和窗口关闭均在本机按 `docs/testing.md` 的人工步骤验证。CI 于 2026-11-20 在 Windows MSVC 与 Linux GNU 上复跑同一套命令并全绿，`v0.1.0` 由 GitHub Actions 构建四个归档并发布（`SHA256SUMS` 已抽查核对）。执行新改动后必须重新运行并更新真实数字。
+最近一次完整验证结果（2026-11-20 第二轮，0.2.0 改动）：`cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`（**131 passed**：core 单元 63、RRQ UDP 集成 29、daemon 单元 10、daemon CLI 集成 5、GUI 单元 23、doctest 1）、`cargo build --workspace --release` 全部通过；多监听 daemon 以 `127.0.0.1` 与 `192.168.3.17` 的**同一临时端口**各下载 5000 字节（`/image.bin`）并 Ctrl-Break 优雅退出；GUI debug/release `--smoke-test` 退出码 0、stderr 为空，PE 子系统为 Windows GUI（daemon 仍为 console）；`PrintWindow` 截图确认状态栏根目录仅显示末级目录名、状态栏横线修复、设置对话框的新端口/多选地址/浏览按钮，以及地址选择器列出 `192.168.3.17` 与两个全局 IPv6 地址。进度条方向用合成传输行（`TFTPD_R_GUI_PREVIEW=transfer`）截图确认左侧起算；**未验证**：真实鼠标点击、原生目录对话框、GUI 中的绑定失败提示、真实多网卡切换、真实 GUI 传输在修复后的渲染、Linux 上的低端口权限路径。此前的 0.1.0 人工验收记录（真实 2 MiB 传输、窗口控件、最近根目录等）见 `docs/testing.md`。执行新改动后必须重新运行并更新真实数字。
 
 ## 2. 仓库地图
 
@@ -34,8 +35,8 @@
 │   ├── architecture.md            # crate 边界、生命周期、数据流、线程模型
 │   ├── security.md                # 威胁模型、沙箱、残余风险
 │   ├── testing.md                 # 实际执行记录与未验证项
-│   ├── roadmap.md                 # 已接受但未实现的需求（端口 69、多选绑定）
-│   └── adr/0001–0006              # 已接受的决策（IPC 延后、上传关闭、octet only 等）
+│   ├── roadmap.md                 # 0.2.0 已实现待发布项与后续未实现项
+│   └── adr/0001–0008              # 已接受的决策（IPC 延后、上传关闭、octet only、端口 69、多地址绑定等）
 ├── crates/
 │   ├── tftpd-r-core/             # 无 GUI/daemon/IPC 依赖
 │   │   ├── src/{lib,config,error,events,filesystem,server,session}.rs
@@ -45,7 +46,7 @@
 │   │   ├── src/{main,cli,config_file,logging,shutdown}.rs
 │   │   └── tests/cli.rs           # 运行编译后的二进制
 │   └── tftpd-r-gui-slint/        # Slint 面板 + EmbeddedController
-│       ├── src/{main,controller,recent}.rs
+│       ├── src/{main,controller,recent,netif,folder_picker}.rs
 │       ├── ui/{app,titlebar,toolbar,statusbar,logs,transfers,settings,about,
 │       │       root-menu,widgets,theme,icons,models}.slint
 │       ├── ui/icons/{LICENSE,README.md}   # Material Design 图标来源与 Apache-2.0
@@ -87,15 +88,17 @@
 
 - `ServerConfig` 使用 serde `deny_unknown_fields` + 安全默认值；`validate()` 是 daemon、GUI 和测试共用的唯一规则来源。
 - `allow_upload=true`、`overwrite=true` 当前必须是**配置错误**（上传尚未实现，不能给运维错误暗示）。
-- `bind_address` 默认 `127.0.0.1:69`（标准 TFTP 端口，需要管理员/root）；端口 0 仅用于测试/临时实例；`0.0.0.0` 属于明确告知的部署选择。绑定特权端口失败必须给出可操作提示，**不得**静默回退、自动提权或改写配置（ADR 0007）。
-- `root_dir` 必须存在且为目录；端口 69 在 Windows 需要管理员权限（README/security 已说明）。
+- 监听配置是 `port` + `bind_addresses`（`Vec<IpAddr>`，1..=16 个）。默认 `127.0.0.1:69`（Linux 需 root/CAP_NET_BIND_SERVICE，Windows 通常允许普通用户但端口可能被系统保留）；端口 0 仅用于测试/临时实例，首个成功监听的端口会被其余地址复用。重复地址去重；同族通配 `0.0.0.0`/`::` 折叠该族其他地址；多播/广播拒绝（ADR 0008）。绑定**全有或全无**：任一地址失败即放弃全部已绑定 socket 并返回分类错误，不得静默只服务部分地址。
+- 绑定特权端口失败必须给出可操作提示，**不得**静默回退、自动提权或改写配置（ADR 0007）。
+- GUI 的网卡枚举与目录选择通过固定绝对路径的 PowerShell/.NET（Unix 为 `hostname`/`zenity`）辅助进程完成，后台线程执行；不得引入 shell、用户可控参数、提权或手写 unsafe。辅助进程失败时必须降级为两个特殊地址/手动输入，而不是崩溃。
+- `root_dir` 必须存在且为目录；低端口权限按平台处理（Linux 需 root/CAP_NET_BIND_SERVICE；Windows 通常允许普通用户，但端口可能被保留），README/security 与 ADR 0007 的表述必须与此一致，不要笼统写成“Windows 需要管理员”。
 - `config.example.toml` 由 daemon `include_str!` 内嵌，`print-default-config` 必须与文件完全一致；修改示例时同步测试。
 
 ### 3.4 资源、事件与生命周期
 
 - 全局 `max_sessions` 信号量 + 每 IP 最多 8 个并发会话；请求大小、文件大小、重传次数、总时长、事件环、GUI 日志行数都有上限。新增资源必须有明确上限。
 - `EventSink::emit` 必须短小、非阻塞、不得 panic；GUI 通过 `EventBus::drain_since(seq)` 轮询，不直接由 Tokio task 改 UI。
-- 生命周期：`Starting → Running → Stopping → Stopped`（或 `Failed`）；`ServerHandle::stop()` 幂等，先取消 accept loop，再在 `shutdown_grace_secs` 内 drain，最后 abort 剩余任务并释放 socket/permit/文件。
+- 生命周期：`Starting → Running { local_addrs } → Stopping → Stopped`（或 `Failed`）；每个监听地址一个 accept loop，peer 表/会话上限/会话 ID 全局共享，会话 socket 绑定该监听地址（非通配时）；`ServerHandle::stop()` 幂等，先取消全部 accept loop，再在 `shutdown_grace_secs` 内并行 drain，最后 abort 剩余任务并释放 socket/permit/文件。
 - GUI 的 `stop()` 必须异步/轮询，不能阻塞 UI 线程等待宽限期；窗口关闭后 `EmbeddedController::shutdown()` 负责最终清理。
 
 ### 3.5 代码与依赖
@@ -131,7 +134,7 @@ cargo test --workspace
 cargo build --workspace --release
 ```
 
-当前基线是 **105 tests passed**（core 单元 53、RRQ UDP 集成 26、daemon 单元 10、daemon CLI 集成 5、GUI 单元 10（控制器 4 + 最近目录 6）、doctest 1）。新增测试后更新 `docs/testing.md` 和本文件的数字。
+当前基线是 **131 tests passed**（core 单元 63、RRQ UDP 集成 29、daemon 单元 10、daemon CLI 集成 5、GUI 单元 23（控制器 4 + 最近目录 6 + 网卡枚举 4 + 目录选择 2 + 地址模型 7）、doctest 1）。新增测试后更新 `docs/testing.md` 和本文件的数字。
 
 其他有用命令：
 
@@ -156,14 +159,14 @@ cargo run -p tftpd-r-gui-slint -- --smoke-test
 - **路径沙箱**：`../`、`/../`、双分隔符、盘符、ADS、设备名、符号链接/reparse、大小写/前缀混淆、root 前缀正向与反向、大小限制。
 - **session/server**：重传、重复 ACK、错误 TID、重复 RRQ、零长度终止块、块号回绕、并发、取消/停止、超时耗尽、事件。
 - **daemon**：CLI 解析、配置错误退出码（0/1/2）、默认配置与示例一致、二进制冒烟。
-- **GUI**：控制器契约（start/stop/重复 start/无效配置/异步 restart/restart 失败上报）与 `recent.rs`（顺序、去重、上限、持久化、canonicalize、失效目录清理）；事件洪泛、真实键盘/IME、布局与字体只能靠目标机人工验收，需在 `docs/testing.md` 如实标注。
+- **GUI**：控制器契约（start/stop/重复 start/无效配置/异步 restart/restart 失败上报）、`recent.rs`（顺序、去重、上限、持久化、canonicalize、失效目录清理）、`netif.rs`（IP 解析/过滤/排序）、`folder_picker.rs`（空选择与非目录拒绝）以及地址选择模型（两个特殊项恒定存在、选中但未发现的地址保留、摘要截断）；事件洪泛、真实键盘/IME、真实网卡枚举、系统目录对话框、布局与字体只能靠目标机/人工验收，需在 `docs/testing.md` 如实标注。
 - 时间相关测试目前使用真实计时器（1 s 级别），避免引入随机 sleep；新增测试尽量确定性。
 
 ## 6. 后续路线与优先级
 
-1. **0.2.0 需求（已接受，未实现，详见 [docs/roadmap.md](docs/roadmap.md)）**
-   - **R1 默认端口 69**：默认绑定端口改为 69；权限不足时向用户提示可改用非特权端口（如 6969），但**不得强制**、不得静默回退、不得自动提权、不得改写配置。需要新 ADR + 安全评审（默认值变更）。
-   - **R2 多选绑定地址**：GUI 用多选下拉框替代单一地址输入，自动导入本机各网卡 IP，并始终提供「全部网络 (0.0.0.0)」与「本地回环 (127.0.0.1)」两个特殊项；可多选。这是服务端改造（多监听 socket、部分失败状态），不只是 UI 改动。
+1. **0.2.0 需求（R1/R2 已在 main 实现，待发布；详见 [docs/roadmap.md](docs/roadmap.md)）**
+   - **R1 默认端口 69 ✅**：默认端口 69；权限不足时提示可改用非特权端口（如 6969），不强制、不回退、不提权、不改写配置（ADR 0007）。
+   - **R2 多选绑定地址 ✅**：`port` + `bind_addresses` 多监听；GUI 多选选择器自动导入网卡 IP，并始终提供「全部网络 (0.0.0.0)」与「本地回环 (127.0.0.1)」（ADR 0008）。绑定全有或全无，不做部分失败服务。
    - **R3 已取消**：INI 配置与固定位置 `~/.tftpdr.ini` 的需求经确认撤销，配置格式保持 TOML；GUI 继续读取工作目录的 `config.toml`。不要再实现或重新引入 INI 支持。
 2. **Phase 6：本机 IPC + GUI daemon 控制**
    - 新建 `tftpd-r-control-protocol`（版本化 DTO、长度前缀 framing、请求 ID、最大消息、错误码）。

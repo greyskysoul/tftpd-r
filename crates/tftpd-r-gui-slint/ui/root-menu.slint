@@ -72,6 +72,11 @@ export component RootMenu inherits Rectangle {
 
             ScrollView {
                 vertical-stretch: 1;
+                // Long paths are elided below; a horizontal scrollbar would
+                // shift the whole list while dragging and make the overlay look
+                // like it jumps, so horizontal panning is disabled.
+                horizontal-scrollbar-policy: always-off;
+                mouse-drag-pan-enabled: false;
                 VerticalLayout {
                     spacing: 2px;
                     if root.items.length == 0 : Text {
@@ -98,17 +103,22 @@ export component RootMenu inherits Rectangle {
                                 icon-size: 17px;
                             }
                             VerticalLayout {
+                                horizontal-stretch: 1;
                                 spacing: 1px;
                                 Text {
                                     text: dir.name;
                                     color: Theme.text-strong;
                                     font-size: 12px;
                                     font-weight: 600;
+                                    width: 100%;
+                                    overflow: elide;
                                 }
                                 Text {
                                     text: dir.path;
                                     color: Theme.text-faint;
                                     font-size: 10px;
+                                    width: 100%;
+                                    overflow: elide;
                                 }
                             }
                             Rectangle { horizontal-stretch: 1; background: transparent; }

@@ -53,13 +53,18 @@ pub fn load(path: &Path) -> Result<ServerConfig, ConfigLoadError> {
 
 /// Apply `--bind`/`--root` command line overrides and re-validate.
 ///
+/// `--bind` replaces the whole configured listen set with that one address and
+/// port; the file cannot be partially overridden because the CLI has no notion
+/// of "keep the other addresses".
+///
 /// # Errors
 ///
 /// Returns [`ConfigLoadError::Invalid`] when an override makes the configuration
 /// invalid (for example a root directory that does not exist).
 pub fn apply_overrides(config: &mut ServerConfig, args: &ServeArgs) -> Result<(), ConfigLoadError> {
     if let Some(bind) = args.bind {
-        config.bind_address = bind;
+        config.bind_addresses = vec![bind.ip()];
+        config.port = bind.port();
     }
     if let Some(root) = &args.root {
         config.root_dir = root.clone();
@@ -91,7 +96,8 @@ mod tests {
         let on_disk = include_str!("../../../config.example.toml");
         assert_eq!(DEFAULT_CONFIG_TOML, on_disk);
         assert!(DEFAULT_CONFIG_TOML.contains("allow_upload = false"));
-        assert!(DEFAULT_CONFIG_TOML.contains("bind_address = \"127.0.0.1:69\""));
+        assert!(DEFAULT_CONFIG_TOML.contains("port = 69"));
+        assert!(DEFAULT_CONFIG_TOML.contains("bind_addresses = [\"127.0.0.1\"]"));
     }
 
     #[test]
@@ -108,7 +114,9 @@ mod tests {
         let parsed =
             ServerConfig::from_toml_str(&text).expect("default configuration must be valid");
         assert!(!parsed.allow_upload);
-        assert_eq!(parsed.bind_address.port(), 69);
+        assert_eq!(parsed.port, 69);
+        assert_eq!(parsed.bind_addresses.len(), 1);
+        assert!(parsed.bind_addresses[0].is_loopback());
     }
 
     #[test]
@@ -142,9 +150,13 @@ mod tests {
             ..ServerConfig::default()
         };
         let mut args = serve_args(dir.path().join("config.toml"));
-        args.bind = Some("127.0.0.1:0".parse().expect("addr"));
+        args.bind = Some("0.0.0.0:6969".parse().expect("addr"));
         apply_overrides(&mut config, &args).expect("valid overrides");
-        assert_eq!(config.bind_address, "127.0.0.1:0".parse().expect("addr"));
+        assert_eq!(config.port, 6969);
+        assert_eq!(
+            config.bind_addresses,
+            vec!["0.0.0.0".parse::<std::net::IpAddr>().expect("ip")]
+        );
 
         args.root = Some(dir.path().join("missing"));
         assert!(apply_overrides(&mut config, &args).is_err());

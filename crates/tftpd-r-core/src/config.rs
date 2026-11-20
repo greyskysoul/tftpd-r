@@ -9,12 +9,21 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-/// Default bind address: loopback only, standard TFTP port 69.
+/// Default UDP port: the standard TFTP port.
 ///
 /// Port 69 is privileged on Windows (administrator token) and Unix (root or
 /// `CAP_NET_BIND_SERVICE`). A start without those privileges fails with an
 /// actionable hint; the server never falls back to another port on its own.
-pub const DEFAULT_BIND_ADDRESS: (IpAddr, u16) = (IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 69);
+pub const DEFAULT_PORT: u16 = 69;
+
+/// Default listen address: loopback only.
+pub const DEFAULT_BIND_ADDRESSES: [IpAddr; 1] = [IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)];
+
+/// Upper bound for the number of configured listen addresses.
+///
+/// Every address owns a listening socket and its own accept loop, so the list
+/// is bounded like every other resource in this server.
+pub const MAX_BIND_ADDRESSES: usize = 16;
 
 /// Minimum allowed `block_size` (RFC 2348).
 pub const MIN_CONFIG_BLOCK_SIZE: u16 = 8;
@@ -44,9 +53,16 @@ pub const DEFAULT_EVENT_BUFFER: usize = 1024;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ServerConfig {
-    /// UDP address the server listens on. Port `0` is accepted for tests and
-    /// assigns an ephemeral port; a real deployment must use a fixed port.
-    pub bind_address: SocketAddr,
+    /// UDP port shared by every listen address. Port `0` is accepted for tests
+    /// and temporary instances: the first listener picks an ephemeral port,
+    /// which is then reused for the remaining addresses. A real deployment
+    /// must use a fixed port.
+    pub port: u16,
+    /// Interface addresses to listen on. Must not be empty. The wildcard
+    /// addresses `0.0.0.0` / `::` listen on every interface of their family
+    /// and collapse the other addresses of that family; exact duplicates are
+    /// de-duplicated (see [`Self::effective_bind_addresses`]).
+    pub bind_addresses: Vec<IpAddr>,
     /// Directory exposed to TFTP clients. Must exist and be a directory.
     pub root_dir: PathBuf,
     /// WRQ uploads. Must remain `false` in this release; enabling it is a
@@ -75,7 +91,8 @@ pub struct ServerConfig {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            bind_address: SocketAddr::new(DEFAULT_BIND_ADDRESS.0, DEFAULT_BIND_ADDRESS.1),
+            port: DEFAULT_PORT,
+            bind_addresses: DEFAULT_BIND_ADDRESSES.to_vec(),
             root_dir: PathBuf::from("tftp-root"),
             allow_upload: false,
             overwrite: false,
@@ -116,6 +133,60 @@ impl ServerConfig {
         usize::from(self.block_size)
     }
 
+    /// Listen addresses after de-duplication and wildcard collapsing.
+    ///
+    /// Addresses keep their configured order. An exact duplicate is dropped. If
+    /// `0.0.0.0` is configured, every other IPv4 address is redundant and is
+    /// dropped (the wildcard already covers it); `::` behaves the same way for
+    /// IPv6. This keeps the listener set minimal without rejecting a
+    /// configuration that an operator wrote understandably.
+    #[must_use]
+    pub fn effective_bind_addresses(&self) -> Vec<IpAddr> {
+        let has_ipv4_wildcard = self
+            .bind_addresses
+            .iter()
+            .any(|address| matches!(address, IpAddr::V4(ip) if ip.is_unspecified()));
+        let has_ipv6_wildcard = self
+            .bind_addresses
+            .iter()
+            .any(|address| matches!(address, IpAddr::V6(ip) if ip.is_unspecified()));
+        let mut effective: Vec<IpAddr> = Vec::with_capacity(self.bind_addresses.len());
+        for address in &self.bind_addresses {
+            if effective.contains(address) {
+                continue;
+            }
+            match address {
+                IpAddr::V4(ip) if has_ipv4_wildcard && !ip.is_unspecified() => continue,
+                IpAddr::V6(ip) if has_ipv6_wildcard && !ip.is_unspecified() => continue,
+                _ => effective.push(*address),
+            }
+        }
+        effective
+    }
+
+    /// Configured socket addresses (`effective_bind_addresses` + `port`).
+    #[must_use]
+    pub fn bind_socket_addrs(&self) -> Vec<SocketAddr> {
+        self.effective_bind_addresses()
+            .into_iter()
+            .map(|address| SocketAddr::new(address, self.port))
+            .collect()
+    }
+
+    /// Compact operator-facing bind description, for logs and the status bar.
+    #[must_use]
+    pub fn bind_summary(&self) -> String {
+        let addrs = self.bind_socket_addrs();
+        if addrs.len() <= 3 {
+            return addrs
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+        }
+        format!("{} and {} more", addrs[0], addrs.len().saturating_sub(1))
+    }
+
     /// Validate every field, including the root directory's existence.
     ///
     /// # Errors
@@ -154,8 +225,16 @@ impl ServerConfig {
         if self.overwrite {
             return Err(ConfigError::OverwriteNotSupported);
         }
-        if self.bind_address.ip().is_multicast() {
-            return Err(ConfigError::MulticastBind(self.bind_address));
+        if self.bind_addresses.is_empty() {
+            return Err(ConfigError::NoBindAddresses);
+        }
+        if self.bind_addresses.len() > MAX_BIND_ADDRESSES {
+            return Err(ConfigError::TooManyBindAddresses(self.bind_addresses.len()));
+        }
+        for address in &self.bind_addresses {
+            if address.is_multicast() || matches!(address, IpAddr::V4(ip) if ip.is_broadcast()) {
+                return Err(ConfigError::BindNotUnicast(*address));
+            }
         }
         let metadata = std::fs::metadata(&self.root_dir).map_err(|error| match error.kind() {
             std::io::ErrorKind::NotFound => ConfigError::RootMissing(self.root_dir.clone()),
@@ -256,9 +335,15 @@ pub enum ConfigError {
         "overwrite=true is not supported: it requires uploads, which are disabled in this release"
     )]
     OverwriteNotSupported,
+    /// No listen address was configured.
+    #[error("bind_addresses must contain at least one address")]
+    NoBindAddresses,
+    /// More addresses than the server accepts.
+    #[error("bind_addresses supports at most {MAX_BIND_ADDRESSES} addresses, got {0}")]
+    TooManyBindAddresses(usize),
     /// Multicast/broadcast bind addresses are not supported.
-    #[error("bind_address {0} is not a unicast address")]
-    MulticastBind(SocketAddr),
+    #[error("bind address {0} is not a unicast interface address")]
+    BindNotUnicast(IpAddr),
     /// Root directory does not exist.
     #[error("root_dir {0:?} does not exist")]
     RootMissing(PathBuf),
@@ -300,17 +385,28 @@ mod tests {
         assert_eq!(config.max_sessions, DEFAULT_MAX_SESSIONS);
         assert!(!config.allow_upload);
         assert!(!config.overwrite);
-        assert!(config.bind_address.ip().is_loopback());
-        assert_eq!(config.bind_address.port(), 69);
-        assert!(crate::error::is_privileged_port(config.bind_address.port()));
+        assert_eq!(config.port, 69);
+        assert_eq!(
+            config.bind_addresses,
+            vec![IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)]
+        );
+        assert!(crate::error::is_privileged_port(config.port));
+        assert!(config.effective_bind_addresses()[0].is_loopback());
     }
 
     #[test]
     fn valid_config_roundtrips_through_toml() {
         let (_dir, mut config) = temp_root();
-        config.bind_address = "0.0.0.0:6969".parse().expect("addr");
+        config.port = 6969;
+        config.bind_addresses = vec![
+            "0.0.0.0".parse().expect("addr"),
+            "::1".parse().expect("addr"),
+        ];
         config.max_sessions = 7;
         let text = config.to_toml_string().expect("serialise");
+        assert!(text.contains("bind_addresses"), "{text}");
+        assert!(text.contains("\"0.0.0.0\""), "{text}");
+        assert!(text.contains("\"::1\""), "{text}");
         let parsed = ServerConfig::from_toml_str(&text).expect("parse");
         assert_eq!(parsed, config);
     }
@@ -319,7 +415,7 @@ mod tests {
     fn unknown_fields_are_rejected() {
         let (_dir, _config) = temp_root();
         let text = r#"
-bind_address = "127.0.0.1:6969"
+bind_addresses = ["127.0.0.1"]
 root_dir = "does-not-matter"
 surprise = true
 "#;
@@ -330,6 +426,18 @@ surprise = true
     }
 
     #[test]
+    fn the_old_single_bind_address_key_is_rejected() {
+        let (_dir, _config) = temp_root();
+        let text = "bind_address = \"127.0.0.1:6969\"\nroot_dir = \"does-not-matter\"\n";
+        let error = ServerConfig::from_toml_str(text).expect_err("old key must not be accepted");
+        let message = error.to_string();
+        assert!(
+            message.contains("bind_address"),
+            "the error should name the rejected key: {message}"
+        );
+    }
+
+    #[test]
     fn missing_fields_use_safe_defaults() {
         let (dir, _config) = temp_root();
         let text = format!("root_dir = {:?}\n", dir.path().to_string_lossy());
@@ -337,8 +445,96 @@ surprise = true
         assert_eq!(parsed.block_size, 512);
         assert!(!parsed.allow_upload);
         assert!(!parsed.overwrite);
-        assert!(parsed.bind_address.ip().is_loopback());
-        assert_eq!(parsed.bind_address.port(), 69);
+        assert_eq!(parsed.port, 69);
+        assert_eq!(
+            parsed.bind_addresses,
+            vec![IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)]
+        );
+    }
+
+    #[test]
+    fn bind_addresses_are_validated() {
+        let (_dir, mut config) = temp_root();
+        config.bind_addresses = Vec::new();
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::NoBindAddresses)
+        ));
+
+        config.bind_addresses =
+            vec![IpAddr::V4(std::net::Ipv4Addr::LOCALHOST); MAX_BIND_ADDRESSES + 1];
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::TooManyBindAddresses(_))
+        ));
+
+        config.bind_addresses = vec!["224.0.0.1".parse().expect("ip")];
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::BindNotUnicast(_))
+        ));
+
+        config.bind_addresses = vec!["255.255.255.255".parse().expect("ip")];
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::BindNotUnicast(_))
+        ));
+
+        config.bind_addresses = vec!["ff02::1".parse().expect("ip")];
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::BindNotUnicast(_))
+        ));
+    }
+
+    #[test]
+    fn wildcard_addresses_collapse_their_family_and_duplicates_are_dropped() {
+        let (_dir, mut config) = temp_root();
+        config.bind_addresses = vec![
+            "127.0.0.1".parse().expect("ip"),
+            "192.168.1.5".parse().expect("ip"),
+            "::1".parse().expect("ip"),
+        ];
+        assert_eq!(config.effective_bind_addresses(), config.bind_addresses);
+
+        config.bind_addresses = vec![
+            "192.168.1.5".parse().expect("ip"),
+            "0.0.0.0".parse().expect("ip"),
+            "127.0.0.1".parse().expect("ip"),
+            "::1".parse().expect("ip"),
+            "0.0.0.0".parse().expect("ip"),
+        ];
+        let effective: Vec<IpAddr> = config.effective_bind_addresses();
+        assert_eq!(
+            effective,
+            vec![
+                "0.0.0.0".parse::<IpAddr>().expect("ip"),
+                "::1".parse::<IpAddr>().expect("ip")
+            ]
+        );
+    }
+
+    #[test]
+    fn bind_socket_addrs_and_summary_use_the_shared_port() {
+        let (_dir, mut config) = temp_root();
+        config.port = 6969;
+        config.bind_addresses = vec![
+            "127.0.0.1".parse().expect("ip"),
+            "192.168.1.5".parse().expect("ip"),
+        ];
+        assert_eq!(
+            config.bind_socket_addrs(),
+            vec![
+                "127.0.0.1:6969".parse().expect("addr"),
+                "192.168.1.5:6969".parse().expect("addr")
+            ]
+        );
+        assert_eq!(config.bind_summary(), "127.0.0.1:6969, 192.168.1.5:6969");
+
+        config.bind_addresses = (1..=4)
+            .map(|octet| IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, octet)))
+            .collect();
+        assert_eq!(config.bind_summary(), "127.0.0.1:6969 and 3 more");
     }
 
     #[test]

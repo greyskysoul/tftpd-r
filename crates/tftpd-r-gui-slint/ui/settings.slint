@@ -1,7 +1,14 @@
 // Modal settings dialog. Values are validated by the Rust side with the same
 // `ServerConfig::validate` rules as the daemon; a successful save closes the
 // dialog, an invalid value keeps it open and shows the error inline.
+//
+// The bind address is a multi-select list: the compact field opens an in-dialog
+// picker (a drop-down style panel anchored under the field) that always offers
+// "全部网络 (0.0.0.0)" and "本地回环 (127.0.0.1)" plus the addresses discovered
+// on this machine.
+import { ScrollView } from "std-widgets.slint";
 import { Icons, MaterialIcon } from "icons.slint";
+import { AddressOption } from "models.slint";
 import { Theme } from "theme.slint";
 import {
     DisabledCheckRow,
@@ -11,15 +18,21 @@ import {
 } from "widgets.slint";
 
 export component SettingsDialog inherits Rectangle {
-    in-out property <string> bind-address: "127.0.0.1:6969";
+    in-out property <string> port: "69";
+    in-out property <[AddressOption]> address-options: [];
+    in-out property <string> bind-summary: "";
     in-out property <string> root-dir: "tftp-root";
     in-out property <string> block-size: "512";
     in-out property <string> timeout-secs: "3";
     in-out property <string> max-sessions: "16";
     in property <string> error-text: "";
+    in-out property <bool> picker-open: false;
+    property <length> card-height: root.error-text == "" ? 492px : 544px;
 
     callback apply-requested();
     callback cancel-requested();
+    callback address-toggled(string);
+    callback browse-requested();
 
     width: 100%;
     height: 100%;
@@ -35,7 +48,7 @@ export component SettingsDialog inherits Rectangle {
         width: 640px;
         // The validation error box only appears on failure; give it room
         // instead of letting the fixed-height card clip the footer.
-        height: root.error-text == "" ? 448px : 500px;
+        height: root.card-height;
 
         background: Theme.panel-bg;
         border-radius: 12px;
@@ -93,26 +106,83 @@ export component SettingsDialog inherits Rectangle {
                     cross-axis-alignment: center;
                     spacing: 10px;
                     Text { text: "绑定地址"; width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
-                    TextField { text <=> root.bind-address; placeholder: "127.0.0.1:6969"; horizontal-stretch: 1; }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 30px;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: address-touch.has-hover ? Theme.accent : Theme.panel-border-strong;
+                        background: Theme.panel-bg;
+                        clip: true;
+
+                        HorizontalLayout {
+                            cross-axis-alignment: center;
+                            padding-left: 9px;
+                            padding-right: 7px;
+                            spacing: 6px;
+                            Text {
+                                text: root.bind-summary;
+                                color: Theme.text-strong;
+                                font-size: 12px;
+                                horizontal-stretch: 1;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            MaterialIcon {
+                                path-data: Icons.keyboard-arrow-down;
+                                tint: Theme.text-muted;
+                                icon-size: 16px;
+                            }
+                        }
+
+                        address-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.picker-open = true; }
+                        }
+                    }
                 }
+
+                HorizontalLayout {
+                    cross-axis-alignment: center;
+                    spacing: 10px;
+                    Text { text: "端口"; width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                    TextField { text <=> root.port; placeholder: "69"; width: 120px; }
+                    Text {
+                        text: "标准端口 69 需要管理员/root；无权限时请改用 6969 等非特权端口。";
+                        color: Theme.text-faint;
+                        font-size: 10px;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
+
                 HorizontalLayout {
                     cross-axis-alignment: center;
                     spacing: 10px;
                     Text { text: "根目录"; width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
                     TextField { text <=> root.root-dir; placeholder: "tftp-root"; horizontal-stretch: 1; }
+                    SmallButton {
+                        label: "浏览…";
+                        button-width: 70px;
+                        clicked => { root.browse-requested(); }
+                    }
                 }
+
                 HorizontalLayout {
                     cross-axis-alignment: center;
                     spacing: 10px;
                     Text { text: "最大块大小"; width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
                     TextField { text <=> root.block-size; placeholder: "512"; horizontal-stretch: 1; }
                 }
+
                 HorizontalLayout {
                     cross-axis-alignment: center;
                     spacing: 10px;
                     Text { text: "超时（秒）"; width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
                     TextField { text <=> root.timeout-secs; placeholder: "3"; horizontal-stretch: 1; }
                 }
+
                 HorizontalLayout {
                     cross-axis-alignment: center;
                     spacing: 10px;
@@ -177,6 +247,148 @@ export component SettingsDialog inherits Rectangle {
                     primary: true;
                     button-width: 96px;
                     clicked => { root.apply-requested(); }
+                }
+            }
+        }
+    }
+
+    // Multi-select bind address picker, rendered above the card (sibling of the
+    // card so it is painted last). Clicking the scrim closes it; the rows stay
+    // open while several addresses are toggled.
+    if root.picker-open : Rectangle {
+        width: 100%;
+        height: 100%;
+        background: transparent;
+
+        TouchArea {
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    root.picker-open = false;
+                }
+            }
+        }
+
+        picker := Rectangle {
+            x: (root.width - 600px) / 2;
+            y: Math.max(12px, (root.height - root.card-height) / 2 + 142px);
+            width: 600px;
+            height: Math.max(190px, Math.min(root.address-options.length * 34px + 112px, 340px));
+
+            background: Theme.panel-bg;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Theme.panel-border-strong;
+            clip: true;
+
+            // Consume clicks on the panel background so it does not fall
+            // through to the scrim.
+            TouchArea {
+                clicked => {}
+            }
+
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+
+                HorizontalLayout {
+                    cross-axis-alignment: center;
+                    spacing: 7px;
+                    MaterialIcon {
+                        path-data: Icons.dns;
+                        tint: Theme.accent;
+                        icon-size: 17px;
+                    }
+                    Text {
+                        text: "选择绑定地址";
+                        color: Theme.text-strong;
+                        font-size: 13px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                    IconButton {
+                        icon-data: Icons.close;
+                        button-size: 24px;
+                        icon-size: 15px;
+                        clicked => { root.picker-open = false; }
+                    }
+                }
+
+                Text {
+                    text: "可多选。全部网络 (0.0.0.0) 已包含所有 IPv4 地址；端口对所有地址生效。";
+                    color: Theme.text-muted;
+                    font-size: 10px;
+                    wrap: word-wrap;
+                }
+
+                Rectangle { height: 1px; background: Theme.panel-border; }
+
+                ScrollView {
+                    vertical-stretch: 1;
+                    horizontal-scrollbar-policy: always-off;
+                    VerticalLayout {
+                        spacing: 2px;
+                        for option in root.address-options : Rectangle {
+                            height: 32px;
+                            border-radius: 6px;
+                            background: option-touch.has-hover ? Theme.row-hover : transparent;
+
+                            HorizontalLayout {
+                                cross-axis-alignment: center;
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 8px;
+                                Rectangle {
+                                    width: 16px;
+                                    height: 16px;
+                                    border-radius: 4px;
+                                    border-width: 1px;
+                                    border-color: option.selected ? Theme.accent : Theme.panel-border-strong;
+                                    background: option.selected ? Theme.accent : Theme.panel-bg;
+                                    if option.selected : MaterialIcon {
+                                        path-data: Icons.check;
+                                        tint: #ffffff;
+                                        icon-size: 11px;
+                                        x: 2.5px;
+                                        y: 2.5px;
+                                    }
+                                }
+                                Text {
+                                    text: option.label;
+                                    color: Theme.text;
+                                    font-size: 12px;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                            }
+
+                            option-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.address-toggled(option.address); }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { height: 1px; background: Theme.panel-border; }
+
+                HorizontalLayout {
+                    cross-axis-alignment: center;
+                    spacing: 8px;
+                    Text {
+                        text: "显示的是本机网卡地址，权限不足的端口会在启动时给出提示。";
+                        color: Theme.text-faint;
+                        font-size: 10px;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                    SmallButton {
+                        label: "完成";
+                        primary: true;
+                        button-width: 72px;
+                        clicked => { root.picker-open = false; }
+                    }
                 }
             }
         }

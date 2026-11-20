@@ -59,7 +59,7 @@ fn check_config_rejects_uploads_with_exit_code_two() {
     let config_path = dir.path().join("config.toml");
     fs::write(
         &config_path,
-        "bind_address = \"127.0.0.1:0\"\nroot_dir = \"irrelevant\"\nallow_upload = true\n",
+        "port = 0\nbind_addresses = [\"127.0.0.1\"]\nroot_dir = \"irrelevant\"\nallow_upload = true\n",
     )
     .expect("write config");
     let output = Command::new(binary())
@@ -115,10 +115,7 @@ fn serve_starts_and_keeps_running() {
     fs::create_dir(&root).expect("create root");
     fs::write(root.join("hello.txt"), b"hello").expect("write file");
     let config_path = dir.path().join("config.toml");
-    let config = example_config_with_root(&root).replace(
-        "bind_address = \"127.0.0.1:69\"",
-        "bind_address = \"127.0.0.1:0\"",
-    );
+    let config = example_config_with_root(&root).replace("port = 69", "port = 0");
     fs::write(&config_path, config).expect("write config");
 
     let mut child = Command::new(binary())

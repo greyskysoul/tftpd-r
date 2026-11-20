@@ -4,17 +4,23 @@
 //! bounded event bus from a Slint timer, and never blocks the UI thread while
 //! stopping or restarting the server.
 
+// The panel is a windowed application; a console window must not be allocated
+// on start. `--help` output is only visible when stdout is redirected.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 slint::include_modules!();
 
 mod controller;
+mod folder_picker;
+mod netif;
 mod recent;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use slint::{Model, ModelRc, Timer, TimerMode, VecModel};
@@ -37,6 +43,14 @@ struct TransferState {
     started: Instant,
 }
 
+/// One entry of the bind address picker, kept in the UI state so selections
+/// survive a discovery refresh.
+struct AddressChoice {
+    ip: IpAddr,
+    label: String,
+    selected: bool,
+}
+
 struct UiState {
     app_started: Instant,
     last_seq: u64,
@@ -52,10 +66,21 @@ struct UiState {
     /// Message of the last failed start/restart, shown in the status bar.
     failed_message: Option<String>,
     throughput_sample: (Instant, u64),
+    /// Bind addresses shown in the settings picker.
+    address_options: Vec<AddressChoice>,
+    /// Local interface addresses discovered on a background thread.
+    discovered: Arc<StdMutex<Option<Vec<IpAddr>>>>,
+    discovery_applied: bool,
+    /// Pending native folder picker; polled from the UI timer.
+    folder_picker: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
 }
 
 impl UiState {
-    fn new(config: ServerConfig, recent: RecentDirs) -> Self {
+    fn new(
+        config: ServerConfig,
+        recent: RecentDirs,
+        discovered: Arc<StdMutex<Option<Vec<IpAddr>>>>,
+    ) -> Self {
         Self {
             app_started: Instant::now(),
             last_seq: 0,
@@ -69,6 +94,10 @@ impl UiState {
             running_root: None,
             failed_message: None,
             throughput_sample: (Instant::now(), 0),
+            address_options: Vec::new(),
+            discovered,
+            discovery_applied: false,
+            folder_picker: None,
         }
     }
 
@@ -104,6 +133,78 @@ impl UiState {
             .collect();
         self.recent_model.set_vec(rows);
     }
+
+    fn discovered_snapshot(&self) -> Option<Vec<IpAddr>> {
+        self.discovered.lock().ok().and_then(|guard| guard.clone())
+    }
+
+    /// Take a newly discovered address list exactly once.
+    fn apply_discovered(&mut self) -> bool {
+        if self.discovery_applied {
+            return false;
+        }
+        let Some(discovered) = self.discovered_snapshot() else {
+            return false;
+        };
+        self.discovery_applied = true;
+        let selected = self.selected_addresses();
+        self.rebuild_address_options(&selected, &discovered);
+        true
+    }
+
+    fn selected_addresses(&self) -> Vec<IpAddr> {
+        self.address_options
+            .iter()
+            .filter(|option| option.selected)
+            .map(|option| option.ip)
+            .collect()
+    }
+
+    fn rebuild_address_options(&mut self, selected: &[IpAddr], discovered: &[IpAddr]) {
+        self.address_options = build_address_choices(selected, discovered);
+    }
+
+    fn bind_summary(&self) -> String {
+        bind_summary_text(&self.address_options)
+    }
+}
+
+/// Build the picker entries: the two mandated special addresses first, then the
+/// discovered interface addresses, then any selected address that discovery did
+/// not report (so a hand-written configuration is never silently dropped).
+fn build_address_choices(selected: &[IpAddr], discovered: &[IpAddr]) -> Vec<AddressChoice> {
+    let mut ips: Vec<IpAddr> = vec![
+        IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+    ];
+    for ip in discovered.iter().chain(selected.iter()) {
+        if !ips.contains(ip) {
+            ips.push(*ip);
+        }
+    }
+    ips.into_iter()
+        .map(|ip| AddressChoice {
+            ip,
+            label: address_label(ip),
+            selected: selected.contains(&ip),
+        })
+        .collect()
+}
+
+fn bind_summary_text(options: &[AddressChoice]) -> String {
+    let selected: Vec<&AddressChoice> = options.iter().filter(|option| option.selected).collect();
+    match selected.len() {
+        0 => "未选择地址".to_string(),
+        1 | 2 => selected
+            .iter()
+            .map(|option| option.label.clone())
+            .collect::<Vec<_>>()
+            .join("、"),
+        count => format!(
+            "{}、{} 等 {count} 个地址",
+            selected[0].label, selected[1].label
+        ),
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -122,19 +223,66 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let smoke_test = std::env::args().any(|argument| argument == "--smoke-test");
-    let initial_config = load_initial_config();
+    let (initial_config, config_error) = load_initial_config();
     let mut recent = RecentDirs::load();
     // Make sure the configured root shows up in the drop-down even on first run
     // or when it differs from the last used directory.
     recent.record(&initial_config.root_dir);
 
+    // Interface discovery starts a platform helper; it must not block the
+    // window creation, so it runs on a background thread and the options are
+    // merged in from the UI timer once the result is available.
+    let discovered = Arc::new(StdMutex::new(None));
+    spawn_discovery(discovered.clone());
+
     let app = AppWindow::new()?;
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
-    apply_config_to_settings(&app, &initial_config);
 
-    let mut state = UiState::new(initial_config, recent);
+    let mut state = UiState::new(initial_config, recent, discovered);
+    apply_config_to_settings(&app, &mut state);
+    // Development aid for UI screenshots and manual layout checks: open a
+    // dialog at startup. Not reachable without the environment variable.
+    match std::env::var("TFTPD_R_GUI_PREVIEW").as_deref() {
+        Ok("settings") => app.set_settings_open(true),
+        Ok("picker") => {
+            app.set_settings_open(true);
+            app.set_settings_picker_open(true);
+        }
+        Ok("transfer") => {
+            // Fake rows so the transfer table and progress fill can be
+            // screenshotted without a client; never reachable without the
+            // environment variable.
+            state.transfers.insert(
+                1,
+                TransferState {
+                    file: "firmware.bin".to_string(),
+                    peer: "192.168.1.20:49152".to_string(),
+                    bytes: 1_100_000,
+                    total: Some(2_000_000),
+                    started: Instant::now(),
+                },
+            );
+            state.transfers.insert(
+                2,
+                TransferState {
+                    file: "config.bin".to_string(),
+                    peer: "127.0.0.1:50000".to_string(),
+                    bytes: 900_000,
+                    total: None,
+                    started: Instant::now(),
+                },
+            );
+        }
+        _ => {}
+    }
     state.refresh_recent_model();
     state.push_log("INFO", "TftpdR 面板已启动；默认只读 RRQ，上传已禁用。");
+    if let Some(error) = config_error {
+        state.push_log(
+            "WARN",
+            format!("config.toml 无效（{error}）；已使用安全默认值。"),
+        );
+    }
     let state = Rc::new(RefCell::new(state));
     let controller = Rc::new(RefCell::new(EmbeddedController::new()?));
 
@@ -158,6 +306,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(error) = restart_error {
                 state.failed_message = Some(error.clone());
                 state.push_log("ERROR", format!("重启失败：{error}"));
+            }
+            if state.apply_discovered() {
+                apply_address_options(&app, &state);
+            }
+            if let Some(picked) = poll_folder_picker(&mut state) {
+                handle_folder_pick(&app, &mut state, picked);
             }
             sync_running_root(&mut state, &status);
             log_status_transition(&mut state, &status);
@@ -183,17 +337,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn load_initial_config() -> ServerConfig {
+fn spawn_discovery(slot: Arc<StdMutex<Option<Vec<IpAddr>>>>) {
+    std::thread::spawn(move || {
+        let addresses = netif::local_addresses();
+        if let Ok(mut guard) = slot.lock() {
+            *guard = Some(addresses);
+        }
+    });
+}
+
+/// Load `config.toml` from the working directory, falling back to safe defaults.
+/// The error is returned so the panel can show it in the activity log instead
+/// of a console that does not exist for a windowed binary.
+fn load_initial_config() -> (ServerConfig, Option<String>) {
     match std::fs::read_to_string("config.toml") {
         Ok(text) => match ServerConfig::from_toml_str(&text) {
-            Ok(config) => config,
-            Err(error) => {
-                eprintln!("warning: config.toml is invalid ({error}); using safe defaults");
-                ServerConfig::default()
-            }
+            Ok(config) => (config, None),
+            Err(error) => (ServerConfig::default(), Some(error.to_string())),
         },
-        Err(_) => ServerConfig::default(),
+        Err(_) => (ServerConfig::default(), None),
     }
+}
+
+fn poll_folder_picker(state: &mut UiState) -> Option<Option<PathBuf>> {
+    let receiver = state.folder_picker.as_ref()?;
+    let result = match receiver.try_recv() {
+        Ok(result) => Some(result),
+        Err(std::sync::mpsc::TryRecvError::Empty) => return None,
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(None),
+    };
+    state.folder_picker = None;
+    result
+}
+
+fn handle_folder_pick(app: &AppWindow, state: &mut UiState, picked: Option<PathBuf>) {
+    match picked {
+        Some(path) if path.is_dir() => {
+            let display = display_root_path(&path);
+            state.config.root_dir = path.clone();
+            let _ = state.recent.record(&path);
+            app.set_settings_root(display.clone().into());
+            state.push_log("INFO", format!("根目录已设置为 {display}。"));
+        }
+        Some(path) => {
+            state.push_log(
+                "ERROR",
+                format!("所选路径不是目录：{}", display_path(&path)),
+            );
+        }
+        None => {}
+    }
+    refresh_models(app, state);
 }
 
 fn install_callbacks(
@@ -241,11 +435,11 @@ fn install_callbacks(
                     let root = state.config.root_dir.clone();
                     let _ = state.recent.record(&root);
                     let verb = if running { "重启" } else { "启动" };
-                    let bind = state.config.bind_address;
+                    let bind = state.config.bind_summary();
                     let root = display_root_path(&state.config.root_dir);
                     state.push_log(
                         "INFO",
-                        format!("正在{verb}服务：绑定 {bind}，根目录 {root}。"),
+                        format!("正在{verb}服务：监听 {bind}，根目录 {root}。"),
                     );
                     app.set_settings_error("".into());
                 }
@@ -324,10 +518,56 @@ fn install_callbacks(
             let Some(app) = weak.upgrade() else {
                 return;
             };
-            let state = state.borrow();
-            apply_config_to_settings(&app, &state.config);
+            let mut state = state.borrow_mut();
+            apply_config_to_settings(&app, &mut state);
             app.set_settings_error("".into());
             app.set_settings_open(false);
+        });
+    }
+    // Toggle one bind address in the settings picker. The dialog stays open so
+    // several addresses can be selected in one go.
+    {
+        let weak = app.as_weak();
+        let state = state.clone();
+        app.on_address_toggled(move |address| {
+            let Some(app) = weak.upgrade() else {
+                return;
+            };
+            let mut state = state.borrow_mut();
+            let address = address.to_string();
+            if let Some(option) = state
+                .address_options
+                .iter_mut()
+                .find(|option| option.ip.to_string() == address)
+            {
+                option.selected = !option.selected;
+                apply_address_options(&app, &state);
+            }
+        });
+    }
+    // Native folder picker for the root directory. The dialog runs in a helper
+    // process on a background thread; the result arrives through the timer.
+    {
+        let weak = app.as_weak();
+        let state = state.clone();
+        app.on_browse_root(move || {
+            let Some(app) = weak.upgrade() else {
+                return;
+            };
+            let mut state = state.borrow_mut();
+            if state.folder_picker.is_some() {
+                state.push_log("INFO", "目录选择器已打开。");
+                return;
+            }
+            let typed = PathBuf::from(app.get_settings_root().trim());
+            let initial = if typed.is_dir() {
+                Some(typed)
+            } else {
+                Some(state.config.root_dir.clone())
+            };
+            state.folder_picker = Some(folder_picker::pick_folder_async(initial));
+            state.push_log("INFO", "已打开系统目录选择器…");
+            refresh_models(&app, &mut state);
         });
     }
     // Clear the log view (the event ring is unaffected).
@@ -411,10 +651,29 @@ fn install_callbacks(
 }
 
 fn read_config(app: &AppWindow, fallback: &ServerConfig) -> Result<ServerConfig, String> {
-    let bind_text = app.get_settings_bind().trim().to_string();
-    let bind_address: SocketAddr = bind_text
+    let port_text = app.get_settings_port().trim().to_string();
+    let port: u16 = port_text
         .parse()
-        .map_err(|_| format!("绑定地址“{bind_text}”无效，应为 IP:端口。"))?;
+        .map_err(|_| format!("端口“{port_text}”无效，应为 1–65535。"))?;
+    if port == 0 {
+        return Err("端口必须在 1 到 65535 之间（0 仅用于测试）。".to_string());
+    }
+    let mut bind_addresses = Vec::new();
+    for option in app.get_settings_address_options().iter() {
+        if !option.selected {
+            continue;
+        }
+        let address: IpAddr = option
+            .address
+            .parse()
+            .map_err(|_| format!("绑定地址“{}”无效。", option.address))?;
+        if !bind_addresses.contains(&address) {
+            bind_addresses.push(address);
+        }
+    }
+    if bind_addresses.is_empty() {
+        return Err("请至少选择一个绑定地址。".to_string());
+    }
     let root_text = app.get_settings_root().trim().to_string();
     if root_text.is_empty() {
         return Err("根目录不能为空。".to_string());
@@ -423,7 +682,8 @@ fn read_config(app: &AppWindow, fallback: &ServerConfig) -> Result<ServerConfig,
     let timeout_secs: u64 = parse_setting(&app.get_settings_timeout(), "超时")?;
     let max_sessions: usize = parse_setting(&app.get_settings_max_sessions(), "最大并发会话")?;
     let config = ServerConfig {
-        bind_address,
+        port,
+        bind_addresses,
         root_dir: PathBuf::from(root_text),
         block_size,
         timeout_secs,
@@ -442,12 +702,40 @@ fn parse_setting<T: std::str::FromStr>(text: &str, label: &str) -> Result<T, Str
         .map_err(|_| format!("{label}“{text}”不是有效的数字。"))
 }
 
-fn apply_config_to_settings(app: &AppWindow, config: &ServerConfig) {
-    app.set_settings_bind(config.bind_address.to_string().into());
+fn apply_config_to_settings(app: &AppWindow, state: &mut UiState) {
+    let config = state.config.clone();
+    app.set_settings_port(config.port.to_string().into());
     app.set_settings_root(config.display_root().into());
     app.set_settings_block_size(config.block_size.to_string().into());
     app.set_settings_timeout(config.timeout_secs.to_string().into());
     app.set_settings_max_sessions(config.max_sessions.to_string().into());
+    let discovered = state.discovered_snapshot().unwrap_or_default();
+    state.rebuild_address_options(&config.bind_addresses, &discovered);
+    apply_address_options(app, state);
+}
+
+fn apply_address_options(app: &AppWindow, state: &UiState) {
+    let rows: Vec<AddressOption> = state
+        .address_options
+        .iter()
+        .map(|option| AddressOption {
+            label: option.label.clone().into(),
+            address: option.ip.to_string().into(),
+            selected: option.selected,
+        })
+        .collect();
+    app.set_settings_address_options(ModelRc::new(VecModel::from(rows)));
+    app.set_settings_bind_summary(state.bind_summary().into());
+}
+
+fn address_label(ip: IpAddr) -> String {
+    match ip {
+        IpAddr::V4(ip) if ip.is_unspecified() => "全部网络 (0.0.0.0)".to_string(),
+        IpAddr::V4(ip) if ip == Ipv4Addr::LOCALHOST => "本地回环 (127.0.0.1)".to_string(),
+        IpAddr::V6(ip) if ip.is_unspecified() => "全部 IPv6 网络 (::)".to_string(),
+        IpAddr::V6(ip) if ip == Ipv6Addr::LOCALHOST => "本地回环 IPv6 (::1)".to_string(),
+        other => other.to_string(),
+    }
 }
 
 fn apply_status(app: &AppWindow, status: &ServerStatus, state: &UiState) {
@@ -476,18 +764,20 @@ fn apply_status(app: &AppWindow, status: &ServerStatus, state: &UiState) {
         ),
     };
     let bind = match status {
-        ServerStatus::Running { local_addr } => local_addr.to_string(),
-        _ => state.config.bind_address.to_string(),
+        ServerStatus::Running { local_addrs } => summarize_addrs(local_addrs),
+        _ => state.config.bind_summary(),
     };
+    // The status bar only shows the last directory name; the full path stays in
+    // the settings dialog, the log and the recent-directory menu.
     let root = match status {
         ServerStatus::Starting | ServerStatus::Running { .. } | ServerStatus::Stopping => {
             let path = state
                 .running_root
                 .as_deref()
                 .unwrap_or(&state.config.root_dir);
-            display_root_path(path)
+            root_display_name(path)
         }
-        _ => display_root_path(&state.config.root_dir),
+        _ => root_display_name(&state.config.root_dir),
     };
     app.set_status_text(text.into());
     app.set_status_kind(kind);
@@ -503,6 +793,28 @@ fn apply_status(app: &AppWindow, status: &ServerStatus, state: &UiState) {
 /// The configured value may be relative to the panel's working directory.
 fn display_root_path(path: &Path) -> String {
     std::fs::canonicalize(path).map_or_else(|_| display_path(path), |path| display_path(&path))
+}
+
+/// Last directory name for the compact status bar. A filesystem root has no
+/// file name and keeps its full display path.
+fn root_display_name(path: &Path) -> String {
+    path.file_name().map_or_else(
+        || display_root_path(path),
+        |name| name.to_string_lossy().into_owned(),
+    )
+}
+
+/// Compact comma-separated address list for the status bar and log.
+fn summarize_addrs(addrs: &[SocketAddr]) -> String {
+    match addrs.len() {
+        0 => "—".to_string(),
+        1..=3 => addrs
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", "),
+        count => format!("{} 等 {count} 个地址", addrs[0]),
+    }
 }
 
 fn status_key(status: &ServerStatus) -> i32 {
@@ -527,7 +839,7 @@ fn log_status_transition(state: &mut UiState, status: &ServerStatus) {
         return;
     }
     match status {
-        ServerStatus::Running { local_addr } => {
+        ServerStatus::Running { local_addrs } => {
             let root = state
                 .running_root
                 .as_deref()
@@ -535,7 +847,10 @@ fn log_status_transition(state: &mut UiState, status: &ServerStatus) {
             let root = display_root_path(root);
             state.push_log(
                 "INFO",
-                format!("服务已就绪：绑定 {local_addr}，根目录 {root}。"),
+                format!(
+                    "服务已就绪：监听 {}，根目录 {root}。",
+                    summarize_addrs(local_addrs)
+                ),
             );
         }
         ServerStatus::Stopped => {
@@ -588,24 +903,29 @@ fn handle_event(state: &mut UiState, event: TftpEvent) {
             }
         }
         EventKind::Completed => {
-            if let Some(transfer) = state.transfers.remove(&event.session_id) {
-                state.push_log(
-                    "INFO",
-                    format!(
-                        "传输完成：{}（{}），耗时 {:.1} 秒。",
-                        transfer.file,
-                        format_bytes(event.bytes),
-                        transfer.started.elapsed().as_secs_f32()
-                    ),
-                );
-            }
+            // Log the completion even if the matching `Started` event was already
+            // evicted from the ring: a finished transfer must always leave a
+            // trace in the activity log.
+            let transfer = state.transfers.remove(&event.session_id);
+            let file = transfer
+                .as_ref()
+                .map_or_else(|| event.file.clone(), |transfer| transfer.file.clone());
+            let elapsed = transfer.as_ref().map(|transfer| transfer.started.elapsed());
+            let duration = elapsed.map_or_else(String::new, |elapsed| {
+                format!("，耗时 {:.1} 秒", elapsed.as_secs_f32())
+            });
+            state.push_log(
+                "INFO",
+                format!(
+                    "传输完成：{file}（{}{duration}）。",
+                    format_bytes(event.bytes)
+                ),
+            );
         }
         EventKind::Failed { reason } => {
-            if let Some(transfer) = state.transfers.remove(&event.session_id) {
-                state.push_log("WARN", format!("传输失败：{}（{reason}）", transfer.file));
-            } else {
-                state.push_log("WARN", format!("传输失败（{reason}）"));
-            }
+            let transfer = state.transfers.remove(&event.session_id);
+            let file = transfer.map_or_else(|| event.file.clone(), |transfer| transfer.file);
+            state.push_log("WARN", format!("传输失败：{file}（{reason}）。"));
         }
         EventKind::Rejected { reason } => {
             state.push_log("WARN", format!("请求被拒绝：{}（{reason}）", event.file));
@@ -712,5 +1032,79 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.1} KiB", value / KIB)
     } else {
         format!("{bytes} B")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ip(text: &str) -> IpAddr {
+        text.parse().expect("ip address")
+    }
+
+    #[test]
+    fn address_choices_always_offer_the_two_special_entries() {
+        let options = build_address_choices(&[ip("127.0.0.1")], &[ip("192.168.1.5")]);
+        let labels: Vec<&str> = options.iter().map(|option| option.label.as_str()).collect();
+        assert_eq!(labels[0], "全部网络 (0.0.0.0)");
+        assert_eq!(labels[1], "本地回环 (127.0.0.1)");
+        assert!(labels.contains(&"192.168.1.5"));
+        assert_eq!(options.iter().filter(|option| option.selected).count(), 1);
+    }
+
+    #[test]
+    fn selected_addresses_missing_from_discovery_stay_visible() {
+        let selected = vec![ip("::1"), ip("10.1.2.3")];
+        let options = build_address_choices(&selected, &[]);
+        assert_eq!(options.len(), 4);
+        assert!(options.iter().any(|option| option.ip == ip("::1")));
+        assert_eq!(options.iter().filter(|option| option.selected).count(), 2);
+    }
+
+    #[test]
+    fn duplicate_selected_addresses_are_not_repeated() {
+        let options = build_address_choices(&[ip("127.0.0.1"), ip("127.0.0.1")], &[]);
+        assert_eq!(options.len(), 2);
+        assert_eq!(options.iter().filter(|option| option.selected).count(), 1);
+    }
+
+    #[test]
+    fn address_labels_cover_the_special_entries() {
+        assert_eq!(address_label(ip("0.0.0.0")), "全部网络 (0.0.0.0)");
+        assert_eq!(address_label(ip("127.0.0.1")), "本地回环 (127.0.0.1)");
+        assert_eq!(address_label(ip("::")), "全部 IPv6 网络 (::)");
+        assert_eq!(address_label(ip("::1")), "本地回环 IPv6 (::1)");
+        assert_eq!(address_label(ip("192.168.1.5")), "192.168.1.5");
+    }
+
+    #[test]
+    fn summary_is_short_for_many_addresses() {
+        let options = build_address_choices(&[ip("0.0.0.0")], &[]);
+        assert_eq!(bind_summary_text(&options), "全部网络 (0.0.0.0)");
+        assert_eq!(bind_summary_text(&[]), "未选择地址");
+
+        let many = build_address_choices(&[ip("0.0.0.0"), ip("10.0.0.1"), ip("10.0.0.2")], &[]);
+        assert_eq!(
+            bind_summary_text(&many),
+            "全部网络 (0.0.0.0)、10.0.0.1 等 3 个地址"
+        );
+    }
+
+    #[test]
+    fn status_bar_summarises_many_listeners() {
+        let one: Vec<SocketAddr> = vec!["127.0.0.1:69".parse().expect("addr")];
+        assert_eq!(summarize_addrs(&one), "127.0.0.1:69");
+        let four: Vec<SocketAddr> = (1..=4)
+            .map(|last| format!("127.0.0.{last}:69").parse().expect("addr"))
+            .collect();
+        assert_eq!(summarize_addrs(&four), "127.0.0.1:69 等 4 个地址");
+        assert_eq!(summarize_addrs(&[]), "—");
+    }
+
+    #[test]
+    fn status_bar_root_shows_the_leaf_directory_name() {
+        assert_eq!(root_display_name(Path::new("tftp-root")), "tftp-root");
+        assert_eq!(root_display_name(Path::new("C:/srv/tftp")), "tftp");
     }
 }

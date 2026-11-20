@@ -5,14 +5,14 @@
 //! involved.
 
 use std::fs;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tftpd_r_core::events::{EventBus, EventKind, TftpEvent};
 use tftpd_r_core::protocol::{decode, encode, Mode, Packet, Request};
 use tftpd_r_core::server::ServerStatus;
-use tftpd_r_core::{ErrorCode, ServerConfig, ServerHandle, TftpServer};
+use tftpd_r_core::{ErrorCode, ServerConfig, ServerError, ServerHandle, TftpServer};
 
 struct Fixture {
     handle: ServerHandle,
@@ -42,7 +42,8 @@ impl Fixture {
             fs::write(&path, contents).expect("write fixture file");
         }
         config.root_dir = dir.path().to_path_buf();
-        config.bind_address = "127.0.0.1:0".parse().expect("bind address");
+        config.port = 0;
+        config.bind_addresses = vec![IpAddr::V4(Ipv4Addr::LOCALHOST)];
         let events = EventBus::default_shared();
         let handle = TftpServer::start(config, events.clone())
             .await
@@ -55,7 +56,7 @@ impl Fixture {
     }
 
     fn addr(&self) -> SocketAddr {
-        self.handle.local_addr()
+        self.handle.local_addrs()[0]
     }
 
     async fn stop(self) {
@@ -801,6 +802,94 @@ async fn block_numbers_wrap_from_65535_to_zero() {
         started.elapsed()
     );
     fixture.stop().await;
+}
+
+#[tokio::test]
+async fn binds_every_configured_address_on_one_port() {
+    // IPv6 loopback is not available in every CI container; the IPv4 listener
+    // is always checked and the dual-stack case only when the OS allows it.
+    let ipv6_available = tokio::net::UdpSocket::bind("[::1]:0").await.is_ok();
+    let mut bind_addresses = vec![IpAddr::V4(Ipv4Addr::LOCALHOST)];
+    if ipv6_available {
+        bind_addresses.push(IpAddr::V6(Ipv6Addr::LOCALHOST));
+    }
+    let dir = tempfile::tempdir().expect("temp dir");
+    let config = ServerConfig {
+        port: 0,
+        bind_addresses: bind_addresses.clone(),
+        root_dir: dir.path().to_path_buf(),
+        timeout_secs: 1,
+        shutdown_grace_secs: 1,
+        ..ServerConfig::default()
+    };
+    let events = EventBus::default_shared();
+    let handle = TftpServer::start(config, events)
+        .await
+        .expect("start server");
+    let local = handle.local_addrs();
+    assert_eq!(local.len(), bind_addresses.len());
+    assert_eq!(local[0].ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
+    assert!(
+        local
+            .iter()
+            .all(|address| address.port() == local[0].port()),
+        "every listener must share the resolved port: {local:?}"
+    );
+    if ipv6_available {
+        assert_eq!(local[1].ip(), IpAddr::V6(Ipv6Addr::LOCALHOST));
+    }
+    handle.stop().await;
+}
+
+#[tokio::test]
+async fn an_unbindable_address_aborts_the_whole_start() {
+    // 192.0.2.0/24 is TEST-NET-1 and is not assigned to a local interface, so
+    // binding it fails immediately on every supported platform.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let config = ServerConfig {
+        port: 0,
+        bind_addresses: vec![
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            "192.0.2.123".parse().expect("ip"),
+        ],
+        root_dir: dir.path().to_path_buf(),
+        timeout_secs: 1,
+        shutdown_grace_secs: 1,
+        ..ServerConfig::default()
+    };
+    let events = EventBus::default_shared();
+    let error = match TftpServer::start(config, events).await {
+        Ok(_) => panic!("a start with an unbindable address must fail"),
+        Err(error) => error,
+    };
+    assert!(
+        matches!(error, ServerError::Bind { .. }),
+        "unexpected error: {error}"
+    );
+}
+
+#[tokio::test]
+async fn wildcard_and_specific_addresses_share_one_listener() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let config = ServerConfig {
+        port: 0,
+        bind_addresses: vec![
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+        ],
+        root_dir: dir.path().to_path_buf(),
+        timeout_secs: 1,
+        shutdown_grace_secs: 1,
+        ..ServerConfig::default()
+    };
+    let events = EventBus::default_shared();
+    let handle = TftpServer::start(config, events)
+        .await
+        .expect("start server");
+    let local = handle.local_addrs();
+    assert_eq!(local.len(), 1, "0.0.0.0 covers 127.0.0.1: {local:?}");
+    assert!(local[0].ip().is_unspecified());
+    handle.stop().await;
 }
 
 async fn wait_for_events(

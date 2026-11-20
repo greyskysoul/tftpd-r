@@ -18,14 +18,14 @@ risks. It is intentionally specific about what is **not** protected.
 - Do not expose the service directly to the Internet. The protocol has no
   anti-spoofing or authentication; request spoofing and response amplification
   are inherent to UDP/TFTP.
-- The default listen address is `127.0.0.1:69`. Port 69 is privileged
-  (administrator on Windows, root or `CAP_NET_BIND_SERVICE` on Linux). The
-  application never elevates itself, never retries on another port and never
-  rewrites the configuration: a permission failure is reported with a hint to
-  choose an unprivileged port such as `6969`. Running the service with elevated
-  rights is an explicit operator decision and widens the impact of any future
-  vulnerability; preferring a high port or a port-forwarding/firewall rule is
-  safer for long-running deployments.
+- The default listen address is `127.0.0.1:69`. Linux requires root or
+  `CAP_NET_BIND_SERVICE` for port 69; Windows normally allows a normal user
+  unless the port is reserved. The application never elevates itself, never
+  retries on another port and never rewrites the configuration: a permission
+  failure is reported with a hint to choose an unprivileged port such as `6969`.
+  Running the service with elevated rights is an explicit operator decision and
+  widens the impact of any future vulnerability; preferring a high port or a
+  port-forwarding/firewall rule is safer for long-running deployments.
 
 ## Threat model
 
@@ -39,7 +39,9 @@ risks. It is intentionally specific about what is **not** protected.
 | Overwriting or uploading data | WRQ rejected (ERROR 2) and `allow_upload = true` rejected at validation. No write path exists. |
 | Local IPC abuse | No IPC endpoint exists in this release. A future IPC must implement local authentication/ACL, framing limits and least-privilege commands. |
 | Log injection / sensitive data leakage | Client file names are sanitised for control characters and length before events/logs; ERROR text is fixed and path-free; detailed OS errors are not sent to clients. |
-| Configuration mistakes | `deny_unknown_fields`, range validation, root existence check, explicit rejection of uploads/overwrite, loopback default. |
+| Configuration mistakes | `deny_unknown_fields`, range validation, root existence check, explicit rejection of uploads/overwrite, loopback default, bind list bounded to 16 unicast addresses and bound all-or-nothing. |
+| Multiple listen addresses widening exposure | Only the configured addresses are bound; `0.0.0.0`/`::` are explicit wildcards, other same-family entries are collapsed rather than duplicated. A single unbindable address aborts the start instead of serving a silently reduced set. |
+| Helper processes used by the GUI | Fixed absolute programs, fixed arguments, no shell; the initial directory is passed via an environment variable and validated; discovery has a 5 s timeout; the GUI never requests elevation. |
 
 ## Filesystem sandbox
 
@@ -138,6 +140,7 @@ is network ACL/firewall or loopback-only binding, not the protocol implementatio
 
 | Resource | Bound |
 | --- | --- |
+| Listen addresses / accept loops | 16 (`MAX_BIND_ADDRESSES`), one socket and accept loop each |
 | Concurrent sessions | `max_sessions` (default 16, max 1024) |
 | Sessions per peer IP | 8 |
 | Request datagram | 1024 bytes |
@@ -155,6 +158,26 @@ user's profile. It contains up to eight absolute directory paths, no credentials
 and is treated as advisory: unreadable or unwritable state never prevents the
 panel from starting. It is not read by the TFTP server and does not affect the
 sandbox root unless the operator selects one of those directories.
+
+## GUI helper processes
+
+The desktop panel has no native interface-enumeration or file-dialog dependency
+(and no hand-written FFI), so it asks the platform's own runtime:
+
+- Interface discovery runs `powershell.exe` (absolute path) with the .NET
+  `NetworkInterface` API, or `hostname -I` on Unix, on a background thread. Only
+  IP literals are parsed; the helper is killed after 5 s.
+- The root directory picker runs `FolderBrowserDialog` through the same
+  PowerShell 5.1 binary, or `zenity`/`kdialog` on Unix, also on a background
+  thread. The selected path is accepted only if it is an existing directory.
+- Neither helper is started with a shell, with user-controlled arguments or with
+  elevation. The initial directory is passed through `TFTPD_R_INITIAL_DIR` so a
+  path containing quotes cannot become script text. Helpers are started with
+  `CREATE_NO_WINDOW`, and the panel itself is a windowed-subsystem binary.
+
+A machine policy that blocks PowerShell or the dialog tools only degrades these
+convenience features; the panel and the server keep working with the two special
+address entries and a manually typed root path.
 
 ## Logging and error hygiene
 

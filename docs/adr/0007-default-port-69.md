@@ -12,9 +12,10 @@ firewall guidance assume it. Requirement R1 in [`roadmap.md`](../roadmap.md)
 asks for port 69 as the default *and* for a helpful message when the process
 lacks the privileges to bind it.
 
-Port 69 is privileged: Windows requires an administrator token, Linux requires
-root or `CAP_NET_BIND_SERVICE`. Silently falling back to another port would
-hide a deployment mistake and change behaviour behind the operator's back;
+Port 69 is a low port: Linux requires root or `CAP_NET_BIND_SERVICE`, while
+Windows normally lets a normal user bind it unless the port is reserved or
+excluded by the system. Silently falling back to another port would hide a
+deployment mistake and change behaviour behind the operator's back;
 auto-elevating would violate the project's "never escalate" rule.
 
 ## Decision
@@ -34,10 +35,11 @@ auto-elevating would violate the project's "never escalate" rule.
 
 ## Consequences
 
-- A first run without privileges now fails visibly by default. That is the
-  intended trade-off: the standard port is the product default, the failure is
-  actionable, and an unprivileged trial run uses `--bind 127.0.0.1:6969`
-  (daemon) or changes the port in the GUI settings.
+- On a platform that restricts low ports (Linux without `CAP_NET_BIND_SERVICE`
+  or a reserved Windows port), a first run now fails visibly by default. That
+  is the intended trade-off: the standard port is the product default, the
+  failure is actionable, and an unprivileged trial run uses
+  `--bind 127.0.0.1:6969` (daemon) or changes the port in the GUI settings.
 - The example configuration, README quick start, security defaults and the
   daemon config tests change together.
 - Tests cannot bind port 69 (that would require privileges and would conflict

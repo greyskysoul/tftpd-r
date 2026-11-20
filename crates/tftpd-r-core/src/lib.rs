@@ -37,7 +37,7 @@
 //!
 //! let events = EventBus::default_shared();
 //! let server = TftpServer::start(config, events).await?;
-//! println!("listening on {}", server.local_addr());
+//! println!("listening on {:?}", server.local_addrs());
 //! server.stop().await;
 //! # Ok(())
 //! # }
