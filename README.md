@@ -22,9 +22,11 @@ Implemented:
 - Block-number wraparound, zero-length final DATA for exact block multiples,
   bounded retransmission, duplicate-ACK tolerance, unknown-TID ERROR 5 handling
   and duplicate-request resend without spawning a second session.
-- Sandboxed root directory: traversal, drive letters, UNC/device paths, NTFS
+- Sandboxed root directory: traversal, drive letters, device paths, NTFS
   alternate data streams, Windows reserved device names and reparse points
-  (symlinks/junctions) are rejected.
+  (symlinks/junctions) are rejected. A leading `/` or `\` (legacy clients often
+  send `get /file.bin`) is mapped to the configured root instead of being
+  rejected; it cannot bypass the traversal checks.
 - Bounded concurrency (global and per-peer), per-transfer deadline, file-size
   limit and bounded event ring.
 - Headless daemon: TOML configuration, `check-config`, `print-default-config`,
@@ -102,6 +104,10 @@ startup or server failure. `--bind`/`--root` override the file and are validated
 again. `TFTP_LOG` (or `--log`) selects the `tracing` filter, e.g.
 `TFTP_LOG=debug`.
 
+Old clients that request `get /hello.txt` are supported: a leading `/` (or `\`)
+is mapped to the configured root instead of being rejected as an absolute host
+path. Traversal such as `/../secret` is still rejected.
+
 ## Quick start (GUI)
 
 ```powershell
@@ -157,9 +163,12 @@ Unknown keys are rejected so typos do not silently fall back to defaults.
 
 - Read-only: uploads are disabled and refused by validation.
 - Loopback binding by default; no `unsafe` code in hand-written crates.
-- Path sandbox rejects traversal, absolute/drive/UNC paths, device names,
-  alternate data streams and reparse points; the final canonical path is
-  compared component-wise with the canonical root.
+- Path sandbox rejects traversal, drive letters, device names, alternate data
+  streams and reparse points; the final canonical path is compared
+  component-wise with the canonical root. A leading `/` or `\` from a legacy
+  client is treated as the root directory (`/file.bin` → `<root>/file.bin`),
+  not as a host-absolute path; `..`, drive letters and reparse points are still
+  rejected after that mapping.
 - Concurrency, file size, retransmission count, transfer duration and event
   memory are bounded.
 - Client-facing ERROR text never includes local paths or raw OS errors; log
@@ -177,10 +186,11 @@ cargo build --workspace --release
 ```
 
 The test suite includes codec boundary tests, configuration/path-sandbox tests,
-24 loopback-UDP RRQ integration tests (including block-number wraparound and
-shutdown cancellation), daemon CLI/config integration tests and GUI controller
-tests. See [docs/testing.md](docs/testing.md) for what was actually executed and
-what still needs manual/target-machine verification.
+26 loopback-UDP RRQ integration tests (including block-number wraparound,
+shutdown cancellation and legacy `/file` requests), daemon CLI/config
+integration tests and GUI controller tests. See [docs/testing.md](docs/testing.md)
+for what was actually executed and what still needs manual/target-machine
+verification.
 
 ## Runtime dependencies
 

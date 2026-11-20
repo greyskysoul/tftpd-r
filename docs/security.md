@@ -27,7 +27,7 @@ risks. It is intentionally specific about what is **not** protected.
 | Unauthorised LAN client downloading files | Read-only by default; sandbox limits to the root; operator must opt into LAN binding; firewall guidance. No authentication exists. |
 | Malicious/malformed UDP datagrams | Strict codec with length/field/UTF-8 checks; unknown opcodes and malformed requests answered with ERROR 4; oversized requests rejected; unknown options ignored, malformed known options fail negotiation. |
 | Resource exhaustion (sessions, ports, memory, retransmissions) | Global `max_sessions` semaphore; 8-session per-IP cap; bounded request size; bounded retransmissions; hard per-transfer deadline; file size limit; bounded event ring; duplicate-request dedup avoids task/port churn. |
-| Directory traversal / symlink escape | Component validation (`..`, absolute, drive, UNC, device names, ADS via `:`), per-component reparse-point rejection, canonical path check after open, component-wise prefix comparison (avoids `C:\root2` confusion). |
+| Directory traversal / symlink escape | Component validation (`..`, drive letters, device names, ADS via `:`), per-component reparse-point rejection, canonical path check after open, component-wise prefix comparison (avoids `C:\root2` confusion). A leading `/`/`\` is mapped to the root for legacy clients and cannot skip these checks. |
 | Silent data corruption | Exact-byte RRQ tests, ACK-block validation, retransmission of the exact encoded packet, idempotent duplicate handling, zero-length final block test, block wrap test. |
 | Overwriting or uploading data | WRQ rejected (ERROR 2) and `allow_upload = true` rejected at validation. No write path exists. |
 | Local IPC abuse | No IPC endpoint exists in this release. A future IPC must implement local authentication/ACL, framing limits and least-privilege commands. |
@@ -40,8 +40,14 @@ Implemented in `crates/tftp-core/src/filesystem.rs`:
 
 1. **Name validation** before touching the filesystem:
    - empty/overlong names, NUL and control characters rejected;
-   - absolute paths (`/`, `\`), drive letters and any `:` rejected (also blocks
-     NTFS alternate data streams);
+   - a leading `/` or `\` is stripped and interpreted as the sandbox root for
+     compatibility with old clients (`/firmware.bin` → `<root>/firmware.bin`);
+     a name consisting only of separators (the root directory itself) is
+     rejected because TFTP cannot transfer a directory;
+   - after that mapping, drive letters and any `:` are rejected (also blocks
+     NTFS alternate data streams); a UNC-like name such as `\\server\share` is
+     interpreted as the relative path `server/share` *inside* the root, never as
+     a network share;
    - both `/` and `\` are treated as separators; empty components rejected
      (catches `//`, trailing separators);
    - `.`/`..` components rejected;
@@ -58,6 +64,27 @@ Implemented in `crates/tftp-core/src/filesystem.rs`:
    canonical path is compared component-by-component against the canonical root
    (case-insensitive on Windows). The component-wise comparison prevents
    prefix confusion such as `C:\root` vs `C:\root2`.
+
+### Legacy root-prefix compatibility
+
+Some older TFTP clients issue a download as `get /file.bin`, i.e. they prefix the
+file name with the server's root directory. The sandbox therefore strips any
+leading `/` or `\` before validation instead of rejecting the request as an
+absolute path. This is a compatibility mapping, not a relaxation:
+
+- only **leading** separators are removed; `a//b`, `a/` and trailing separators
+  are still rejected;
+- `..`, drive letters, `:`, device names and reparse points are still rejected
+  after stripping, so `/../secret`, `/C:/Windows/win.ini` and
+  `//sub/../../secret` fail;
+- a UNC-looking request such as `\\server\share` becomes the relative path
+  `server\share` under the root, which is safe (and almost always missing);
+- a request for `/` (the root directory itself) is rejected because TFTP cannot
+  transfer directories.
+
+Covered by unit tests (`root_prefixed_names_map_to_the_root`,
+`rejects_traversal_and_drive_paths`) and by the UDP integration tests
+`root_prefixed_filename_is_served` and `root_prefix_does_not_escape_the_sandbox`.
 
 ### Residual filesystem risks (accepted, documented)
 

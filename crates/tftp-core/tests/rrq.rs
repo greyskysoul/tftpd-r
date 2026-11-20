@@ -249,7 +249,7 @@ async fn path_traversal_is_rejected() {
     for name in [
         "../secret.txt",
         "..\\secret.txt",
-        "/etc/passwd",
+        "/../secret.txt",
         "sub/../../secret.txt",
     ] {
         let error = download(fixture.addr(), name, &[])
@@ -261,6 +261,63 @@ async fn path_traversal_is_rejected() {
             "unexpected error for {name:?}"
         );
     }
+    fixture.stop().await;
+}
+
+#[tokio::test]
+async fn root_prefixed_filename_is_served() {
+    // Legacy clients send `get /file.bin`; the leading separator means the
+    // server's root directory, not an absolute host path.
+    let payload = pattern(1500);
+    let nested = pattern(400);
+    let fixture = Fixture::start(&[("firmware.bin", &payload), ("dir/nested.bin", &nested)]).await;
+    for (name, expected) in [
+        ("/firmware.bin", payload.as_slice()),
+        ("//firmware.bin", payload.as_slice()),
+        ("\\firmware.bin", payload.as_slice()),
+        ("/dir/nested.bin", nested.as_slice()),
+    ] {
+        let result = download(fixture.addr(), name, &[])
+            .await
+            .unwrap_or_else(|error| panic!("download of {name:?} failed: {error:?}"));
+        assert_eq!(result.data, expected, "unexpected content for {name:?}");
+    }
+    fixture.stop().await;
+}
+
+#[tokio::test]
+async fn root_prefix_does_not_escape_the_sandbox() {
+    let outside = tempfile::tempdir().expect("outside dir");
+    fs::write(outside.path().join("secret.txt"), b"top secret").expect("write secret");
+    let fixture = Fixture::start(&[]).await;
+    for name in [
+        "/../secret.txt",
+        "\\..\\secret.txt",
+        "//sub/../../secret.txt",
+        "/C:/Windows/win.ini",
+    ] {
+        let error = download(fixture.addr(), name, &[])
+            .await
+            .expect_err("must fail");
+        assert_eq!(
+            error.0,
+            ErrorCode::AccessViolation,
+            "unexpected error for {name:?}"
+        );
+    }
+
+    // A root-prefixed path without traversal is simply a relative path in the
+    // root; a missing file is reported as such, not as an escape attempt.
+    let missing = download(fixture.addr(), "/etc/passwd", &[])
+        .await
+        .expect_err("must fail");
+    assert_eq!(missing.0, ErrorCode::FileNotFound);
+
+    // The root directory itself is not a file transfer.
+    let root = download(fixture.addr(), "/", &[])
+        .await
+        .expect_err("must fail");
+    assert_eq!(root.0, ErrorCode::AccessViolation);
     fixture.stop().await;
 }
 

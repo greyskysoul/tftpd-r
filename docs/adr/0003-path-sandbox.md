@@ -1,6 +1,6 @@
 # ADR 0003: Filesystem sandbox strategy
 
-- **Status:** accepted
+- **Status:** accepted (updated 2026-11-20: legacy root-prefix mapping)
 - **Date:** 2026-11-20
 
 ## Context
@@ -14,11 +14,11 @@ names, ADS syntax and Unicode.
 
 Defence in depth, implemented in `tftp-core::filesystem`:
 
-1. **Syntactic validation** before any filesystem call: reject absolute paths,
-   drive letters/`:` (also blocks ADS), empty components, `.`/`..`, control
-   characters, trailing dots/spaces, invalid Windows characters and reserved
-   device names. Treat both `/` and `\` as separators so the meaning does not
-   depend on the platform.
+1. **Syntactic validation** before any filesystem call: strip a leading `/` or
+   `\` (legacy root prefix, see update below), then reject drive letters/`:`
+   (also blocks ADS), empty components, `.`/`..`, control characters, trailing
+   dots/spaces, invalid Windows characters and reserved device names. Treat both
+   `/` and `\` as separators so the meaning does not depend on the platform.
 2. **Canonical root** stored at sandbox construction; the root itself may be a
    symlink/junction chosen by the operator (it is canonicalised once).
 3. **Component walk** on every open: intermediate components must be real
@@ -32,10 +32,39 @@ Defence in depth, implemented in `tftp-core::filesystem`:
 5. **No writes**: WRQ is rejected, so there is no create/replace path to secure
    in this release.
 
+## Update 2026-11-20: legacy root-prefix mapping
+
+### Context
+
+Old TFTP clients may request a download as `get /firmware.bin`, prefixing the
+name with the server's root directory. The first implementation rejected every
+leading separator as an absolute path, which broke those clients even though the
+request was intended to be root-relative.
+
+### Decision
+
+Strip any leading `/` and `\` before component validation and interpret the
+remainder relative to the canonical sandbox root. Only leading separators are
+removed; every other rule (empty components, `.`/`..`, `:`, device names, control
+characters, reparse points, canonical-prefix check) still applies afterwards. A
+name that consists only of separators (`/`, `\\`) refers to the root directory
+itself and is rejected as an unusable file name.
+
+### Consequences
+
+- `/firmware.bin`, `//sub/file.bin` and `\firmware.bin` are served from the root;
+  this is covered by unit and UDP integration tests.
+- `/../secret`, `/C:/Windows/win.ini` and `//sub/../../secret` are still rejected.
+- UNC-like names are reduced to a relative path under the root
+  (`\\server\share` → `server/share`), which cannot leave the root.
+- The display name in events/logs no longer contains the legacy prefix.
+
 ## Consequences
 
 - Traversal, symlink/junction escapes, device names, ADS and `C:\root2` prefix
-  confusion are covered by tests.
+  confusion are covered by tests. The legacy root-prefix mapping has its own
+  positive and negative tests (served root-prefixed files, rejected
+  root-prefixed traversal).
 - A TOCTOU window remains between metadata checks and `open`; stable `std` has
   no openat-style relative open on Windows. The threat model assumes the export
   tree is not writable by an untrusted local user.

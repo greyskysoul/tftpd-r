@@ -6,6 +6,11 @@
 //! component-wise with the canonical root, which avoids the classic
 //! `starts_with("C:\\root")` match on `C:\\root2`.
 //!
+//! A leading `/` or `\` is treated as the server's root directory, because old
+//! clients commonly send `get /file.bin`. After stripping those separators the
+//! name is still checked component by component (`..`, drive letters, device
+//! names, ...), so the mapping cannot leave the root.
+//!
 //! # Residual races
 //!
 //! Windows has no stable, safe-std way to open a file *relative to an already
@@ -77,7 +82,13 @@ impl Sandbox {
         &self.root
     }
 
-    /// Validate a client-supplied name and join it to the root.
+    /// Validate a client-supplied name, normalise a legacy root prefix and join
+    /// it to the root.
+    ///
+    /// A leading `/` or `\` is interpreted as the server's root directory for
+    /// compatibility with old clients (`get /firmware.bin` → `firmware.bin`
+    /// below the root). Traversal, drive letters, device names and the other
+    /// component checks still apply afterwards.
     ///
     /// This performs syntactic validation only; [`Self::open_for_read`] performs
     /// the filesystem checks.
@@ -87,24 +98,32 @@ impl Sandbox {
     /// Returns [`FileError::InvalidName`] or [`FileError::Escape`] for unsafe
     /// names.
     pub fn resolve(&self, name: &str) -> Result<PathBuf, FileError> {
-        validate_name(name)?;
+        let normalized = normalize_name(name)?;
+        Ok(self.join_components(normalized))
+    }
+
+    fn join_components(&self, name: &str) -> PathBuf {
         let mut path = self.root.clone();
         for component in split_components(name) {
             path.push(component);
         }
-        Ok(path)
+        path
     }
 
     /// Open a file for reading through the sandbox.
+    ///
+    /// Leading path separators are mapped to the root as described on
+    /// [`Self::resolve`].
     ///
     /// # Errors
     ///
     /// Returns [`FileError`] for invalid names, missing files, permission
     /// problems, reparse points and size limits.
     pub async fn open_for_read(&self, name: &str) -> Result<OpenedFile, FileError> {
-        let path = self.resolve(name)?;
+        let normalized = normalize_name(name)?;
+        let path = self.join_components(normalized);
         let root = self.root.clone();
-        let display_name = crate::events::sanitize_display_name(name);
+        let display_name = crate::events::sanitize_display_name(normalized);
         let max = self.max_file_bytes;
         let (file, size) = tokio::task::spawn_blocking(move || open_checked(&root, &path, max))
             .await
@@ -231,24 +250,32 @@ fn components_equal(left: std::path::Component<'_>, right: std::path::Component<
     }
 }
 
-fn validate_name(name: &str) -> Result<(), FileError> {
-    if name.is_empty() {
-        return Err(FileError::InvalidName("empty file name"));
-    }
+/// Normalise a client-supplied TFTP name.
+///
+/// Legacy clients sometimes prefix a download with the server's root
+/// directory, for example `get /firmware.bin`. Any leading `/` or `\` is
+/// therefore stripped and the name is interpreted relative to the sandbox
+/// root. This is a mapping, not an escape hatch: after stripping, the usual
+/// component checks still run and the resulting path is always joined below the
+/// canonical root.
+fn normalize_name(name: &str) -> Result<&str, FileError> {
     if name.len() > MAX_NAME_BYTES {
         return Err(FileError::InvalidName("file name too long"));
     }
     if name.contains('\0') {
         return Err(FileError::InvalidName("file name contains NUL"));
     }
-    if name.starts_with('/') || name.starts_with('\\') {
-        return Err(FileError::Escape);
+    let relative = name.trim_start_matches(['/', '\\']);
+    if relative.is_empty() {
+        // The request names the root directory itself; TFTP cannot serve a
+        // directory, so report it as an unusable name.
+        return Err(FileError::InvalidName("empty file name"));
     }
-    if name.contains(':') {
+    if relative.contains(':') {
         return Err(FileError::Escape);
     }
     let mut total = 0usize;
-    for component in split_components(name) {
+    for component in split_components(relative) {
         if component.is_empty() {
             return Err(FileError::Escape);
         }
@@ -281,7 +308,7 @@ fn validate_name(name: &str) -> Result<(), FileError> {
     if total == 0 {
         return Err(FileError::InvalidName("empty file name"));
     }
-    Ok(())
+    Ok(relative)
 }
 
 fn split_components(name: &str) -> impl Iterator<Item = &str> {
@@ -411,7 +438,42 @@ mod tests {
     }
 
     #[test]
-    fn rejects_traversal_and_absolute_paths() {
+    fn root_prefixed_names_map_to_the_root() {
+        let (dir, sandbox) = sandbox();
+        let root = fs::canonicalize(dir.path()).expect("canon");
+        assert_eq!(
+            sandbox.resolve("/hello.txt").expect("resolve root prefix"),
+            root.join("hello.txt")
+        );
+        assert_eq!(
+            sandbox
+                .resolve("//sub/nested.bin")
+                .expect("resolve double slash"),
+            root.join("sub").join("nested.bin")
+        );
+        assert_eq!(
+            sandbox
+                .resolve(r"\hello.txt")
+                .expect("resolve backslash prefix"),
+            root.join("hello.txt")
+        );
+        assert_eq!(
+            sandbox
+                .resolve(r"\\sub\nested.bin")
+                .expect("resolve double backslash"),
+            root.join("sub").join("nested.bin")
+        );
+        // The root directory itself is not a file and gives a clean error.
+        for name in ["/", "///", r"\\", "/sub/"] {
+            assert!(
+                sandbox.resolve(name).is_err(),
+                "expected rejection for {name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_traversal_and_drive_paths() {
         let (_dir, sandbox) = sandbox();
         for name in [
             "../secret",
@@ -419,9 +481,10 @@ mod tests {
             ".",
             "./hello.txt",
             "sub/../../x",
-            "/etc/passwd",
+            "/../secret",
+            r"\..\secret",
+            "//../secret",
             r"C:\Windows\win.ini",
-            r"\\server\share\x",
             "a//b",
             "a/",
             "a\\",
@@ -459,6 +522,17 @@ mod tests {
     async fn opens_regular_file_and_reports_size() {
         let (_dir, sandbox) = sandbox();
         let opened = sandbox.open_for_read("hello.txt").await.expect("open");
+        assert_eq!(opened.size, 5);
+        assert_eq!(opened.display_name, "hello.txt");
+    }
+
+    #[tokio::test]
+    async fn opens_root_prefixed_file_without_leading_slash_in_display_name() {
+        let (_dir, sandbox) = sandbox();
+        let opened = sandbox
+            .open_for_read("/hello.txt")
+            .await
+            .expect("open root-prefixed");
         assert_eq!(opened.size, 5);
         assert_eq!(opened.display_name, "hello.txt");
     }

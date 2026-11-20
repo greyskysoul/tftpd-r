@@ -100,6 +100,17 @@ with `blksize = 8`.
 The transfer deadline (`max_transfer_duration_secs`) is checked before sending
 each block and while waiting for ACKs.
 
+## Filesystem sandbox
+
+`Sandbox` canonicalises the root once and validates every request syntactically
+before touching the filesystem. A leading `/` or `\` is mapped to the root for
+legacy clients (`/firmware.bin` → `<root>/firmware.bin`); after that mapping,
+`..`, drive letters/`:`, device names, alternate data streams and reparse points
+are rejected. The file is then opened through a component walk, and the final
+canonical path is compared component-wise with the canonical root. Details and
+residual risks are in [`security.md`](security.md) and
+[`adr/0003-path-sandbox.md`](adr/0003-path-sandbox.md).
+
 ## Events
 
 `EventSink` is a small synchronous trait. The daemon's `TracingSink` maps events

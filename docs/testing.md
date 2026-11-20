@@ -27,7 +27,7 @@ with network access; subsequent builds/tests ran with `--offline`.
 | --- | --- |
 | `cargo fmt --all -- --check` | Pass (exit 0) |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Pass (no warnings) |
-| `cargo test --workspace` | **93 passed, 0 failed** |
+| `cargo test --workspace` | **97 passed, 0 failed** |
 | `cargo build --workspace --release` | Pass (~1 min 36 s including Slint) |
 
 Release artifacts on the verification machine (informational only; not an
@@ -39,8 +39,8 @@ Test breakdown from `cargo test --workspace`:
 
 | Target | Tests | What is covered |
 | --- | --- | --- |
-| `tftp-core` unit tests (`src/lib.rs` target) | 51 | codec round-trips and malformed/oversized packets; option negotiation ranges, duplicates and clamping; configuration defaults/ranges/TOML errors; path sandbox traversal, device names, symlink/reparse rejection, size limits; event ring drop/sequence/clear; error-code mapping |
-| `tftp-core` integration `tests/rrq.rs` | 24 | real loopback UDP server and client: small/exact-multiple/empty files, missing file, traversal, `blksize`/`tsize`/`timeout` negotiation, clamping, invalid option, duplicate ACK, retransmission, unknown TID ERROR 5, duplicate RRQ resend without a new session, WRQ rejection, netascii rejection, unknown mode/malformed/oversized datagrams, size limit, concurrent transfers, lifecycle events, shutdown cancellation, idempotent stop, retry exhaustion, **block-number wrap 65535 → 0** with `blksize = 8` (65,537 blocks) |
+| `tftp-core` unit tests (`src/lib.rs` target) | 53 | codec round-trips and malformed/oversized packets; option negotiation ranges, duplicates and clamping; configuration defaults/ranges/TOML errors; path sandbox traversal, device names, legacy root-prefix mapping and root-directory rejection, symlink/reparse rejection, size limits; event ring drop/sequence/clear; error-code mapping |
+| `tftp-core` integration `tests/rrq.rs` | 26 | real loopback UDP server and client: small/exact-multiple/empty files, missing file, traversal, legacy `/file` and `\file` requests, root-prefixed traversal rejection, `blksize`/`tsize`/`timeout` negotiation, clamping, invalid option, duplicate ACK, retransmission, unknown TID ERROR 5, duplicate RRQ resend without a new session, WRQ rejection, netascii rejection, unknown mode/malformed/oversized datagrams, size limit, concurrent transfers, lifecycle events, shutdown cancellation, idempotent stop, retry exhaustion, **block-number wrap 65535 → 0** with `blksize = 8` (65,537 blocks) |
 | `tftp-daemon` unit tests | 10 | CLI parsing/defaults/overrides, embedded example template validity, config loading errors, unknown fields, override validation, status-channel failure path |
 | `tftp-daemon` integration `tests/cli.rs` | 5 | binary `print-default-config` equals `config.example.toml`; `check-config` success/missing file/uploads-rejected exit code 2; `serve` refuses invalid config with exit code 1; `serve` stays running with a valid config |
 | `tftp-gui-slint` controller tests | 2 | embedded `ServerHandle` start/stop within a Tokio runtime, double-start rejection, invalid root does not start |
@@ -64,7 +64,8 @@ verification machine.
    - Started `tftp-daemon serve --config <temp config>` with
      `bind_address = "127.0.0.1:0"` and a 5,000-byte file `image.bin`.
    - A raw UDP TFTP client (Python, 512-byte `octet` RRQ, sequential ACKs)
-     downloaded the file byte-for-byte.
+     downloaded the file **as `/image.bin`**, i.e. with the legacy root prefix
+     that the user's old client sends, and the bytes matched exactly.
    - Sent `CTRL_BREAK_EVENT` to the daemon process group: it logged
      `shutdown requested signal=Ctrl-Break` and `TFTP server stopped`, and exited
      with code 0.
@@ -110,8 +111,10 @@ verification machine.
    hash matches and the transfer appears/disappears in the Active transfers list.
 4. Stop the server during a large transfer; confirm the client sees an error and
    the UI reaches `Stopped` without freezing.
-5. Try `../`, an absolute path, a symlink inside the root and an oversized file;
-   confirm the client receives an error and the server log shows a rejection.
+5. Try `../`, a root-prefixed traversal (`/../file`), a drive path, a symlink
+   inside the root and an oversized file; confirm the client receives an error
+   and the server log shows a rejection. Also request `/file.bin` with the old
+   client and confirm it is served from the configured root.
 6. Flood events (large file, small `blksize`) and confirm the UI stays
    responsive and log/transfer lists stay bounded.
 7. Close the window during an active transfer; confirm the process exits and no
