@@ -44,6 +44,40 @@ The suite also runs on `ubuntu-latest` in CI. One core unit test
 Windows and a Unix variant, so the component-comparison invariant is checked on
 both platforms instead of only where `C:\` paths are meaningful.
 
+## CI and release verification (GitHub Actions)
+
+The repository is public at
+[github.com/greyskysoul/tftpd-r](https://github.com/greyskysoul/tftpd-r).
+`.github/workflows/ci.yml` runs on every push; `.github/workflows/release.yml`
+runs on a `v*` tag, or manually without publishing.
+
+| Run | Result |
+| --- | --- |
+| CI on 2026-11-20 ([44681897220](https://github.com/greyskysoul/tftpd-r/actions/runs/44681897220)) | Pass: fmt, clippy `-D warnings` and `cargo test --workspace` on `windows-latest` (MSVC) and `ubuntu-latest` (GNU); GUI `cargo check` on Windows |
+| Release dry run ([44681934004](https://github.com/greyskysoul/tftpd-r/actions/runs/44681934004)) | Pass: the same test gate, then all four targets built and packaged; the publish job was correctly skipped for a non-tag run |
+| `v0.1.0` release ([44684633030](https://github.com/greyskysoul/tftpd-r/actions/runs/44684633030)) | Pass: [release published](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.1.0) with four archives plus `SHA256SUMS` |
+
+What CI proves, and what it does not:
+
+- The suite passes with the **MSVC** toolchain (`x86_64-pc-windows-msvc`) and on
+  Linux (GNU). The hand-verified build documented above is still the GNU one.
+- `aarch64-pc-windows-msvc` and `aarch64-unknown-linux-gnu` are built on native
+  arm64 runners and packaged, but no test is executed there and no arm64 binary
+  has ever been run.
+- Archive contents were inspected for a Windows and a Linux artifact: each holds
+  `tftpd-r`, `tftpd-r-gui`, `config.example.toml`, `README.md`, `LICENSE-MIT`
+  and `LICENSE-APACHE`.
+- The published `SHA256SUMS` was verified against a downloaded asset
+  (`tftpd-r-0.1.0-aarch64-pc-windows-msvc.zip`, SHA-256 starting `8ee455c6`); it
+  matched.
+
+Archive and binary sizes in the `v0.1.0` release: Windows x64 zip 7.09 MiB,
+Windows arm64 zip 6.76 MiB, Linux x64 tar.gz 9.19 MiB, Linux arm64 tar.gz
+8.77 MiB. Uncompressed MSVC x64 binaries are `tftpd-r.exe` 2.28 MiB and
+`tftpd-r-gui.exe` 13.36 MiB; Linux arm64 `tftpd-r` is 1.94 MiB and
+`tftpd-r-gui` 15.76 MiB. They differ from the GNU numbers recorded above because
+the toolchain and platform differ.
+
 Test breakdown from `cargo test --workspace`:
 
 | Target | Tests | What is covered |
@@ -145,17 +179,17 @@ verification machine.
 - **External TFTP client interoperability** (tftp-hpa, Tftpd64, PXE firmware,
   U-Boot, etc.). Only the in-repo test client and the raw Python client were
   used.
-- **MSVC toolchain build.** Only the `x86_64-pc-windows-gnu` host was built and
-  tested here. The code contains no `unsafe` and no Windows-API calls outside
-  the reparse-point attribute check, so MSVC is expected to work, but that is
-  not measured.
-- **Linux/macOS runtime.** `.github/workflows/ci.yml` configures Linux and
-  Windows runners, but no CI run has been executed for this repository yet.
+- **MSVC runtime behaviour.** CI compiles and tests `x86_64-pc-windows-msvc` and
+  compiles `aarch64-pc-windows-msvc`, but no MSVC binary has been run by hand on
+  a target machine; only the GNU build above was.
+- **Linux/macOS runtime.** CI runs the full suite on Linux, but the GUI has never
+  been run on a Linux desktop, and macOS is untested.
 - **LAN/deployment behaviour:** binding `0.0.0.0`, Windows Defender Firewall
   rules for TID ports, port 69 privileges, RDP sessions, concurrent real-world
   clients.
-- **Release artifacts:** see the release build section; binary size and RSS are
-  not acceptance criteria and are not published as guarantees.
+- **Release artifacts:** sizes and checksums are recorded above; they are
+  informational for the recorded build and are not a guarantee for other
+  machines or toolchains.
 - **Keyboard/IME input in the settings fields.** The fields received focus and
   rendered correctly, but the synthetic `WM_CHAR` used here was not conclusive
   for normal typing or Chinese IME composition; this needs a person on a target

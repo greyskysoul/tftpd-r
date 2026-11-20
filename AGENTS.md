@@ -15,11 +15,11 @@
 | Phase 0–5 | ✅ 已完成 | workspace、codec/沙箱、RRQ 引擎、daemon、GUI 面板重设计（无边框自定义标题栏与窗口控件、工具栏状态徽标、状态栏、日志/传输列表、设置/关于、最近根目录）、文档/ADR/CI 文件 |
 | Phase 6 IPC | ⏳ 未开始 | GUI 仅 Embedded 模式；无 named pipe / daemon 控制 |
 | Phase 7 WRQ 上传 | ⏳ 未开始 | 默认且唯一行为是只读；`allow_upload=true` 被配置校验拒绝 |
-| Phase 8 发布/目标机 | ⏳ 部分完成 | Release 构建通过；本机 2× DPI 截图验证了中文/图标/主要交互，但 MSVC、外部客户端、LAN/防火墙、真实键盘/IME 与目标机人工验收未做 |
+| Phase 8 发布/目标机 | 🟡 部分完成 | 0.1.0 已发布（[GitHub Release](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.1.0)，Windows/Linux × x64/arm64 四目标原生构建）；CI 在 windows-latest（MSVC x64）与 ubuntu-latest（GNU x64）上 fmt/clippy/test 全绿；目标机人工验收（真实/老式客户端、LAN/防火墙、RDP、IME、其他 DPI）未做 |
 
-已验证环境：Windows 11（10.0.26300）+ Rust 1.100.0 `x86_64-pc-windows-gnu` + MinGW-w64 GCC 15.3 + Slint 1.19.0。**未验证**：MSVC 工具链、Linux 运行、真实/外部 TFTP 客户端互操作、Windows Service、RDP、69 端口权限、真实键盘/IME 输入、其他 DPI/语言下的字体渲染与无障碍。不要在文档或回复中把这些写成已通过。
+已验证环境：Windows 11（10.0.26300）+ Rust 1.100.0 `x86_64-pc-windows-gnu` + MinGW-w64 GCC 15.3 + Slint 1.19.0；CI 另在 `windows-latest`（MSVC x64）与 `ubuntu-latest`（GNU x64）跑通 fmt/clippy/test，并在原生 arm64 runner 上构建 arm64 产物。**未验证**：MSVC、Linux 与 arm64 产物的**运行**（CI 只对 x64 跑测试，arm64 仅编译）、GUI 在 Linux 桌面上的运行、真实/外部 TFTP 客户端互操作、Windows Service、RDP、69 端口权限、真实键盘/IME 输入、其他 DPI/语言下的字体渲染与无障碍。不要在文档或回复中把这些写成已通过。
 
-最近一次完整验证结果：`cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`（105 passed）、`cargo build --workspace --release` 全部通过；daemon 端到端以 `/image.bin` 形式下载 5000 字节并 Ctrl-Break 优雅退出；GUI debug/release `--smoke-test` 退出码均为 0；GUI 面板的启动/停止/重启、真实 2 MiB TFTP 传输、设置/关于对话框、最近根目录切换、自定义窗口控件（最小化/最大化/还原/关闭）和窗口关闭均在本机按 `docs/testing.md` 的人工步骤验证。执行新改动后必须重新运行并更新真实数字。
+最近一次完整验证结果：`cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`（105 passed）、`cargo build --workspace --release` 全部通过；daemon 端到端以 `/image.bin` 形式下载 5000 字节并 Ctrl-Break 优雅退出；GUI debug/release `--smoke-test` 退出码均为 0；GUI 面板的启动/停止/重启、真实 2 MiB TFTP 传输、设置/关于对话框、最近根目录切换、自定义窗口控件（最小化/最大化/还原/关闭）和窗口关闭均在本机按 `docs/testing.md` 的人工步骤验证。CI 于 2026-11-20 在 Windows MSVC 与 Linux GNU 上复跑同一套命令并全绿，`v0.1.0` 由 GitHub Actions 构建四个归档并发布（`SHA256SUMS` 已抽查核对）。执行新改动后必须重新运行并更新真实数字。
 
 ## 2. 仓库地图
 

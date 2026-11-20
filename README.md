@@ -1,5 +1,7 @@
 # TftpdR
 
+[![CI](https://github.com/greyskysoul/tftpd-r/actions/workflows/ci.yml/badge.svg)](https://github.com/greyskysoul/tftpd-r/actions/workflows/ci.yml)
+
 TftpdR is a read-only TFTP (RFC 1350) server written in Rust, with a headless
 daemon and a native [Slint](https://slint.dev/) desktop panel.
 
@@ -7,6 +9,17 @@ daemon and a native [Slint](https://slint.dev/) desktop panel.
 > the path sandbox, the daemon CLI and the embedded-mode GUI are implemented and
 > tested. WRQ uploads, daemon IPC and Windows Service packaging are explicitly
 > **not** part of this release. See [Scope](#scope-and-non-goals).
+
+## Downloads
+
+Prebuilt archives for Windows and Linux on x64 and arm64 are attached to the
+[latest release](https://github.com/greyskysoul/tftpd-r/releases/latest). Each
+archive contains the `tftpd-r` daemon, the `tftpd-r-gui` panel,
+`config.example.toml`, `README.md` and both license files; `SHA256SUMS` covers
+every asset.
+
+The protocol engine and the daemon are portable; the desktop panel needs a
+graphical session (an X11 or Wayland session on Linux).
 
 ## Scope and non-goals
 
@@ -56,8 +69,8 @@ INI configuration stored at `~/.tftpdr.ini` — are recorded in
 - Rust **1.100.0** is the toolchain used to develop and verify this workspace.
   An MSRV is not yet claimed; older compilers have not been tested.
 - Windows 10/11 is the primary target. The protocol engine is platform-neutral
-  and its tests also run on Linux (see CI), but this repository has only been
-  executed on Windows so far.
+  and the full test suite also runs on Linux in CI; the desktop panel has only
+  been run by hand on Windows so far.
 - On Windows, a linker is required: the MSVC Build Tools (`link.exe`) for the
   default `x86_64-pc-windows-msvc` toolchain, or MinGW-w64 for
   `x86_64-pc-windows-gnu`. The verification described in
