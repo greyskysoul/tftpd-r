@@ -16,6 +16,12 @@ import { AboutDialog } from "about.slint";
 
 export component AppWindow inherits Window {
     title: "TftpdR · TFTP 服务端";
+    // Product icon (ui/icons/app-icon.svg) for the window and task-bar icon.
+    // The panel build has no runtime image decoder, so the decoded pixels are
+    // passed in from Rust (see `app_icon()` in src/main.rs) instead of using
+    // `@image-url`.
+    in property <image> app-icon;
+    icon: root.app-icon;
     preferred-width: 1120px;
     preferred-height: 780px;
     min-width: 900px;
@@ -69,6 +75,7 @@ export component AppWindow inherits Window {
     callback browse-root();
     callback clear-logs();
     callback recent-selected(string);
+    callback clear-recent();
     callback minimize-requested();
     callback maximize-requested();
     callback close-requested();
@@ -135,6 +142,7 @@ export component AppWindow inherits Window {
             root.recent-menu-open = false;
             root.recent-selected(path);
         }
+        clear-requested => { root.clear-recent(); }
     }
 
     if root.settings-open : SettingsDialog {

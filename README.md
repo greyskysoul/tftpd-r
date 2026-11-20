@@ -15,8 +15,9 @@ daemon and a native [Slint](https://slint.dev/) desktop panel.
 Prebuilt archives for Windows and Linux on x64 and arm64 are attached to the
 [latest release](https://github.com/greyskysoul/tftpd-r/releases/latest). Each
 archive contains the `tftpd-r` daemon, the `tftpd-r-gui` panel,
-`config.example.toml`, `README.md` and both license files; `SHA256SUMS` covers
-every asset.
+`config.example.toml`, `README.md` and both license files; the Windows archives
+also ship `tftpd-r-gui.ico` (the product icon, for shortcuts); `SHA256SUMS`
+covers every asset.
 
 The protocol engine and the daemon are portable; the desktop panel needs a
 graphical session (an X11 or Wayland session on Linux).
@@ -50,7 +51,10 @@ Implemented:
   window controls; toolbar with a prominent service-status chip plus
   start/restart, stop, settings and about; status bar with bind address and a
   clickable recently-used root selector; activity log and active transfers;
-  settings validation. Layout and icons are in `crates/tftpd-r-gui-slint/ui/`.
+  settings validation. The header is one flat `#37474f` block carrying the
+  product mark; the same artwork (`crates/tftpd-r-gui-slint/ui/icons/app-icon.svg`,
+  Material `dns` glyph) is the window and task-bar icon. Layout and icons are in
+  `crates/tftpd-r-gui-slint/ui/`.
 
 Not implemented in this release (deliberate, tracked in `docs/adr/`):
 
@@ -67,8 +71,10 @@ Port 69 as the default (with a non-forcing hint when privileges are missing) and
 multi-select bind addresses are implemented on `main` for the unreleased `0.2.0`
 and recorded in [docs/roadmap.md](docs/roadmap.md) and
 [docs/adr/0007](docs/adr/0007-default-port-69.md) /
-[docs/adr/0008](docs/adr/0008-multiple-bind-addresses.md). They are **not** part
-of 0.1.0. Configuration stays TOML; an INI format with a fixed location was
+[docs/adr/0008](docs/adr/0008-multiple-bind-addresses.md); the GUI first-run,
+history-clear and idle auto-restart behaviour is in
+[docs/adr/0009](docs/adr/0009-gui-first-run-and-auto-restart.md). They are **not**
+part of 0.1.0. Configuration stays TOML; an INI format with a fixed location was
 considered and dropped.
 
 ## Requirements
@@ -144,8 +150,13 @@ path. Traversal such as `/../secret` is still rejected.
 cargo run -p tftpd-r-gui-slint
 ```
 
-The GUI loads `config.toml` from the current directory when present; otherwise it
-uses safe defaults. The panel is in Chinese and is organized as follows:
+The GUI loads `config.toml` from the current directory when present. On the first
+start without a usable configuration it opens the settings dialog automatically
+(once per user profile) so the root directory and bind addresses can be filled
+in; the form then preselects "全部网络 (0.0.0.0)". The daemon and
+`ServerConfig::default()` keep their conservative loopback default. The panel
+does not rewrite `config.toml`; values that must survive a restart belong in
+that file. The panel is in Chinese and is organized as follows:
 
 - **Window**: frameless, with a custom title bar on the same dark background as
   the toolbar. The title bar holds the app name, a drag area
@@ -163,15 +174,23 @@ uses safe defaults. The panel is in Chinese and is organized as follows:
 - **Status bar**: a read-only hint, or the last error when there is one, on the
   left; the bind address(es) and the current root directory (last path
   component) on the right. Click the root name to choose another directory from
-  the recently used list.
+  the recently used list; the drop-down has a 清空 button that forgets the
+  history (the configured/running root is not affected).
 - **Settings dialog**: validated with the same `ServerConfig::validate` rules as
   the daemon. A port field plus a multi-select address picker (always offering
   "全部网络 (0.0.0.0)" and "本地回环 (127.0.0.1)" and the addresses discovered on
   this machine), a directory picker button for the root, and the transfer
-  limits. Every selected address shares the single port field. Changes are
-  stored for the next start or restart; the running server is not reconfigured
-  in place. **About** shows the version, feature summary and third-party icon
-  attribution.
+  limits. Every selected address shares the single port field. The wildcard is
+  exclusive: selecting "全部网络" clears the specific addresses, selecting a
+  specific address clears the wildcard, and the wildcard cannot be unchecked
+  (unchecking the last specific address selects 全部网络 again), so at least one
+  bind address is always selected. **About** shows the version, feature summary
+  and third-party icon attribution.
+- **Automatic restart**: saving settings, or switching the root while the server
+  is running, restarts it automatically when no transfer is active. With active
+  transfers the new values are stored and a warning explains that a manual
+  restart is required; the running downloads are never interrupted for a
+  configuration change.
 - **Activity log**: every transfer logs a start line and a completion or failure
   line (file, peer, size and duration), even when the start event was already
   evicted from the bounded event ring.
@@ -179,8 +198,9 @@ uses safe defaults. The panel is in Chinese and is organized as follows:
 Recently used roots are kept (most recent first, at most 8) in
 `%APPDATA%\TftpdR\recent-dirs.txt` on Windows and
 `$XDG_CONFIG_HOME/tftpd-r/recent-dirs.txt` (or `~/.config/tftpd-r/`) elsewhere.
-The file only stores local paths; write failures are ignored so the panel still
-works in read-only profiles.
+The one-time first-run flag is stored next to it in `ui-state.txt`. Both files
+only store local UI state; write failures are ignored so the panel still works
+in read-only profiles.
 
 Closing the window stops the embedded server and waits for active transfers,
 bounded by `shutdown_grace_secs`.
@@ -274,8 +294,9 @@ The test suite includes codec boundary tests, configuration/path-sandbox tests,
 shutdown cancellation, legacy `/file` requests, multiple listeners on one port
 and all-or-nothing binding), daemon CLI/config integration tests and GUI tests
 for the embedded controller (start/stop, asynchronous restart, failed restart),
-the recent-root persistence, interface-address parsing, folder-selection
-validation and the address-picker model. See
+the recent-root persistence and clearing, the one-time setup flag,
+interface-address parsing, folder-selection validation, the exclusive
+address-picker model and the idle/deferred auto-restart decision. See
 [docs/testing.md](docs/testing.md) for what was actually executed and what still
 needs manual/target-machine verification.
 

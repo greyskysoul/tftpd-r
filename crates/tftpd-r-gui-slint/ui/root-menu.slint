@@ -5,13 +5,14 @@ import { ScrollView } from "std-widgets.slint";
 import { Icons, MaterialIcon } from "icons.slint";
 import { RecentDir } from "models.slint";
 import { Theme } from "theme.slint";
-import { IconButton } from "widgets.slint";
+import { IconButton, SmallButton } from "widgets.slint";
 
 export component RootMenu inherits Rectangle {
     in property <[RecentDir]> items;
 
     callback dismissed();
     callback selected(string);
+    callback clear-requested();
 
     width: 100%;
     height: 100%;
@@ -32,7 +33,9 @@ export component RootMenu inherits Rectangle {
         x: root.width - self.width - 16px;
         y: root.height - self.height - 50px;
         width: 520px;
-        height: min(112px + root.items.length * 44px, root.height - 150px);
+        // The base height leaves room for the toolbar row, the clear button and
+        // the empty-state hint; each entry adds a 40 px row plus spacing.
+        height: min(150px + root.items.length * 44px, root.height - 150px);
 
         background: Theme.panel-bg;
         border-radius: 10px;
@@ -60,6 +63,14 @@ export component RootMenu inherits Rectangle {
                     vertical-alignment: center;
                 }
                 Rectangle { horizontal-stretch: 1; background: transparent; }
+                SmallButton {
+                    label: "清空";
+                    icon-data: Icons.delete-sweep;
+                    tint: Theme.text-muted;
+                    button-width: 72px;
+                    available: root.items.length > 0;
+                    clicked => { root.clear-requested(); }
+                }
                 IconButton {
                     icon-data: Icons.close;
                     button-size: 24px;
@@ -141,7 +152,7 @@ export component RootMenu inherits Rectangle {
 
             Rectangle { height: 1px; background: Theme.panel-border; }
             Text {
-                text: "服务运行中切换目录后，重启服务即可生效。";
+                text: "服务运行中切换目录：无进行中的传输时自动重启，否则请稍后手动重启。";
                 color: Theme.text-faint;
                 font-size: 10px;
             }

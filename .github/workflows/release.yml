@@ -91,6 +91,11 @@ jobs:
           mkdir -p "dist/${name}"
           cp "target/release/tftpd-r${exe}" "dist/${name}/"
           cp "target/release/tftpd-r-gui${exe}" "dist/${name}/"
+          if [ -n "$exe" ]; then
+            # Product icon for shortcuts: the executable does not embed a PE
+            # icon resource yet (see crates/tftpd-r-gui-slint/ui/icons/README.md).
+            cp "crates/tftpd-r-gui-slint/ui/icons/app-icon.ico" "dist/${name}/tftpd-r-gui.ico"
+          fi
           cp config.example.toml README.md LICENSE-MIT LICENSE-APACHE "dist/${name}/"
           if [ -n "$exe" ]; then
             (cd dist && 7z a -tzip "../${name}.zip" "${name}" >/dev/null)

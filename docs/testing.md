@@ -27,17 +27,23 @@ with network access; subsequent builds/tests ran with `--offline`.
 | --- | --- |
 | `cargo fmt --all -- --check` | Pass (exit 0) |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Pass (exit 0, no warnings) |
-| `cargo test --workspace` | **131 passed, 0 failed** |
-| `cargo build --workspace --release` | Pass (1 m 28 s in the final run) |
+| `cargo test --workspace` | **147 passed, 0 failed** |
+| `cargo build --workspace --release` | Pass (59.6 s in the final run) |
 
 The workspace was renamed from `rust-tftpd`/`tftp-*` to TftpdR/`tftpd-r-*` on
 2026-11-20. Every command in this section was re-run on 2026-11-20 after the GUI
 redesign; the results shown here are from that run (offline, GNU toolchain).
+The GUI crate now contributes 39 tests (24 before the first-run / auto-restart
+work): `product_icon_pixels_are_a_valid_rounded_tile` guards the embedded
+window-icon pixels (size, transparent corners, `#263238` tile, `#fafafa`
+glyph); `SetupState` guards the one-time setup flag; the address-toggle and
+`RestartDisposition` tests cover the picker rules and the idle auto-restart
+decision, and one test performs a real embedded-server restart.
 
 Release artifacts on the verification machine (informational only; not an
 acceptance criterion and not a promise for other machines/toolchains):
-`target/release/tftpd-r.exe` ≈ 2.04 MiB, `target/release/tftpd-r-gui.exe`
-≈ 12.43 MiB (debug symbols stripped by the release profile).
+`target/release/tftpd-r.exe` ≈ 2.07 MiB (2,174,976 bytes), `target/release/tftpd-r-gui.exe`
+≈ 12.81 MiB (13,430,272 bytes; debug symbols stripped by the release profile).
 
 The suite also runs on `ubuntu-latest` in CI. One core unit test
 (`prefix_confusion_is_rejected_by_component_comparison`) therefore has a
@@ -86,7 +92,7 @@ Test breakdown from `cargo test --workspace`:
 | `tftpd-r-core` integration `tests/rrq.rs` | 29 | real loopback UDP server and client: small/exact-multiple/empty files, missing file, traversal, legacy `/file` and `\file` requests, root-prefixed traversal rejection, `blksize`/`tsize`/`timeout` negotiation, clamping, invalid option, duplicate ACK, retransmission, unknown TID ERROR 5, duplicate RRQ resend without a new session, WRQ rejection, netascii rejection, unknown mode/malformed/oversized datagrams, size limit, concurrent transfers, lifecycle events, shutdown cancellation, idempotent stop, retry exhaustion, **block-number wrap 65535 → 0** with `blksize = 8` (65,537 blocks); multiple listeners on one resolved port (IPv6 checked when available), wildcard collapsing to one listener, and an unbindable address aborting the whole start |
 | `tftpd-r-daemon` unit tests | 10 | CLI parsing/defaults/overrides, embedded example template validity, config loading errors, unknown fields, override validation, status-channel failure path |
 | `tftpd-r-daemon` integration `tests/cli.rs` | 5 | binary `print-default-config` equals `config.example.toml`; `check-config` success/missing file/uploads-rejected exit code 2; `serve` refuses invalid config with exit code 1; `serve` stays running with a valid config |
-| `tftpd-r-gui-slint` unit tests | 23 | embedded controller start/stop, double-start rejection, invalid root, asynchronous restart (old server → new config) and failed-restart error reporting; recent-root ordering, de-duplication, cap, persistence, canonicalisation and stale-directory cleanup; interface-address parsing/filtering/sorting; folder-selection validation; address picker model (two permanent entries, selected-but-undiscovered addresses preserved, duplicate removal, summaries), status-bar address summary and leaf-directory name |
+| `tftpd-r-gui-slint` unit tests | 39 | embedded controller start/stop, double-start rejection, invalid root, asynchronous restart (old server → new config), failed-restart error reporting and the no-stale-`Running`-after-stop guarantee; recent-root ordering, de-duplication, cap, persistence, canonicalisation, stale-directory cleanup and clearing the state file; one-time setup-flag persistence and read-only-profile tolerance; interface-address parsing/filtering/sorting; folder-selection validation; address picker model (two permanent entries, selected-but-undiscovered addresses preserved, duplicate removal, summaries) and the exclusive/sticky/fallback "全部网络" toggle rules; first-run all-network defaults; idle auto-restart with a real embedded server, deferral while a transfer is tracked, unchanged configuration and a deliberate stop; status-bar address summary and leaf-directory name |
 | `tftpd-r-core` doc test | 1 | crate-level usage example compiles |
 
 The block-wrap test transfers 65,537 blocks in roughly 3–4 seconds on the
@@ -98,8 +104,9 @@ verification machine.
   slower than ideal and could be flaky on extremely loaded machines.
 - Packet loss is not injected with a proxy; retransmission behaviour is tested by
   withholding ACKs deterministically.
-- The GUI tests cover the controller and recent-root state, not window rendering
-  or real user interaction. Rendering and interaction were checked manually as
+- The GUI tests cover the controller, setup state, recent-root state, address
+  toggles and the restart decision, not window rendering or real user
+  interaction. Rendering and interaction were checked manually as
   described below; that check is not an automated acceptance test.
 
 ## Manual end-to-end verification performed
@@ -209,8 +216,92 @@ verification machine.
   input does not reach this winit window under the agent sandbox, so the dialogs
   were opened through the preview variable instead of a click.
 
-## Not verified (and therefore not claimed)
+### Product icon and header palette (2026-11-20, third run)
 
+- **Icon artwork.** New master `crates/tftpd-r-gui-slint/ui/icons/app-icon.svg`:
+  the Material `dns` glyph in `#fafafa` on a `#263238` rounded square (radius
+  56/256) with a soft top-light sheen. The `dns` path data is the same string as
+  `Icons.dns`. Edge/Chromium cannot start inside the agent sandbox (its
+  multi-process model needs named pipes), so the SVG was rasterised in-process
+  with WPF; the rasteriser asserted the parsed glyph bounds (3,3)–(21,21) so a
+  mangled path could not silently produce a wrong icon. Exports: `app-icon.png`
+  (256 px), `app-icon.ico` (16–256 px) and `app-icon-128.rgba` (raw pixels for
+  the window icon).
+- **Window and task-bar icon.** The panel uploads the embedded RGBA buffer
+  through `Window.icon` and the running window was probed with `WM_GETICON`:
+  ICON_SMALL and ICON_SMALL2 return a **128x128** icon whose pixels match
+  `app-icon.png` (ICON_BIG stays 0 for this window, which is why the probe reads
+  the small icon too).
+- **Header palette.** `PrintWindow` captures at 1x show the title bar and the
+  toolbar as one flat `#37474f` block with a `#2b3a41` divider between the rows,
+  the `#263238`/`#fafafa` brand mark at 22 px on the left of the title bar
+  (previously a 20 px `#2563eb` badge), the toolbar icons/labels on the
+  blue-grey tints and the About dialog's 54 px mark. Panel surfaces carry no
+  gradients; only the exported icon files do.
+- **Failure mode found and removed in this run.** Embedding the icon with
+  `slint_build::EmbedResourcesKind::EmbedForSoftwareRenderer` makes the Slint
+  compiler pre-render glyphs at build time, which left every Chinese string and
+  every runtime log line blank in the panel. The build keeps the default embed
+  mode and passes the icon as a pixel buffer instead
+  (`crates/tftpd-r-gui-slint/build.rs`, `app_icon()` in `src/main.rs`).
+- **Smoke tests.** `tftpd-r-gui --smoke-test` exits 0 with empty stderr and empty
+  stdout in both the debug and the release build after the change.
+- **Not verified in this session:** the window controls (minimize / maximize /
+  close) are not visible in any capture here — the same holds for the unmodified
+  `main` build captured in the same session, so it is a property of this agent
+  desktop, not of the change: it reports 200 % scaling on a 1560x1040 physical
+  screen, so the 1120x780 *logical* window is laid out larger than its window and
+  the right/bottom edges are clipped. Captures therefore used
+  `SLINT_SCALE_FACTOR=1` plus a forced window size. Real mouse interaction with
+  the new palette, other DPI scales and the Windows Explorer `.exe` icon were not
+  exercised.
+
+### GUI first-run, address picker, history clear and idle auto-restart (2026-11-20, fourth run)
+
+The panel was built in debug mode and run with an isolated `APPDATA` so every
+scenario started from a fresh profile. `SLINT_SCALE_FACTOR=1` was set because
+this agent desktop reports 200 % scaling; captures are `PrintWindow` images.
+
+- **First run.** With no `config.toml` in the working directory, the settings
+  dialog opened automatically on startup. The bind summary showed
+  `全部网络 (0.0.0.0)`, the status bar showed `0.0.0.0:69`, and the activity log
+  contained the first-run hint. `ui-state.txt` was created with
+  `setup-shown=true`; a second launch with the same profile showed the main
+  window without the dialog. A fresh profile with a **valid** `config.toml`
+  started on the main window and did not create `ui-state.txt`.
+- **Address picker.** Clicks were posted as window messages (the method used in
+  the earlier runs; this time they reached the window). Starting from
+  "全部网络" selected: clicking `192.168.3.17` cleared the wildcard; clicking
+  `127.0.0.1` then added it (summary `本地回环 (127.0.0.1)、192.168.3.17`);
+  clicking "全部网络" cleared both; clicking "全部网络" again kept it checked;
+  unchecking the last specific address (127.0.0.1) selected the wildcard again.
+  Every state was checked in a capture; no capture showed an empty selection.
+- **Clear history.** With two seeded recent roots, the drop-down showed the new
+  清空 button next to the close button. Clicking it removed
+  `recent-dirs.txt`, logged `最近使用的根目录已清空。`, rendered the empty-state
+  hint and disabled the button. The configured root in the status bar did not
+  change.
+- **Idle auto-restart.** A temporary `config.toml` (`port = 56971`,
+  `bind_addresses = ["127.0.0.1"]`, `root_dir = "share1"`) plus two directories
+  was used. Starting the server and then selecting `share2` in the drop-down
+  logged `根目录已切换为 …share2；当前无进行中的传输，正在自动重启服务。`
+  followed by `服务已就绪：监听 127.0.0.1:56971，根目录 …share2。`. A raw UDP
+  client downloaded `two.txt` (5 bytes) from `share2`; `one.txt` (only in
+  `share1`) returned `ERROR File not found`. The status bar showed the new root
+  and the toolbar returned to 运行中.
+- **No restart during a transfer.** A slow raw client (512-byte blocks, 20 ms
+  between ACKs, 256 KiB file) kept one transfer active. Selecting `share2`
+  logged the warning `根目录已切换为 …share2；有 1 个进行中的传输，未自动重启，
+  稍后请手动重启。`; the server stayed on `share1` and the transfer row kept
+  progressing (80.3 % captured after the switch, 90 % later). The test client
+  itself timed out near the end of that deliberately slow transfer; the panel
+  never restarted or dropped the session during the observation window.
+- **Not verified in this run:** real mouse hardware (the posted messages are
+  synthetic), keyboard/IME editing of the dialog fields, other DPI scales, and
+  the native folder dialog. The file transfer used the in-repo raw Python client,
+  not an external TFTP implementation.
+
+## Not verified (and therefore not claimed)
 - **External TFTP client interoperability** (tftp-hpa, Tftpd64, PXE firmware,
   U-Boot, etc.). Only the in-repo test client and the raw Python client were
   used.
@@ -232,6 +323,10 @@ verification machine.
 - **Release artifacts:** sizes and checksums are recorded above; they are
   informational for the recorded build and are not a guarantee for other
   machines or toolchains.
+- **Executable icon.** Neither `.exe` embeds the product icon as a PE resource
+  yet, so Windows Explorer shows the generic executable icon. The running
+  window/task-bar icon and the `app-icon.ico` shipped in the archives carry the
+  artwork; adding a resource compiler belongs to the packaging work (Phase 8).
 - **Keyboard/IME input in the settings fields.** The fields received focus and
   rendered correctly, but the synthetic `WM_CHAR` used here was not conclusive
   for normal typing or Chinese IME composition; this needs a person on a target

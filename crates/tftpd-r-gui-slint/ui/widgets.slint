@@ -3,6 +3,31 @@
 import { Icons, MaterialIcon } from "icons.slint";
 import { Theme } from "theme.slint";
 
+// The TftpdR product mark: a rounded #263238 tile with the Material "dns"
+// (server racks) glyph in #fafafa. It mirrors ui/icons/app-icon.svg — the same
+// artwork plus a top-light sheen for the exported icon — so the in-app badge,
+// the window/task-bar icon and the shipped ICO carry one single identity.
+// Corner radius and glyph size keep the source artwork's ratios (56/256 and
+// 144/256), so the badge looks like a scaled-down copy of the icon.
+export component BrandMark inherits Rectangle {
+    in property <length> mark-size: 24px;
+    in property <color> tile: Theme.brand-bg;
+    in property <color> glyph: Theme.brand-glyph;
+
+    width: self.mark-size;
+    height: self.mark-size;
+    border-radius: root.mark-size * 0.21875;
+    background: root.tile;
+
+    MaterialIcon {
+        path-data: Icons.dns;
+        tint: root.glyph;
+        icon-size: root.mark-size * 0.5625;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+    }
+}
+
 export component Panel inherits Rectangle {
     background: Theme.panel-bg;
     border-radius: 10px;

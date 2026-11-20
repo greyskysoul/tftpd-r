@@ -1,7 +1,7 @@
 // Modal "About" dialog.
 import { Icons, MaterialIcon } from "icons.slint";
 import { Theme } from "theme.slint";
-import { IconButton, SmallButton } from "widgets.slint";
+import { IconButton, SmallButton, BrandMark } from "widgets.slint";
 
 export component AboutDialog inherits Rectangle {
     in property <string> app-version: "0.1.0";
@@ -60,19 +60,7 @@ export component AboutDialog inherits Rectangle {
             HorizontalLayout {
                 cross-axis-alignment: center;
                 spacing: 14px;
-                Rectangle {
-                    width: 54px;
-                    height: 54px;
-                    border-radius: 13px;
-                    background: Theme.toolbar-brand;
-                    MaterialIcon {
-                        path-data: Icons.dns;
-                        tint: #ffffff;
-                        icon-size: 32px;
-                        x: 11px;
-                        y: 11px;
-                    }
-                }
+                BrandMark { mark-size: 54px; }
                 VerticalLayout {
                     spacing: 2px;
                     Text {

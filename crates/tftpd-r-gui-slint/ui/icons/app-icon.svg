@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  TftpdR product icon (master artwork).
+
+  Rounded square #263238 with a soft top-light sheen and the Google Material
+  Design "dns" (server racks) glyph in #fafafa. The glyph path data is copied
+  verbatim from materialicons/24px.svg (Apache License 2.0, see ./LICENSE and
+  ./README.md) and the same path data is used by `Icons.dns` in ../icons.slint,
+  so the in-app brand mark (Widgets.BrandMark) and this file stay identical.
+
+  Geometry: 256x256 tile, corner radius 56 (22 %), glyph box 192x192 (24 x 8)
+  centred at 32,32, so the visible glyph spans 144x144 px in the middle.
+  The sheen is a vertical overlay on the tile only: white 12 % at the top edge
+  fading out by 42 %, then black up to 10 % at the bottom edge for depth. The
+  flat tile colour underneath is #263238.
+
+  Exports next to this file are generated from it:
+    app-icon.png  256x256, straight alpha
+    app-icon.ico  multi-size Windows icon (16, 24, 32, 48, 64, 128, 256)
+  Regenerate by rasterising this SVG on a transparent background.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="TftpdR">
+  <title>TftpdR</title>
+  <defs>
+    <linearGradient id="tile-sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.12"/>
+      <stop offset="0.42" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.72" stop-color="#000000" stop-opacity="0.02"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.10"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="#263238"/>
+  <rect width="256" height="256" rx="56" fill="url(#tile-sheen)"/>
+  <g transform="translate(32 32) scale(8)" fill="#fafafa">
+    <path d="M20 13H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1v-6c0-.55-.45-1-1-1zM7 19c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zM20 3H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1V4c0-.55-.45-1-1-1zM7 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>
+  </g>
+</svg>

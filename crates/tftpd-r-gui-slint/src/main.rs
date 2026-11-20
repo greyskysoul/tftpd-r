@@ -14,6 +14,7 @@ mod controller;
 mod folder_picker;
 mod netif;
 mod recent;
+mod user_state;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -31,9 +32,32 @@ use tftpd_r_core::ServerConfig;
 
 use controller::EmbeddedController;
 use recent::RecentDirs;
+use user_state::SetupState;
 
 const MAX_LOG_ROWS: usize = 500;
 const UI_TICK: Duration = Duration::from_millis(200);
+
+/// Product icon pixels for the window and task-bar icon, generated from
+/// `ui/icons/app-icon.svg` (see `ui/icons/README.md`). The panel build has no
+/// runtime image decoder, so the pixels are compiled in and uploaded as a raw
+/// buffer instead of going through `@image-url`.
+const APP_ICON_RGBA: &[u8] = include_bytes!("../ui/icons/app-icon-128.rgba");
+/// Edge length of `APP_ICON_RGBA`; Slint asks winit for 64 px logical, so 128 px
+/// stays sharp up to 200 % display scaling.
+const APP_ICON_SIZE: u32 = 128;
+
+/// Wrap the embedded product icon in a Slint image for `Window.icon`.
+fn app_icon() -> slint::Image {
+    let mut buffer =
+        slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(APP_ICON_SIZE, APP_ICON_SIZE);
+    // The asset length is a multiple of four bytes (asserted by a unit test), so
+    // the remainder returned here is always empty.
+    let (pixels, _) = APP_ICON_RGBA.as_chunks::<4>();
+    for (pixel, rgba) in buffer.make_mut_slice().iter_mut().zip(pixels) {
+        *pixel = slint::Rgba8Pixel::new(rgba[0], rgba[1], rgba[2], rgba[3]);
+    }
+    slint::Image::from_rgba8(buffer)
+}
 
 struct TransferState {
     file: String,
@@ -63,6 +87,8 @@ struct UiState {
     config: ServerConfig,
     /// Root directory of the server instance that is starting or running.
     running_root: Option<PathBuf>,
+    /// Configuration of the running server, for detecting changed settings.
+    running_config: Option<ServerConfig>,
     /// Message of the last failed start/restart, shown in the status bar.
     failed_message: Option<String>,
     throughput_sample: (Instant, u64),
@@ -92,6 +118,7 @@ impl UiState {
             recent_model: Rc::new(VecModel::default()),
             config,
             running_root: None,
+            running_config: None,
             failed_message: None,
             throughput_sample: (Instant::now(), 0),
             address_options: Vec::new(),
@@ -223,7 +250,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let smoke_test = std::env::args().any(|argument| argument == "--smoke-test");
-    let (initial_config, config_error) = load_initial_config();
+    let initial = load_initial_config();
+    let initial_config = initial.config();
     let mut recent = RecentDirs::load();
     // Make sure the configured root shows up in the drop-down even on first run
     // or when it differs from the last used directory.
@@ -236,19 +264,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     spawn_discovery(discovered.clone());
 
     let app = AppWindow::new()?;
+    app.set_app_icon(app_icon());
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
 
     let mut state = UiState::new(initial_config, recent, discovered);
     apply_config_to_settings(&app, &mut state);
+
+    // First start without a usable `config.toml`: open the settings dialog so
+    // the operator can fill in the root directory and bind addresses before the
+    // first start. The flag is per user, so this happens once; `--smoke-test` and
+    // the screenshot previews are development runs and must not consume it.
+    let preview = std::env::var("TFTPD_R_GUI_PREVIEW").ok();
+    let mut setup = SetupState::load();
+    let show_setup =
+        preview.is_none() && !smoke_test && !initial.is_configured() && setup.should_show_setup();
+    if show_setup {
+        app.set_settings_open(true);
+        setup.mark_setup_shown();
+    }
+
     // Development aid for UI screenshots and manual layout checks: open a
     // dialog at startup. Not reachable without the environment variable.
-    match std::env::var("TFTPD_R_GUI_PREVIEW").as_deref() {
-        Ok("settings") => app.set_settings_open(true),
-        Ok("picker") => {
+    match preview.as_deref() {
+        Some("settings") => {
+            app.set_about_open(false);
+            app.set_settings_open(true);
+        }
+        Some("about") => {
+            app.set_settings_open(false);
+            app.set_about_open(true);
+        }
+        Some("picker") => {
+            app.set_about_open(false);
             app.set_settings_open(true);
             app.set_settings_picker_open(true);
         }
-        Ok("transfer") => {
+        Some("root-menu") => {
+            app.set_settings_open(false);
+            app.set_about_open(false);
+            app.set_recent_menu_open(true);
+        }
+        Some("transfer") => {
+            app.set_settings_open(false);
+            app.set_about_open(false);
             // Fake rows so the transfer table and progress fill can be
             // screenshotted without a client; never reachable without the
             // environment variable.
@@ -277,11 +335,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     state.refresh_recent_model();
     state.push_log("INFO", "TftpdR 面板已启动；默认只读 RRQ，上传已禁用。");
-    if let Some(error) = config_error {
+    if let Some(error) = initial.error() {
         state.push_log(
             "WARN",
-            format!("config.toml 无效（{error}）；已使用安全默认值。"),
+            format!("config.toml 不可用（{error}）；已使用默认值。"),
         );
+    }
+    if show_setup {
+        state.push_log("INFO", "首次启动：请确认根目录和绑定地址，然后保存设置。");
     }
     let state = Rc::new(RefCell::new(state));
     let controller = Rc::new(RefCell::new(EmbeddedController::new()?));
@@ -346,16 +407,98 @@ fn spawn_discovery(slot: Arc<StdMutex<Option<Vec<IpAddr>>>>) {
     });
 }
 
-/// Load `config.toml` from the working directory, falling back to safe defaults.
-/// The error is returned so the panel can show it in the activity log instead
-/// of a console that does not exist for a windowed binary.
-fn load_initial_config() -> (ServerConfig, Option<String>) {
+/// Result of reading `config.toml` from the working directory.
+enum InitialConfig {
+    /// A valid configuration was loaded from disk.
+    Loaded(ServerConfig),
+    /// No `config.toml` exists; the panel starts from its own defaults.
+    Missing,
+    /// `config.toml` exists but is unreadable or invalid.
+    Invalid(String),
+}
+
+impl InitialConfig {
+    /// Configuration used for the settings form and the first start.
+    ///
+    /// Without a usable `config.toml`, the panel preselects "全部网络
+    /// (0.0.0.0)": the desktop panel is normally used to share files on the
+    /// LAN, and the server still only starts after the operator confirms the
+    /// dialog and presses 启动. `ServerConfig::default()` and the daemon keep
+    /// the conservative loopback default.
+    fn config(&self) -> ServerConfig {
+        match self {
+            Self::Loaded(config) => config.clone(),
+            Self::Missing | Self::Invalid(_) => gui_default_config(),
+        }
+    }
+
+    /// Whether a valid configuration file was loaded.
+    fn is_configured(&self) -> bool {
+        matches!(self, Self::Loaded(_))
+    }
+
+    /// Error of an unreadable or invalid configuration file, for the log.
+    fn error(&self) -> Option<&str> {
+        match self {
+            Self::Invalid(error) => Some(error),
+            Self::Loaded(_) | Self::Missing => None,
+        }
+    }
+}
+
+/// Defaults of the panel's first-run form: safe server defaults plus the
+/// wildcard bind address. Core and daemon defaults are not touched.
+fn gui_default_config() -> ServerConfig {
+    ServerConfig {
+        bind_addresses: vec![IpAddr::V4(Ipv4Addr::UNSPECIFIED)],
+        ..ServerConfig::default()
+    }
+}
+
+/// Load `config.toml` from the working directory.
+fn load_initial_config() -> InitialConfig {
     match std::fs::read_to_string("config.toml") {
         Ok(text) => match ServerConfig::from_toml_str(&text) {
-            Ok(config) => (config, None),
-            Err(error) => (ServerConfig::default(), Some(error.to_string())),
+            Ok(config) => InitialConfig::Loaded(config),
+            Err(error) => InitialConfig::Invalid(error.to_string()),
         },
-        Err(_) => (ServerConfig::default(), None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => InitialConfig::Missing,
+        Err(error) => InitialConfig::Invalid(format!("无法读取 config.toml：{error}")),
+    }
+}
+
+/// Apply one click in the multi-select address picker.
+///
+/// "全部网络 (0.0.0.0)" is exclusive and sticky:
+/// - selecting it clears every specific address;
+/// - selecting a specific address clears it;
+/// - unchecking it is not possible: the click keeps it selected, and selecting
+///   it while it is already selected also drops any other selected address;
+/// - unchecking the last specific address falls back to it, so the bind list can
+///   never become empty.
+fn toggle_address_choice(options: &mut [AddressChoice], address: IpAddr) {
+    let wildcard = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+    let Some(index) = options.iter().position(|option| option.ip == address) else {
+        return;
+    };
+    if address == wildcard {
+        for option in options.iter_mut() {
+            option.selected = option.ip == wildcard;
+        }
+        return;
+    }
+    let was_selected = options[index].selected;
+    options[index].selected = !was_selected;
+    if was_selected {
+        if !options.iter().any(|option| option.selected) {
+            if let Some(option) = options.iter_mut().find(|option| option.ip == wildcard) {
+                option.selected = true;
+            }
+        }
+    } else {
+        if let Some(option) = options.iter_mut().find(|option| option.ip == wildcard) {
+            option.selected = false;
+        }
     }
 }
 
@@ -374,10 +517,15 @@ fn handle_folder_pick(app: &AppWindow, state: &mut UiState, picked: Option<PathB
     match picked {
         Some(path) if path.is_dir() => {
             let display = display_root_path(&path);
-            state.config.root_dir = path.clone();
+            // Only the form is updated here: the directory becomes the
+            // configured root when the dialog is saved, so 取消 still restores
+            // the value that is currently in effect.
             let _ = state.recent.record(&path);
             app.set_settings_root(display.clone().into());
-            state.push_log("INFO", format!("根目录已设置为 {display}。"));
+            state.push_log(
+                "INFO",
+                format!("根目录已选择为 {display}；点击“保存设置”后生效。"),
+            );
         }
         Some(path) => {
             state.push_log(
@@ -424,9 +572,10 @@ fn install_callbacks(
             };
             match result {
                 Ok(()) => {
-                    state.config = config;
+                    state.config = config.clone();
                     state.failed_message = None;
                     state.running_root = Some(state.config.root_dir.clone());
+                    state.running_config = Some(config);
                     if running {
                         // The restart will pass through Stopping before the new
                         // server is ready; force the transition log for that.
@@ -490,13 +639,31 @@ fn install_callbacks(
             let mut state = state.borrow_mut();
             match read_config(&app, &state.config) {
                 Ok(config) => {
-                    state.config = config;
+                    state.config = config.clone();
                     let root = state.config.root_dir.clone();
                     let _ = state.recent.record(&root);
-                    state.push_log(
-                        "INFO",
-                        "设置已保存；服务运行中时，点击“重启”或用重启按钮使其生效。",
-                    );
+                    match auto_restart_if_idle(&controller, &mut state, &config) {
+                        RestartDisposition::Restarted => state.push_log(
+                            "INFO",
+                            "设置已保存；当前无进行中的传输，正在自动重启服务。",
+                        ),
+                        RestartDisposition::Deferred { transfers } => state.push_log(
+                            "WARN",
+                            format!(
+                                "设置已保存；有 {transfers} 个进行中的传输，未自动重启，稍后请手动重启。"
+                            ),
+                        ),
+                        RestartDisposition::Failed => state.push_log(
+                            "ERROR",
+                            "设置已保存，但自动重启失败；请手动重启。",
+                        ),
+                        RestartDisposition::NotRunning => {
+                            state.push_log("INFO", "设置已保存；将在下次启动时生效。");
+                        }
+                        RestartDisposition::Unchanged => {
+                            state.push_log("INFO", "设置未发生变化。");
+                        }
+                    }
                     app.set_settings_error("".into());
                     app.set_settings_open(false);
                 }
@@ -524,8 +691,10 @@ fn install_callbacks(
             app.set_settings_open(false);
         });
     }
-    // Toggle one bind address in the settings picker. The dialog stays open so
-    // several addresses can be selected in one go.
+    // Toggle one bind address in the settings picker. "全部网络" is exclusive
+    // and never unchecks, and the bind list can never become empty; see
+    // `toggle_address_choice`. The dialog stays open so several addresses can
+    // be selected in one go.
     {
         let weak = app.as_weak();
         let state = state.clone();
@@ -533,16 +702,12 @@ fn install_callbacks(
             let Some(app) = weak.upgrade() else {
                 return;
             };
+            let Ok(address) = address.to_string().parse::<IpAddr>() else {
+                return;
+            };
             let mut state = state.borrow_mut();
-            let address = address.to_string();
-            if let Some(option) = state
-                .address_options
-                .iter_mut()
-                .find(|option| option.ip.to_string() == address)
-            {
-                option.selected = !option.selected;
-                apply_address_options(&app, &state);
-            }
+            toggle_address_choice(&mut state.address_options, address);
+            apply_address_options(&app, &state);
         });
     }
     // Native folder picker for the root directory. The dialog runs in a helper
@@ -606,21 +771,48 @@ fn install_callbacks(
             let _ = state.recent.record(&path);
             let root_text = display_root_path(&path);
             app.set_settings_root(root_text.clone().into());
-            let running = matches!(
-                controller.borrow_mut().poll_status(),
-                ServerStatus::Starting | ServerStatus::Running { .. } | ServerStatus::Stopping
-            );
-            if running {
-                state.push_log(
+            let config = state.config.clone();
+            match auto_restart_if_idle(&controller, &mut state, &config) {
+                RestartDisposition::Restarted => state.push_log(
                     "INFO",
-                    format!("根目录已切换为 {root_text}；点击“重启”后生效。"),
-                );
-            } else {
-                state.push_log("INFO", format!("根目录已设置为 {root_text}。"));
+                    format!("根目录已切换为 {root_text}；当前无进行中的传输，正在自动重启服务。"),
+                ),
+                RestartDisposition::Deferred { transfers } => state.push_log(
+                    "WARN",
+                    format!(
+                        "根目录已切换为 {root_text}；有 {transfers} 个进行中的传输，未自动重启，稍后请手动重启。"
+                    ),
+                ),
+                RestartDisposition::Failed => state.push_log(
+                    "ERROR",
+                    format!("根目录已切换为 {root_text}；自动重启失败，请手动重启。"),
+                ),
+                RestartDisposition::Unchanged => {
+                    state.push_log("INFO", format!("根目录已经是 {root_text}。"));
+                }
+                RestartDisposition::NotRunning => {
+                    state.push_log("INFO", format!("根目录已设置为 {root_text}。"));
+                }
             }
             refresh_models(&app, &mut state);
             let status = controller.borrow_mut().poll_status();
             apply_status(&app, &status, &state);
+        });
+    }
+
+    // Forget the recent-root history. The configured and running root are
+    // unaffected: they are server configuration, not history.
+    {
+        let weak = app.as_weak();
+        let state = state.clone();
+        app.on_clear_recent(move || {
+            let Some(app) = weak.upgrade() else {
+                return;
+            };
+            let mut state = state.borrow_mut();
+            state.recent.clear();
+            state.push_log("INFO", "最近使用的根目录已清空。");
+            refresh_models(&app, &mut state);
         });
     }
 
@@ -827,9 +1019,70 @@ fn status_key(status: &ServerStatus) -> i32 {
     }
 }
 
+/// What to do after a configuration or root-directory change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RestartDisposition {
+    /// No server is running; the new settings apply on the next start.
+    NotRunning,
+    /// The running server already uses exactly this configuration.
+    Unchanged,
+    /// No transfer was active and the server was asked to restart.
+    Restarted,
+    /// Transfers are active; the restart is left to a manual action.
+    Deferred { transfers: usize },
+    /// The automatic restart failed; the error was logged.
+    Failed,
+}
+
+/// Restart the running server with `config` when nothing is being transferred.
+///
+/// A configuration change while transfers are active is only saved: restarting
+/// would abort the current downloads. The caller stores the new configuration
+/// in `state.config` before calling this.
+fn auto_restart_if_idle(
+    controller: &Rc<RefCell<EmbeddedController>>,
+    state: &mut UiState,
+    config: &ServerConfig,
+) -> RestartDisposition {
+    let status = controller.borrow_mut().poll_status();
+    // Starting counts as running; Stopping is a deliberate shutdown and must
+    // not be turned back into a start.
+    let running = matches!(
+        status,
+        ServerStatus::Starting | ServerStatus::Running { .. }
+    );
+    if !running {
+        return RestartDisposition::NotRunning;
+    }
+    if state.running_config.as_ref() == Some(config) {
+        return RestartDisposition::Unchanged;
+    }
+    if !state.transfers.is_empty() {
+        return RestartDisposition::Deferred {
+            transfers: state.transfers.len(),
+        };
+    }
+    match controller.borrow_mut().restart(config.clone()) {
+        Ok(()) => {
+            state.running_config = Some(config.clone());
+            state.running_root = Some(config.root_dir.clone());
+            state.failed_message = None;
+            // Suppress the transient Stopped log, exactly like the manual
+            // restart path.
+            state.last_status_key = status_key(&ServerStatus::Stopping);
+            RestartDisposition::Restarted
+        }
+        Err(error) => {
+            state.push_log("ERROR", format!("自动重启失败：{error}"));
+            RestartDisposition::Failed
+        }
+    }
+}
+
 fn sync_running_root(state: &mut UiState, status: &ServerStatus) {
     if matches!(status, ServerStatus::Stopped | ServerStatus::Failed { .. }) {
         state.running_root = None;
+        state.running_config = None;
     }
 }
 
@@ -1043,6 +1296,186 @@ mod tests {
         text.parse().expect("ip address")
     }
 
+    fn is_selected(options: &[AddressChoice], address: &str) -> bool {
+        options
+            .iter()
+            .find(|option| option.ip == ip(address))
+            .is_some_and(|option| option.selected)
+    }
+
+    #[test]
+    fn first_run_defaults_to_all_networks() {
+        let config = gui_default_config();
+        assert_eq!(
+            config.bind_addresses,
+            vec![IpAddr::V4(Ipv4Addr::UNSPECIFIED)]
+        );
+        assert_eq!(config.port, 69);
+        assert!(!config.allow_upload);
+        assert!(!config.overwrite);
+    }
+
+    #[test]
+    fn missing_or_invalid_config_uses_the_panel_default_and_keeps_the_error() {
+        let missing = InitialConfig::Missing;
+        assert!(!missing.is_configured());
+        assert!(missing.error().is_none());
+        assert_eq!(missing.config().bind_addresses, vec![ip("0.0.0.0")]);
+
+        let invalid = InitialConfig::Invalid("bad toml".to_string());
+        assert!(!invalid.is_configured());
+        assert_eq!(invalid.error(), Some("bad toml"));
+        assert_eq!(invalid.config().bind_addresses, vec![ip("0.0.0.0")]);
+    }
+
+    #[test]
+    fn a_loaded_config_keeps_its_addresses_for_the_first_start() {
+        let config = ServerConfig {
+            bind_addresses: vec![ip("127.0.0.1"), ip("10.0.0.7")],
+            ..ServerConfig::default()
+        };
+        let loaded = InitialConfig::Loaded(config.clone());
+        assert!(loaded.is_configured());
+        assert!(loaded.error().is_none());
+        assert_eq!(loaded.config(), config);
+    }
+
+    #[test]
+    fn choosing_all_networks_replaces_the_specific_addresses() {
+        let mut options = build_address_choices(&[ip("127.0.0.1")], &[ip("10.0.0.7")]);
+        assert!(is_selected(&options, "127.0.0.1"));
+
+        toggle_address_choice(&mut options, ip("0.0.0.0"));
+        assert!(is_selected(&options, "0.0.0.0"));
+        assert!(!is_selected(&options, "127.0.0.1"));
+        assert!(!is_selected(&options, "10.0.0.7"));
+        assert_eq!(options.iter().filter(|option| option.selected).count(), 1);
+    }
+
+    #[test]
+    fn choosing_a_specific_address_clears_all_networks() {
+        let mut options = build_address_choices(&[ip("0.0.0.0")], &[ip("10.0.0.7")]);
+        toggle_address_choice(&mut options, ip("10.0.0.7"));
+        assert!(!is_selected(&options, "0.0.0.0"));
+        assert!(is_selected(&options, "10.0.0.7"));
+
+        // A second specific address joins the list instead of replacing it.
+        toggle_address_choice(&mut options, ip("127.0.0.1"));
+        assert!(is_selected(&options, "10.0.0.7"));
+        assert!(is_selected(&options, "127.0.0.1"));
+        assert_eq!(options.iter().filter(|option| option.selected).count(), 2);
+    }
+
+    #[test]
+    fn all_networks_cannot_be_unchecked() {
+        let mut options = build_address_choices(&[ip("0.0.0.0")], &[]);
+        toggle_address_choice(&mut options, ip("0.0.0.0"));
+        assert!(is_selected(&options, "0.0.0.0"));
+        assert_eq!(options.iter().filter(|option| option.selected).count(), 1);
+    }
+
+    #[test]
+    fn clearing_the_last_address_falls_back_to_all_networks() {
+        let mut options = build_address_choices(&[ip("127.0.0.1")], &[ip("10.0.0.7")]);
+        toggle_address_choice(&mut options, ip("127.0.0.1"));
+        assert!(is_selected(&options, "0.0.0.0"));
+        assert!(!is_selected(&options, "127.0.0.1"));
+        assert_eq!(options.iter().filter(|option| option.selected).count(), 1);
+    }
+
+    #[test]
+    fn toggling_an_unknown_address_is_ignored() {
+        let mut options = build_address_choices(&[ip("0.0.0.0")], &[]);
+        toggle_address_choice(&mut options, ip("192.0.2.1"));
+        assert!(is_selected(&options, "0.0.0.0"));
+        assert_eq!(options.len(), 2);
+    }
+
+    #[test]
+    fn auto_restart_runs_only_for_running_servers_and_idle_transfers() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("file.bin"), b"payload").expect("write file");
+        let config = ServerConfig {
+            root_dir: dir.path().to_path_buf(),
+            port: 0,
+            bind_addresses: vec![ip("127.0.0.1")],
+            timeout_secs: 1,
+            max_retries: 1,
+            shutdown_grace_secs: 2,
+            ..ServerConfig::default()
+        };
+        let mut state = UiState::new(
+            config.clone(),
+            RecentDirs::empty_for_tests(),
+            Arc::new(StdMutex::new(Some(Vec::new()))),
+        );
+        let controller = Rc::new(RefCell::new(EmbeddedController::new().expect("controller")));
+
+        // A stopped server only stores the new configuration.
+        assert_eq!(
+            auto_restart_if_idle(&controller, &mut state, &config),
+            RestartDisposition::NotRunning
+        );
+
+        controller
+            .borrow_mut()
+            .start(config.clone())
+            .expect("start");
+        state.running_config = Some(config.clone());
+        assert_eq!(
+            auto_restart_if_idle(&controller, &mut state, &config),
+            RestartDisposition::Unchanged
+        );
+
+        // An active transfer defers the restart and keeps the old configuration.
+        let mut changed = config.clone();
+        changed.timeout_secs = 2;
+        state.transfers.insert(
+            1,
+            TransferState {
+                file: "file.bin".to_string(),
+                peer: "127.0.0.1:1".to_string(),
+                bytes: 0,
+                total: None,
+                started: Instant::now(),
+            },
+        );
+        assert_eq!(
+            auto_restart_if_idle(&controller, &mut state, &changed),
+            RestartDisposition::Deferred { transfers: 1 }
+        );
+        assert_eq!(state.running_config.as_ref(), Some(&config));
+
+        // With no transfer the same change restarts the server.
+        state.transfers.clear();
+        assert_eq!(
+            auto_restart_if_idle(&controller, &mut state, &changed),
+            RestartDisposition::Restarted
+        );
+        assert_eq!(state.running_config.as_ref(), Some(&changed));
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let status = controller.borrow_mut().poll_status();
+            if matches!(status, ServerStatus::Running { .. }) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "automatic restart did not finish: {status:?}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        // A deliberate stop must not be turned back into a start by a change.
+        assert!(controller.borrow_mut().stop());
+        assert_eq!(
+            auto_restart_if_idle(&controller, &mut state, &config),
+            RestartDisposition::NotRunning
+        );
+        controller.borrow_mut().shutdown();
+    }
+
     #[test]
     fn address_choices_always_offer_the_two_special_entries() {
         let options = build_address_choices(&[ip("127.0.0.1")], &[ip("192.168.1.5")]);
@@ -1106,5 +1539,32 @@ mod tests {
     fn status_bar_root_shows_the_leaf_directory_name() {
         assert_eq!(root_display_name(Path::new("tftp-root")), "tftp-root");
         assert_eq!(root_display_name(Path::new("C:/srv/tftp")), "tftp");
+    }
+
+    #[test]
+    fn product_icon_pixels_are_a_valid_rounded_tile() {
+        assert_eq!(
+            APP_ICON_RGBA.len(),
+            (APP_ICON_SIZE * APP_ICON_SIZE * 4) as usize,
+            "app-icon-128.rgba must hold one RGBA quad per pixel"
+        );
+        let pixel = |x: u32, y: u32| {
+            let offset = ((y * APP_ICON_SIZE + x) * 4) as usize;
+            &APP_ICON_RGBA[offset..offset + 4]
+        };
+        // Rounded square: the corners are transparent, the tile is #263238
+        // (the sheen barely moves it at mid height) and the middle of the upper
+        // server rack is the #fafafa glyph.
+        assert_eq!(pixel(0, 0)[3], 0);
+        assert_eq!(pixel(APP_ICON_SIZE - 1, APP_ICON_SIZE - 1)[3], 0);
+        let tile = pixel(8, APP_ICON_SIZE / 2);
+        assert_eq!(tile[3], 255);
+        for (channel, expected) in tile[..3].iter().zip([0x26u8, 0x32, 0x38]) {
+            assert!(
+                channel.abs_diff(expected) <= 3,
+                "tile pixel {tile:?} is not close to #263238"
+            );
+        }
+        assert_eq!(pixel(APP_ICON_SIZE / 2, 44), &[0xfa, 0xfa, 0xfa, 255]);
     }
 }

@@ -62,7 +62,7 @@ export component TopToolbar inherits Rectangle {
                         color: root.status-kind == 1 ? #4ade80
                             : root.status-kind == 4 ? #f87171
                             : root.status-kind == 2 || root.status-kind == 3 ? #fbbf24
-                            : #cbd5e1;
+                            : Theme.toolbar-icon;
                         font-size: 13px;
                         font-weight: 700;
                     }
@@ -77,7 +77,7 @@ export component TopToolbar inherits Rectangle {
             label: root.primary-is-restart ? "重启" : "启动";
             icon-data: root.primary-is-restart ? Icons.restart-alt : Icons.play-arrow;
             icon-tint: root.primary-is-restart ? #fbbf24 : #4ade80;
-            label-tint: #e2e8f0;
+            label-tint: Theme.toolbar-label;
             available: root.primary-enabled;
             clicked => { root.primary-requested(); }
         }

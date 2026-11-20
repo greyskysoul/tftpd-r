@@ -16,11 +16,13 @@
 | Phase 6 IPC | ⏳ 未开始 | GUI 仅 Embedded 模式；无 named pipe / daemon 控制 |
 | Phase 7 WRQ 上传 | ⏳ 未开始 | 默认且唯一行为是只读；`allow_upload=true` 被配置校验拒绝 |
 | Phase 8 发布/目标机 | 🟡 部分完成 | 0.1.0 已发布（[GitHub Release](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.1.0)，Windows/Linux × x64/arm64 四目标原生构建）；CI 在 windows-latest（MSVC x64）与 ubuntu-latest（GNU x64）上 fmt/clippy/test 全绿；目标机人工验收（真实/老式客户端、LAN/防火墙、RDP、IME、其他 DPI）未做 |
-| 0.2.0 R1/R2 | ✅ 已实现（未发布） | 默认端口 69 + 非强制提示（ADR 0007）；`port` + `bind_addresses` 多监听、GUI 多选地址选择器与目录选择器（ADR 0008）；配置格式破坏性变更，`bind_address` 已删除 |
+| 0.2.0 R1/R2 | ✅ 已实现（未发布） | 默认端口 69 + 非强制提示（ADR 0007）；`port` + `bind_addresses` 多监听、GUI 多选地址选择器与目录选择器（ADR 0008）；首次启动自动打开设置（每用户一次）、选择器「全部网络」独占且不可清空、「全部网络」为首次启动默认、最近根目录可清空、空闲时配置/根目录变更自动重启（ADR 0009）；配置格式破坏性变更，`bind_address` 已删除 |
 
 已验证环境：Windows 11（10.0.26300）+ Rust 1.100.0 `x86_64-pc-windows-gnu` + MinGW-w64 GCC 15.3 + Slint 1.19.0；CI 另在 `windows-latest`（MSVC x64）与 `ubuntu-latest`（GNU x64）跑通 fmt/clippy/test，并在原生 arm64 runner 上构建 arm64 产物。**未验证**：MSVC、Linux 与 arm64 产物的**运行**（CI 只对 x64 跑测试，arm64 仅编译）、GUI 在 Linux 桌面上的运行、真实/外部 TFTP 客户端互操作、Windows Service、RDP、69 端口权限、真实键盘/IME 输入、其他 DPI/语言下的字体渲染与无障碍。不要在文档或回复中把这些写成已通过。
 
-最近一次完整验证结果（2026-11-20 第二轮，0.2.0 改动）：`cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`（**131 passed**：core 单元 63、RRQ UDP 集成 29、daemon 单元 10、daemon CLI 集成 5、GUI 单元 23、doctest 1）、`cargo build --workspace --release` 全部通过；多监听 daemon 以 `127.0.0.1` 与 `192.168.3.17` 的**同一临时端口**各下载 5000 字节（`/image.bin`）并 Ctrl-Break 优雅退出；GUI debug/release `--smoke-test` 退出码 0、stderr 为空，PE 子系统为 Windows GUI（daemon 仍为 console）；`PrintWindow` 截图确认状态栏根目录仅显示末级目录名、状态栏横线修复、设置对话框的新端口/多选地址/浏览按钮，以及地址选择器列出 `192.168.3.17` 与两个全局 IPv6 地址。进度条方向用合成传输行（`TFTPD_R_GUI_PREVIEW=transfer`）截图确认左侧起算；**未验证**：真实鼠标点击、原生目录对话框、GUI 中的绑定失败提示、真实多网卡切换、真实 GUI 传输在修复后的渲染、Linux 上的低端口权限路径。此前的 0.1.0 人工验收记录（真实 2 MiB 传输、窗口控件、最近根目录等）见 `docs/testing.md`。执行新改动后必须重新运行并更新真实数字。
+最近一次完整验证结果（2026-11-20 第四轮，GUI 首次启动/地址选择/历史清空/空闲自动重启）：`cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`（**147 passed**：core 单元 63、RRQ UDP 集成 29、daemon 单元 10、daemon CLI 集成 5、GUI 单元 39、doctest 1）、`cargo build --workspace --release` 全部通过；隔离 `APPDATA` 启动 GUI 确认无 `config.toml` 时自动打开设置且默认选中「全部网络 (0.0.0.0)」，同一 profile 第二次启动不再弹窗；窗口消息点击验证选择器五种切换状态（选具体地址清空「全部网络」、可叠加多个具体地址、选「全部网络」清空其他、再次点击「全部网络」仍保持选中、取消最后一个具体地址回退到「全部网络」）；最近目录「清空」删除 `recent-dirs.txt` 并显示空状态；运行中切换根目录且无传输时自动重启，新根目录可下载 `two.txt`，旧根目录文件返回 file not found；有活跃传输时只记录 WARN 并保持旧根目录/传输不中断。**未验证**：真实鼠标硬件（点击为窗口消息）、其他 DPI、真实/外部 TFTP 客户端、Linux GUI 运行。此前的 0.1.0 人工验收与图标/配色结果见 `docs/testing.md`。执行新改动后必须重新运行并更新真实数字。
+
+此前的完整验证结果（2026-11-20 第二轮，0.2.0 改动）：`cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`（**131 passed**：core 单元 63、RRQ UDP 集成 29、daemon 单元 10、daemon CLI 集成 5、GUI 单元 23、doctest 1）、`cargo build --workspace --release` 全部通过；多监听 daemon 以 `127.0.0.1` 与 `192.168.3.17` 的**同一临时端口**各下载 5000 字节（`/image.bin`）并 Ctrl-Break 优雅退出；GUI debug/release `--smoke-test` 退出码 0、stderr 为空，PE 子系统为 Windows GUI（daemon 仍为 console）；`PrintWindow` 截图确认状态栏根目录仅显示末级目录名、状态栏横线修复、设置对话框的新端口/多选地址/浏览按钮，以及地址选择器列出 `192.168.3.17` 与两个全局 IPv6 地址。进度条方向用合成传输行（`TFTPD_R_GUI_PREVIEW=transfer`）截图确认左侧起算；**未验证**：真实鼠标点击、原生目录对话框、GUI 中的绑定失败提示、真实多网卡切换、真实 GUI 传输在修复后的渲染、Linux 上的低端口权限路径。此前的 0.1.0 人工验收记录（真实 2 MiB 传输、窗口控件、最近根目录等）见 `docs/testing.md`。执行新改动后必须重新运行并更新真实数字。
 
 ## 2. 仓库地图
 
@@ -36,7 +38,7 @@
 │   ├── security.md                # 威胁模型、沙箱、残余风险
 │   ├── testing.md                 # 实际执行记录与未验证项
 │   ├── roadmap.md                 # 0.2.0 已实现待发布项与后续未实现项
-│   └── adr/0001–0008              # 已接受的决策（IPC 延后、上传关闭、octet only、端口 69、多地址绑定等）
+│   └── adr/0001–0009              # 已接受的决策（IPC 延后、上传关闭、octet only、端口 69、多地址绑定、GUI 首次启动/自动重启等）
 ├── crates/
 │   ├── tftpd-r-core/             # 无 GUI/daemon/IPC 依赖
 │   │   ├── src/{lib,config,error,events,filesystem,server,session}.rs
@@ -46,10 +48,10 @@
 │   │   ├── src/{main,cli,config_file,logging,shutdown}.rs
 │   │   └── tests/cli.rs           # 运行编译后的二进制
 │   └── tftpd-r-gui-slint/        # Slint 面板 + EmbeddedController
-│       ├── src/{main,controller,recent,netif,folder_picker}.rs
+│       ├── src/{main,controller,recent,netif,folder_picker,user_state}.rs
 │       ├── ui/{app,titlebar,toolbar,statusbar,logs,transfers,settings,about,
 │       │       root-menu,widgets,theme,icons,models}.slint
-│       ├── ui/icons/{LICENSE,README.md}   # Material Design 图标来源与 Apache-2.0
+│       ├── ui/icons/                           # Material 图标来源、产品图标（SVG/PNG/ICO/RGBA）
 │       └── build.rs
 ├── .github/workflows/ci.yml       # push/PR：fmt、clippy、test、release 构建、GUI 编译
 ├── .github/workflows/release.yml  # v* tag：四目标原生构建并发布 GitHub Release
@@ -88,7 +90,7 @@
 
 - `ServerConfig` 使用 serde `deny_unknown_fields` + 安全默认值；`validate()` 是 daemon、GUI 和测试共用的唯一规则来源。
 - `allow_upload=true`、`overwrite=true` 当前必须是**配置错误**（上传尚未实现，不能给运维错误暗示）。
-- 监听配置是 `port` + `bind_addresses`（`Vec<IpAddr>`，1..=16 个）。默认 `127.0.0.1:69`（Linux 需 root/CAP_NET_BIND_SERVICE，Windows 通常允许普通用户但端口可能被系统保留）；端口 0 仅用于测试/临时实例，首个成功监听的端口会被其余地址复用。重复地址去重；同族通配 `0.0.0.0`/`::` 折叠该族其他地址；多播/广播拒绝（ADR 0008）。绑定**全有或全无**：任一地址失败即放弃全部已绑定 socket 并返回分类错误，不得静默只服务部分地址。
+- 监听配置是 `port` + `bind_addresses`（`Vec<IpAddr>`，1..=16 个）。默认 `127.0.0.1:69`（Linux 需 root/CAP_NET_BIND_SERVICE，Windows 通常允许普通用户但端口可能被系统保留）；端口 0 仅用于测试/临时实例，首个成功监听的端口会被其余地址复用。重复地址去重；同族通配 `0.0.0.0`/`::` 折叠该族其他地址；多播/广播拒绝（ADR 0008）。绑定**全有或全无**：任一地址失败即放弃全部已绑定 socket 并返回分类错误，不得静默只服务部分地址。GUI 在没有有效 `config.toml` 时的表单默认选中 `0.0.0.0`（ADR 0009），但核心/daemon 的默认值仍是回环，且服务只有用户点击「启动」后才启动；不要把 GUI 表单默认写进 `ServerConfig::default()`。
 - 绑定特权端口失败必须给出可操作提示，**不得**静默回退、自动提权或改写配置（ADR 0007）。
 - GUI 的网卡枚举与目录选择通过固定绝对路径的 PowerShell/.NET（Unix 为 `hostname`/`zenity`）辅助进程完成，后台线程执行；不得引入 shell、用户可控参数、提权或手写 unsafe。辅助进程失败时必须降级为两个特殊地址/手动输入，而不是崩溃。
 - `root_dir` 必须存在且为目录；低端口权限按平台处理（Linux 需 root/CAP_NET_BIND_SERVICE；Windows 通常允许普通用户，但端口可能被保留），README/security 与 ADR 0007 的表述必须与此一致，不要笼统写成“Windows 需要管理员”。
@@ -100,6 +102,7 @@
 - `EventSink::emit` 必须短小、非阻塞、不得 panic；GUI 通过 `EventBus::drain_since(seq)` 轮询，不直接由 Tokio task 改 UI。
 - 生命周期：`Starting → Running { local_addrs } → Stopping → Stopped`（或 `Failed`）；每个监听地址一个 accept loop，peer 表/会话上限/会话 ID 全局共享，会话 socket 绑定该监听地址（非通配时）；`ServerHandle::stop()` 幂等，先取消全部 accept loop，再在 `shutdown_grace_secs` 内并行 drain，最后 abort 剩余任务并释放 socket/permit/文件。
 - GUI 的 `stop()` 必须异步/轮询，不能阻塞 UI 线程等待宽限期；窗口关闭后 `EmbeddedController::shutdown()` 负责最终清理。
+- GUI 的配置/根目录变更自动重启只在 `Starting`/`Running`、配置确实变化且 `state.transfers` 为空时发生；有传输时只保存并 WARN，不得中断传输或排队在传输结束后自动重启。`Stopping` 绝不能被变更改回启动。`poll_status` 在 handle 已被 `stop()` 取走后不得继续报告陈旧的 `Running`。
 
 ### 3.5 代码与依赖
 
@@ -134,7 +137,7 @@ cargo test --workspace
 cargo build --workspace --release
 ```
 
-当前基线是 **131 tests passed**（core 单元 63、RRQ UDP 集成 29、daemon 单元 10、daemon CLI 集成 5、GUI 单元 23（控制器 4 + 最近目录 6 + 网卡枚举 4 + 目录选择 2 + 地址模型 7）、doctest 1）。新增测试后更新 `docs/testing.md` 和本文件的数字。
+当前基线是 **147 tests passed**（core 单元 63、RRQ UDP 集成 29、daemon 单元 10、daemon CLI 集成 5、GUI 单元 39（控制器 5 + 最近目录 7 + 网卡枚举 4 + 目录选择 2 + 用户状态 4 + 地址模型/首次启动/自动重启/产品图标 17）、doctest 1）。新增测试后更新 `docs/testing.md` 和本文件的数字。
 
 其他有用命令：
 
@@ -159,7 +162,7 @@ cargo run -p tftpd-r-gui-slint -- --smoke-test
 - **路径沙箱**：`../`、`/../`、双分隔符、盘符、ADS、设备名、符号链接/reparse、大小写/前缀混淆、root 前缀正向与反向、大小限制。
 - **session/server**：重传、重复 ACK、错误 TID、重复 RRQ、零长度终止块、块号回绕、并发、取消/停止、超时耗尽、事件。
 - **daemon**：CLI 解析、配置错误退出码（0/1/2）、默认配置与示例一致、二进制冒烟。
-- **GUI**：控制器契约（start/stop/重复 start/无效配置/异步 restart/restart 失败上报）、`recent.rs`（顺序、去重、上限、持久化、canonicalize、失效目录清理）、`netif.rs`（IP 解析/过滤/排序）、`folder_picker.rs`（空选择与非目录拒绝）以及地址选择模型（两个特殊项恒定存在、选中但未发现的地址保留、摘要截断）；事件洪泛、真实键盘/IME、真实网卡枚举、系统目录对话框、布局与字体只能靠目标机/人工验收，需在 `docs/testing.md` 如实标注。
+- **GUI**：控制器契约（start/stop/重复 start/无效配置/异步 restart/restart 失败上报/`stop()` 后不再报告 `Running`）、`recent.rs`（顺序、去重、上限、持久化、canonicalize、失效目录清理、清空后删除状态文件）、`user_state.rs`（首次启动标记的持久化与只读 profile 降级）、`netif.rs`（IP 解析/过滤/排序）、`folder_picker.rs`（空选择与非目录拒绝）、地址选择模型（两个特殊项恒定存在、选中但未发现的地址保留、摘要截断、`0.0.0.0` 独占/不可取消/最后一个地址回退）以及首次启动默认与自动重启判定（运行中且配置变化且无传输才重启；有传输只记录、不排队；`Stopping` 不复活）；事件洪泛、真实键盘/IME、真实网卡枚举、系统目录对话框、布局与字体只能靠目标机/人工验收，需在 `docs/testing.md` 如实标注。
 - 时间相关测试目前使用真实计时器（1 s 级别），避免引入随机 sleep；新增测试尽量确定性。
 
 ## 6. 后续路线与优先级
@@ -167,6 +170,7 @@ cargo run -p tftpd-r-gui-slint -- --smoke-test
 1. **0.2.0 需求（R1/R2 已在 main 实现，待发布；详见 [docs/roadmap.md](docs/roadmap.md)）**
    - **R1 默认端口 69 ✅**：默认端口 69；权限不足时提示可改用非特权端口（如 6969），不强制、不回退、不提权、不改写配置（ADR 0007）。
    - **R2 多选绑定地址 ✅**：`port` + `bind_addresses` 多监听；GUI 多选选择器自动导入网卡 IP，并始终提供「全部网络 (0.0.0.0)」与「本地回环 (127.0.0.1)」（ADR 0008）。绑定全有或全无，不做部分失败服务。
+   - **GUI 交互补充 ✅**：无有效配置的首次启动自动打开设置（每 profile 一次）并预选「全部网络」，「全部网络」在 picker 中独占且不可清空，最近根目录可清空；保存设置或切换根目录时，服务运行中且无传输则自动重启，否则只保存并提示手动重启（ADR 0009）。核心/daemon 的回环默认不变。
    - **R3 已取消**：INI 配置与固定位置 `~/.tftpdr.ini` 的需求经确认撤销，配置格式保持 TOML；GUI 继续读取工作目录的 `config.toml`。不要再实现或重新引入 INI 支持。
 2. **Phase 6：本机 IPC + GUI daemon 控制**
    - 新建 `tftpd-r-control-protocol`（版本化 DTO、长度前缀 framing、请求 ID、最大消息、错误码）。
@@ -192,6 +196,10 @@ cargo run -p tftpd-r-gui-slint -- --smoke-test
 - UI 线程同步等待 stop/grace；或让后台任务直接改 Slint 属性。
 - 自定义无边框标题栏时让 `WindowMoveArea` 覆盖窗口按钮（Windows 上按下按钮会同时开始拖动并把最大化窗口还原）；最小化/最大化/关闭必须走 `slint::Window` API（`set_minimized`/`set_maximized`/`quit_event_loop`），不要只依赖 Slint 的 `minimized`/`maximized` window property。
 - 无上限的事件/日志/会话/请求缓冲。
+- 在仍有进行中的传输时自动重启服务，或在传输结束后排队自动重启；配置变更应保存并提示手动重启（ADR 0009）。
+- 把 `Stopping`（用户明确停止）因配置变更改回启动，或在 `stop()` 取走 handle 后仍从 watch 通道报告陈旧的 `Running`。
+- 把 GUI 无配置时的「全部网络」表单默认写进 `ServerConfig::default()` 或 daemon 默认值，破坏核心/daemon 的回环默认。
+- 把 `slint_build` 的 `embed_resources` 改成 `EmbedResourcesKind::EmbedForSoftwareRenderer`：该模式会在构建期预烘焙字形，使全部中文文案与运行时日志文本渲染成空白（2026-11-20 实际踩到）。窗口图标走 `include_bytes!` + `Window.icon`（见 `src/main.rs` 的 `app_icon()`），不要为此开启 `image-default-formats` 或改用该嵌入模式。
 - 未经 ADR 与安全审查新增 `unsafe`、上传、IPC、服务注册或公网默认监听。
 - 提交本地计划文档、便携工具链、构建产物；或在 CI/README 中宣称未验证的平台/客户端已通过。
 

@@ -7,6 +7,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::user_state::{state_file, RECENT_DIRS_FILE};
+
 /// Maximum number of directories kept in the drop-down.
 pub const MAX_RECENT_DIRS: usize = 8;
 
@@ -21,13 +23,23 @@ impl RecentDirs {
     /// empty list; directories that no longer exist are dropped.
     #[must_use]
     pub fn load() -> Self {
-        Self::load_from(default_storage_path())
+        Self::load_from(state_file(RECENT_DIRS_FILE))
     }
 
     /// Directories in most-recently-used order.
     #[must_use]
     pub fn paths(&self) -> &[PathBuf] {
         &self.paths
+    }
+
+    /// Empty history without a storage file, for tests in other modules.
+    #[cfg(test)]
+    #[must_use]
+    pub fn empty_for_tests() -> Self {
+        Self {
+            paths: Vec::new(),
+            storage: None,
+        }
     }
 
     /// Record `path` as the most recently used directory.
@@ -76,6 +88,18 @@ impl RecentDirs {
         recent
     }
 
+    /// Forget every recorded directory and remove the persisted list. The
+    /// configured/running root is not affected: it is server configuration, not
+    /// history.
+    pub fn clear(&mut self) {
+        self.paths.clear();
+        if let Some(storage) = &self.storage {
+            // Best effort like `save`: a read-only profile must not break the
+            // panel. A missing file is already the desired state.
+            let _ = std::fs::remove_file(storage);
+        }
+    }
+
     fn insert(&mut self, path: PathBuf) {
         self.paths.retain(|existing| !same_dir(existing, &path));
         self.paths.insert(0, path);
@@ -107,29 +131,6 @@ fn same_dir(left: &Path, right: &Path) -> bool {
     } else {
         left == right
     }
-}
-
-fn default_storage_path() -> Option<PathBuf> {
-    if let Some(appdata) = std::env::var_os("APPDATA") {
-        return Some(
-            PathBuf::from(appdata)
-                .join("TftpdR")
-                .join("recent-dirs.txt"),
-        );
-    }
-    if let Some(config_home) = std::env::var_os("XDG_CONFIG_HOME") {
-        return Some(
-            PathBuf::from(config_home)
-                .join("tftpd-r")
-                .join("recent-dirs.txt"),
-        );
-    }
-    std::env::var_os("HOME").map(|home| {
-        PathBuf::from(home)
-            .join(".config")
-            .join("tftpd-r")
-            .join("recent-dirs.txt")
-    })
 }
 
 #[cfg(test)]
@@ -227,6 +228,29 @@ mod tests {
 
         let reloaded = load_from(&storage);
         assert!(reloaded.paths().is_empty());
+    }
+
+    #[test]
+    fn clear_forgets_the_history_and_removes_the_state_file() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let storage = temp.path().join("recent.txt");
+        let first = temp.path().join("first");
+        let second = temp.path().join("second");
+        std::fs::create_dir(&first).expect("first dir");
+        std::fs::create_dir(&second).expect("second dir");
+
+        let mut recent = load_from(&storage);
+        assert!(recent.record(&first));
+        assert!(recent.record(&second));
+        assert!(storage.exists());
+
+        recent.clear();
+        assert!(recent.paths().is_empty());
+        assert!(
+            !storage.exists(),
+            "clearing the history must remove the state file"
+        );
+        assert!(load_from(&storage).paths().is_empty());
     }
 
     #[test]

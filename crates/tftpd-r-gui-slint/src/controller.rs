@@ -141,6 +141,17 @@ impl EmbeddedController {
             // final `Stopped` state is never lost.
             self.status = receiver.borrow_and_update().clone();
         }
+        // `stop()` (and a queued restart) takes the handle immediately, but the
+        // watch channel can still hold `Running` for one tick. Without a handle
+        // the server is at most stopping, never running.
+        if self.server.is_none()
+            && matches!(
+                self.status,
+                ServerStatus::Starting | ServerStatus::Running { .. }
+            )
+        {
+            self.status = ServerStatus::Stopping;
+        }
         // A queued restart means the old server is on its way out. The watch
         // channel can still hold its last `Running` value for one tick; never
         // report the controller as running while a restart is pending.
@@ -251,6 +262,25 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert!(!controller.stop());
+        controller.shutdown();
+    }
+
+    #[test]
+    fn status_never_reports_running_after_a_stop_was_requested() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut controller = EmbeddedController::new().expect("controller");
+        controller.start(config(dir.path())).expect("start");
+        assert!(controller.is_running());
+
+        assert!(controller.stop());
+        let status = controller.poll_status();
+        assert!(
+            !matches!(
+                status,
+                ServerStatus::Starting | ServerStatus::Running { .. }
+            ),
+            "status after stop: {status:?}"
+        );
         controller.shutdown();
     }
 

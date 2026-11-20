@@ -5,7 +5,8 @@
 // The bind address is a multi-select list: the compact field opens an in-dialog
 // picker (a drop-down style panel anchored under the field) that always offers
 // "全部网络 (0.0.0.0)" and "本地回环 (127.0.0.1)" plus the addresses discovered
-// on this machine.
+// on this machine. "全部网络" is exclusive and cannot be unchecked; the Rust
+// side applies the toggle rules (see `toggle_address_choice` in src/main.rs).
 import { ScrollView } from "std-widgets.slint";
 import { Icons, MaterialIcon } from "icons.slint";
 import { AddressOption } from "models.slint";
@@ -91,7 +92,7 @@ export component SettingsDialog inherits Rectangle {
             }
 
             Text {
-                text: "配置项与守护进程使用的 TOML 配置遵循同一套校验规则。修改在下次启动或重启服务后生效。";
+                text: "与守护进程使用同一套 TOML 校验规则。保存后，运行中且无传输时自动重启；否则请稍后手动重启。";
                 color: Theme.text-muted;
                 font-size: 11px;
                 wrap: word-wrap;
@@ -315,7 +316,7 @@ export component SettingsDialog inherits Rectangle {
                 }
 
                 Text {
-                    text: "可多选。全部网络 (0.0.0.0) 已包含所有 IPv4 地址；端口对所有地址生效。";
+                    text: "可多选。选中具体地址会自动取消「全部网络」；选中「全部网络」会清空其他地址。端口对所有地址生效。";
                     color: Theme.text-muted;
                     font-size: 10px;
                     wrap: word-wrap;

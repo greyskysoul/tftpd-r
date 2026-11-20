@@ -43,6 +43,25 @@ the decisions and deviations.
   and an unbindable address aborting the start; GUI unit tests for the picker
   model and summaries.
 
+### GUI first-run setup, clearable history and idle auto-restart — implemented
+
+Additional interaction requirements accepted after the R2 review:
+
+- The first start without a valid `config.toml` opens the settings dialog once
+  per user profile; the unconfigured form preselects "全部网络 (0.0.0.0)" while
+  the daemon and core defaults stay loopback.
+- "全部网络" is exclusive in the bind picker, cannot be unchecked and is the
+  fallback when the last specific address is removed, so the bind list is never
+  empty.
+- The recent-root drop-down has a 清空 button.
+- Saving settings or changing the root while the server runs restarts it
+  automatically when no transfer is active; with active transfers the change is
+  only stored and the log asks for a manual restart.
+- ADR: [`adr/0009-gui-first-run-and-auto-restart.md`](adr/0009-gui-first-run-and-auto-restart.md).
+- Tests: address-toggle transitions, first-run defaults, setup-state
+  persistence, recent-history clearing and the idle/deferred restart decision
+  (including a real embedded-server restart) in the GUI crate.
+
 ## Next
 
 - Phase 6 (local IPC and GUI-managed daemon) and Phase 7 (WRQ uploads) remain

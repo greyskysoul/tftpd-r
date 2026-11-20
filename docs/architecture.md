@@ -163,8 +163,22 @@ The GUI crate stays deliberately small:
   root, the block size, the timeout and the maximum session count. The address
   picker always offers `0.0.0.0` ("全部网络") and `127.0.0.1` ("本地回环"), merges
   the discovered interface addresses and never drops a selected address that
-  discovery did not report. The root field has a 浏览… button backed by a native
-  directory dialog.
+  discovery did not report. "全部网络" is exclusive and sticky: selecting it
+  clears the other addresses, selecting another address clears it, and it cannot
+  be unchecked (unchecking the last specific address selects it again), so the
+  bind list is never empty. The root field has a 浏览… button backed by a native
+  directory dialog. When no valid `config.toml` exists, the panel preselects
+  `0.0.0.0`; the core and daemon defaults stay loopback. On the first start of a
+  profile without a valid configuration the dialog opens automatically, once
+  (see `src/user_state.rs`).
+- Saving the dialog, or selecting another recent root, compares the resulting
+  `ServerConfig` with the configuration of the running server. When the server
+  is running (`Starting`/`Running`) and no transfer is active, the change is
+  applied with an asynchronous `EmbeddedController::restart`; with active
+  transfers it is only stored and the log asks for a manual restart. A stop or
+  restart that is already in progress (`Stopping`) is never turned back into a
+  start. `poll_status` no longer reports a stale `Running` after the handle was
+  taken by `stop()`.
 - `src/main.rs` owns the Slint models (`LogRow`, `TransferRow`, `RecentDir`,
   `AddressOption`), translates `TftpEvent`s and `ServerStatus` into UI state,
   and keeps the UI thread free of blocking calls. Window controls call
@@ -180,8 +194,18 @@ The GUI crate stays deliberately small:
   applies it to the settings form. Both helpers are fixed, absolute commands
   without a shell, with the initial directory passed via the environment.
 - `src/recent.rs` persists at most eight canonicalised root directories
-  (most-recent first). It is local UI state, not part of `ServerConfig`, and
-  write failures are ignored so a read-only profile still runs the panel.
+  (most-recent first). The drop-down's 清空 button removes the state file; the
+  configured/running root is not history and is unaffected. It is local UI
+  state, not part of `ServerConfig`, and write failures are ignored so a
+  read-only profile still runs the panel.
+- `src/user_state.rs` locates the per-user state directory and stores the
+  one-time setup flag (`ui-state.txt`). The recent-root file uses the same
+  directory helper. Both files are advisory: a missing or unwritable profile
+  only means the panel asks for setup again / keeps no history.
+- Selecting a recent root while the server runs either restarts it
+  automatically (no active transfer) or updates the configuration for the next
+  manual restart; the status bar keeps showing the root of the running server.
+  The same rule applies to saving the settings dialog.
 - The GUI is a windowed-subsystem binary on Windows (`windows_subsystem =
   "windows"`), so starting the panel does not allocate a console window.
 
@@ -207,9 +231,6 @@ sized child without `x`/`y` is centred by the renderer.
   a restart is pending a stale `Running` watch value is reported as `Stopping`,
   and a failed replacement is surfaced through `take_error()` instead of leaving
   a half-started server.
-- Selecting a recent root while the server runs updates the configuration for
-  the next start/restart only; the status bar keeps showing the root of the
-  running server and the log states that a restart is required.
 - Log rows are capped at 500 in the model; the event ring is independently
   bounded. Logs are displayed newest-first so the latest event stays visible
   without programmatic scrolling.
@@ -230,7 +251,9 @@ collapses the other addresses of its family in `effective_bind_addresses()`;
 multicast/broadcast entries and lists longer than 16 are rejected. The 0.1.0
 `bind_address` key is gone, so an old file fails with an unknown-field error
 instead of silently binding something else. Daemon `--bind` replaces the whole
-list with one address and port.
+list with one address and port. `ServerConfig::default()` stays on loopback; only
+the GUI's no-config form preselects `0.0.0.0` (ADR 0009), and the GUI does not
+write `config.toml`.
 
 ## Logging
 
