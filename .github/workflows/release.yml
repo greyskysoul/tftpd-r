@@ -1,0 +1,141 @@
+name: Release
+
+# A `v*` tag builds every supported target and publishes a GitHub Release.
+# `workflow_dispatch` runs the same matrix but stops after uploading workflow
+# artifacts, which is how the pipeline is tested without cutting a release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Gate: no artifact is published unless format, lints and tests pass on both
+  # native hosts (MSVC on Windows, GNU on Linux).
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Install cross linker (aarch64 Linux)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
+      - name: Build
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          if [ "$TARGET" = "aarch64-unknown-linux-gnu" ]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          fi
+          cargo build --workspace --release --locked --target "$TARGET"
+      - name: Package
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version = "\([0-9][^"]*\)"$/\1/p' Cargo.toml | head -n1)
+          name="tftpd-r-${version}-${TARGET}"
+          exe=""
+          case "$TARGET" in
+            *windows*) exe=".exe" ;;
+          esac
+          mkdir -p "dist/${name}"
+          cp "target/${TARGET}/release/tftpd-r${exe}" "dist/${name}/"
+          cp "target/${TARGET}/release/tftpd-r-gui${exe}" "dist/${name}/"
+          cp config.example.toml README.md LICENSE-MIT LICENSE-APACHE "dist/${name}/"
+          if [ -n "$exe" ]; then
+            (cd dist && 7z a -tzip "../${name}.zip" "${name}" >/dev/null)
+          else
+            tar -czf "${name}.tar.gz" -C dist "${name}"
+          fi
+          ls -l "${name}".*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            tftpd-r-*.zip
+            tftpd-r-*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          notes=".github/release-notes/${TAG#v}.md"
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --repo "$REPO" --clobber
+          elif [ -f "$notes" ]; then
+            gh release create "$TAG" dist/* --repo "$REPO" \
+              --title "TftpdR $TAG" --notes-file "$notes"
+          else
+            gh release create "$TAG" dist/* --repo "$REPO" \
+              --title "TftpdR $TAG" --generate-notes
+          fi
