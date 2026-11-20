@@ -64,6 +64,7 @@ runs on a `v*` tag, or manually without publishing.
 | Release dry run ([44681934004](https://github.com/greyskysoul/tftpd-r/actions/runs/44681934004)) | Pass: the same test gate, then all four targets built and packaged; the publish job was correctly skipped for a non-tag run |
 | `v0.1.0` release ([44684633030](https://github.com/greyskysoul/tftpd-r/actions/runs/44684633030)) | Pass: [release published](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.1.0) with four archives plus `SHA256SUMS` |
 | CI for the `0.2.0` release commit ([44719058814](https://github.com/greyskysoul/tftpd-r/actions/runs/44719058814)) | Pass: fmt, clippy `-D warnings`, `cargo test --workspace` and the release build on `windows-latest` (MSVC) and `ubuntu-latest` (GNU); GUI `cargo check` on Windows |
+| `v0.2.0` release ([44719989555](https://github.com/greyskysoul/tftpd-r/actions/runs/44719989555)) | Pass: [release published](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.2.0) with four archives plus `SHA256SUMS`; GitHub's SHA-256 digest for every archive matches the attached checksum file |
 
 The first `v0.2.0` tag run ([44718170093](https://github.com/greyskysoul/tftpd-r/actions/runs/44718170093))
 failed before building anything: Linux clippy reported `DISCOVERY_TIMEOUT` and
@@ -79,19 +80,25 @@ What CI proves, and what it does not:
 - `aarch64-pc-windows-msvc` and `aarch64-unknown-linux-gnu` are built on native
   arm64 runners and packaged, but no test is executed there and no arm64 binary
   has ever been run.
-- Archive contents were inspected for a Windows and a Linux artifact: each holds
-  `tftpd-r`, `tftpd-r-gui`, `config.example.toml`, `README.md`, `LICENSE-MIT`
-  and `LICENSE-APACHE`.
-- The published `SHA256SUMS` was verified against a downloaded asset
+- Archive contents were inspected for a `v0.1.0` Windows and a Linux artifact:
+  each holds `tftpd-r`, `tftpd-r-gui`, `config.example.toml`, `README.md`,
+  `LICENSE-MIT` and `LICENSE-APACHE`.
+- The published `v0.1.0` `SHA256SUMS` was verified against a downloaded asset
   (`tftpd-r-0.1.0-aarch64-pc-windows-msvc.zip`, SHA-256 starting `8ee455c6`); it
-  matched.
+  matched. For `v0.2.0` the four archives were not downloaded again — large
+  asset downloads stalled in the release session — but the SHA-256 digest
+  reported by the GitHub API for each of them matches the attached
+  `SHA256SUMS`, so the published bytes are the checksummed bytes. The `v0.2.0`
+  archive contents and binaries were therefore not re-executed after download.
 
 Archive and binary sizes in the `v0.1.0` release: Windows x64 zip 7.09 MiB,
 Windows arm64 zip 6.76 MiB, Linux x64 tar.gz 9.19 MiB, Linux arm64 tar.gz
 8.77 MiB. Uncompressed MSVC x64 binaries are `tftpd-r.exe` 2.28 MiB and
 `tftpd-r-gui.exe` 13.36 MiB; Linux arm64 `tftpd-r` is 1.94 MiB and
 `tftpd-r-gui` 15.76 MiB. They differ from the GNU numbers recorded above because
-the toolchain and platform differ.
+the toolchain and platform differ. The `v0.2.0` archives are Windows x64 zip
+7.27 MiB, Windows arm64 zip 6.92 MiB, Linux x64 tar.gz 9.33 MiB and Linux arm64
+tar.gz 8.90 MiB.
 
 Test breakdown from `cargo test --workspace`:
 
