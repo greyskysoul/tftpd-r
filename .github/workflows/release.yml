@@ -30,6 +30,11 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install GUI build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libfontconfig1-dev pkg-config
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -37,6 +42,8 @@ jobs:
       - name: Tests
         run: cargo test --workspace
 
+  # Every target builds on a native runner of its own architecture, so no cross
+  # toolchain or emulation is involved for the published binaries.
   build:
     name: build (${{ matrix.target }})
     needs: test
@@ -47,35 +54,28 @@ jobs:
         include:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-          - os: windows-latest
+          - os: windows-11-arm
             target: aarch64-pc-windows-msvc
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-      - name: Install cross linker (aarch64 Linux)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
+      - name: Install GUI build dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
+          sudo apt-get install -y --no-install-recommends libfontconfig1-dev pkg-config
       - name: Build
         shell: bash
-        env:
-          TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          if [ "$TARGET" = "aarch64-unknown-linux-gnu" ]; then
-            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-          fi
-          cargo build --workspace --release --locked --target "$TARGET"
+          cargo build --workspace --release --locked
       - name: Package
         shell: bash
         env:
@@ -89,8 +89,8 @@ jobs:
             *windows*) exe=".exe" ;;
           esac
           mkdir -p "dist/${name}"
-          cp "target/${TARGET}/release/tftpd-r${exe}" "dist/${name}/"
-          cp "target/${TARGET}/release/tftpd-r-gui${exe}" "dist/${name}/"
+          cp "target/release/tftpd-r${exe}" "dist/${name}/"
+          cp "target/release/tftpd-r-gui${exe}" "dist/${name}/"
           cp config.example.toml README.md LICENSE-MIT LICENSE-APACHE "dist/${name}/"
           if [ -n "$exe" ]; then
             (cd dist && 7z a -tzip "../${name}.zip" "${name}" >/dev/null)

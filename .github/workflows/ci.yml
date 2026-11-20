@@ -25,6 +25,14 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # Slint's software renderer resolves system fonts through fontconfig on
+      # Linux, so the GUI crate needs the fontconfig development package to
+      # build. It is not needed on Windows.
+      - name: Install GUI build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libfontconfig1-dev pkg-config
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy
