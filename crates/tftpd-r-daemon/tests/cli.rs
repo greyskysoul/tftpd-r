@@ -8,7 +8,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 fn binary() -> &'static str {
-    env!("CARGO_BIN_EXE_tftp-daemon")
+    env!("CARGO_BIN_EXE_tftpd-r")
 }
 
 fn example_config_with_root(root: &std::path::Path) -> String {

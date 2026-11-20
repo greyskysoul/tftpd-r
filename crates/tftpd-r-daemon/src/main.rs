@@ -1,6 +1,6 @@
 //! Headless TFTP daemon entry point.
 //!
-//! Run `tftp-daemon --help` for usage. The daemon owns its Tokio runtime; the
+//! Run `tftpd-r --help` for usage. The daemon owns its Tokio runtime; the
 //! core server does not create one.
 
 mod cli;
@@ -13,9 +13,9 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
-use tftp_core::events::EventSink;
-use tftp_core::server::ServerStatus;
-use tftp_core::TftpServer;
+use tftpd_r_core::events::EventSink;
+use tftpd_r_core::server::ServerStatus;
+use tftpd_r_core::TftpServer;
 use tokio::sync::watch;
 use tracing::{info, warn};
 

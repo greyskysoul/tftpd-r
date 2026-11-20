@@ -9,10 +9,10 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tftp_core::events::{EventBus, EventKind, TftpEvent};
-use tftp_core::protocol::{decode, encode, Mode, Packet, Request};
-use tftp_core::server::ServerStatus;
-use tftp_core::{ErrorCode, ServerConfig, ServerHandle, TftpServer};
+use tftpd_r_core::events::{EventBus, EventKind, TftpEvent};
+use tftpd_r_core::protocol::{decode, encode, Mode, Packet, Request};
+use tftpd_r_core::server::ServerStatus;
+use tftpd_r_core::{ErrorCode, ServerConfig, ServerHandle, TftpServer};
 
 struct Fixture {
     handle: ServerHandle,

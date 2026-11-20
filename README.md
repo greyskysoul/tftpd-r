@@ -1,9 +1,9 @@
-# rust-tftpd
+# TftpdR
 
-A read-only TFTP (RFC 1350) server written in Rust, with a headless daemon and a
-native [Slint](https://slint.dev/) desktop panel. The GUI uses a native window and
-rendering backend — **no WebView / WebView2 is involved** — but see
-[Runtime dependencies](#runtime-dependencies) before repeating that claim.
+TftpdR is a read-only TFTP (RFC 1350) server written in Rust, with a headless
+daemon and a native [Slint](https://slint.dev/) desktop panel. The GUI uses a
+native window and rendering backend — **no WebView / WebView2 is involved** — but
+see [Runtime dependencies](#runtime-dependencies) before repeating that claim.
 
 > **Status: MVP (Phase 0–5 vertical slice).** RRQ downloads, option negotiation,
 > the path sandbox, the daemon CLI and the embedded-mode GUI are implemented and
@@ -32,7 +32,7 @@ Implemented:
 - Headless daemon: TOML configuration, `check-config`, `print-default-config`,
   structured logs and Ctrl-C / Ctrl-Break / SIGTERM graceful shutdown.
 - Slint GUI (embedded mode): start/stop, status, active transfers, activity log,
-  settings validation. Layout is in `crates/tftp-gui-slint/ui/`.
+  settings validation. Layout is in `crates/tftpd-r-gui-slint/ui/`.
 
 Not implemented in this release (deliberate, tracked in `docs/adr/`):
 
@@ -69,9 +69,9 @@ The workspace contains three crates:
 
 | Crate | Purpose |
 | --- | --- |
-| `tftp-core` | Protocol, session engine, sandbox, configuration, events. No GUI/daemon/IPC dependency. |
-| `tftp-daemon` | Headless server binary: CLI, TOML config, logging, graceful shutdown. |
-| `tftp-gui-slint` | Native Slint desktop panel; embeds `tftp-core` (no daemon required). |
+| `tftpd-r-core` | Protocol, session engine, sandbox, configuration, events. No GUI/daemon/IPC dependency. |
+| `tftpd-r-daemon` | Headless server binary: CLI, TOML config, logging, graceful shutdown. |
+| `tftpd-r-gui-slint` | Native Slint desktop panel; embeds `tftpd-r-core` (no daemon required). |
 
 ## Quick start (daemon)
 
@@ -82,10 +82,10 @@ Set-Content tftp-root\hello.txt "hello over tftp"
 
 # 2. Validate the configuration (does not bind a socket).
 Copy-Item config.example.toml config.toml
-cargo run -p tftp-daemon -- check-config --config config.toml
+cargo run -p tftpd-r-daemon -- check-config --config config.toml
 
 # 3. Run the server in the foreground; Ctrl-C (or Ctrl-Break) stops it gracefully.
-cargo run -p tftp-daemon -- serve --config config.toml
+cargo run -p tftpd-r-daemon -- serve --config config.toml
 ```
 
 Then point any TFTP client at `127.0.0.1:6969` and request `hello.txt`. The
@@ -94,15 +94,15 @@ server is read-only: uploads are refused.
 CLI summary:
 
 ```text
-tftp-daemon serve --config config.toml [--bind 0.0.0.0:6969] [--root DIR]
-tftp-daemon check-config --config config.toml
-tftp-daemon print-default-config
+tftpd-r serve --config config.toml [--bind 0.0.0.0:6969] [--root DIR]
+tftpd-r check-config --config config.toml
+tftpd-r print-default-config
 ```
 
 Exit codes: `0` success, `2` configuration/CLI validation failure, `1` runtime
 startup or server failure. `--bind`/`--root` override the file and are validated
-again. `TFTP_LOG` (or `--log`) selects the `tracing` filter, e.g.
-`TFTP_LOG=debug`.
+again. `TFTPD_R_LOG` (or `--log`) selects the `tracing` filter, e.g.
+`TFTPD_R_LOG=debug`.
 
 Old clients that request `get /hello.txt` are supported: a leading `/` (or `\`)
 is mapped to the configured root instead of being rejected as an absolute host
@@ -111,7 +111,7 @@ path. Traversal such as `/../secret` is still rejected.
 ## Quick start (GUI)
 
 ```powershell
-cargo run -p tftp-gui-slint
+cargo run -p tftpd-r-gui-slint
 ```
 
 The GUI loads `config.toml` from the current directory when present; otherwise it

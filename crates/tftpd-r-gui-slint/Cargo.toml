@@ -1,13 +1,17 @@
 [package]
-name = "tftp-gui-slint"
+name = "tftpd-r-gui-slint"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Slint native desktop panel for the TFTP server (embedded mode)"
+description = "TftpdR native Slint desktop panel for the embedded server"
+
+[[bin]]
+name = "tftpd-r-gui"
+path = "src/main.rs"
 
 [dependencies]
-tftp-core.workspace = true
+tftpd-r-core.workspace = true
 tokio.workspace = true
 slint.workspace = true
 thiserror.workspace = true

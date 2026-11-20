@@ -5,19 +5,19 @@
 
 ## Context
 
-`tftp-core` uses Tokio sockets, timers, channels and tasks. Creating a runtime
+`tftpd-r-core` uses Tokio sockets, timers, channels and tasks. Creating a runtime
 inside a library is surprising, can deadlock when called from an async context,
 and makes shutdown ownership unclear. The GUI and the daemon have different
 runtime needs.
 
 ## Decision
 
-`tftp-core` never creates a Tokio runtime and never calls `block_on`. The
+`tftpd-r-core` never creates a Tokio runtime and never calls `block_on`. The
 front-end owns the runtime:
 
-- `tftp-daemon` builds a multi-thread runtime in `main`, runs `serve_async` on
+- `tftpd-r-daemon` builds a multi-thread runtime in `main`, runs `serve_async` on
   it, and drops it after `ServerHandle::stop()` completes.
-- `tftp-gui-slint` builds a two-worker multi-thread runtime inside
+- `tftpd-r-gui-slint` builds a two-worker multi-thread runtime inside
   `EmbeddedController`. `start` uses `block_on` because binding + validation are
   fast and non-blocking; `stop` is spawned and polled so the UI thread is never
   blocked for the grace period. `shutdown` (after the event loop exits) blocks

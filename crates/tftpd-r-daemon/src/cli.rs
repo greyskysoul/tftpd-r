@@ -11,9 +11,9 @@ use clap::{Args, Parser, Subcommand};
 /// Headless TFTP server with configuration file and graceful shutdown.
 #[derive(Debug, Parser)]
 #[command(
-    name = "tftp-daemon",
+    name = "tftpd-r",
     version,
-    about = "Read-only TFTP (RFC 1350) server daemon with a sandboxed root directory",
+    about = "TftpdR: read-only TFTP (RFC 1350) server daemon with a sandboxed root directory",
     long_about = None
 )]
 pub struct Cli {
@@ -45,7 +45,7 @@ pub struct ServeArgs {
     /// Override the configured root directory.
     #[arg(long, value_name = "DIR")]
     pub root: Option<PathBuf>,
-    /// Log filter directive (overrides the TFTP_LOG environment variable).
+    /// Log filter directive (overrides the TFTPD_R_LOG environment variable).
     #[arg(long, value_name = "FILTER")]
     pub log: Option<String>,
 }
@@ -64,7 +64,7 @@ mod tests {
 
     #[test]
     fn serve_defaults_to_config_toml() {
-        let cli = Cli::try_parse_from(["tftp-daemon", "serve"]).expect("parse");
+        let cli = Cli::try_parse_from(["tftpd-r", "serve"]).expect("parse");
         let Command::Serve(args) = cli.command else {
             panic!("expected serve")
         };
@@ -75,7 +75,7 @@ mod tests {
     #[test]
     fn serve_accepts_overrides() {
         let cli = Cli::try_parse_from([
-            "tftp-daemon",
+            "tftpd-r",
             "serve",
             "--config",
             "server.toml",
@@ -95,18 +95,17 @@ mod tests {
 
     #[test]
     fn check_config_and_print_default_config_parse() {
-        let cli =
-            Cli::try_parse_from(["tftp-daemon", "check-config", "-c", "x.toml"]).expect("parse");
+        let cli = Cli::try_parse_from(["tftpd-r", "check-config", "-c", "x.toml"]).expect("parse");
         assert!(
             matches!(cli.command, Command::CheckConfig(args) if args.config == std::path::Path::new("x.toml"))
         );
 
-        let cli = Cli::try_parse_from(["tftp-daemon", "print-default-config"]).expect("parse");
+        let cli = Cli::try_parse_from(["tftpd-r", "print-default-config"]).expect("parse");
         assert!(matches!(cli.command, Command::PrintDefaultConfig));
     }
 
     #[test]
     fn invalid_subcommand_is_rejected() {
-        assert!(Cli::try_parse_from(["tftp-daemon", "run"]).is_err());
+        assert!(Cli::try_parse_from(["tftpd-r", "run"]).is_err());
     }
 }

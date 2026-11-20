@@ -12,9 +12,9 @@ framing limits, reconnect logic and a new crate for shared DTOs.
 
 ## Decision
 
-Deliver Phase 5 only in this release: the Slint GUI embeds `tftp-core` in its own
+Deliver Phase 5 only in this release: the Slint GUI embeds `tftpd-r-core` in its own
 Tokio runtime (`EmbeddedController`). There is no IPC endpoint, no daemon
-process control, and no `tftp-control-protocol` crate yet. The daemon is a
+process control, and no `tftpd-r-control-protocol` crate yet. The daemon is a
 separate, standalone front-end.
 
 ## Consequences
@@ -22,7 +22,7 @@ separate, standalone front-end.
 - The GUI is a fully functional local server panel without any IPC attack
   surface or platform transport code.
 - The GUI cannot attach to an already-running daemon; closing the GUI stops its
-  server. Operators who need a background service must run `tftp-daemon`.
+  server. Operators who need a background service must run `tftpd-r`.
 - Phase 6 remains open. When implemented, DTOs must live in a separate crate,
   the protocol must be versioned and length-prefixed, local clients must be
   authenticated (pipe ACLs / socket permissions), and commands must be split by

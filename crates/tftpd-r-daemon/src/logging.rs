@@ -2,7 +2,7 @@
 
 use std::io::IsTerminal;
 
-use tftp_core::events::{EventKind, EventSink, TftpEvent};
+use tftpd_r_core::events::{EventKind, EventSink, TftpEvent};
 use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -56,13 +56,13 @@ impl EventSink for TracingSink {
 
 /// Initialise the global tracing subscriber.
 ///
-/// Precedence: `--log <filter>` > `TFTP_LOG` environment variable > `info`.
+/// Precedence: `--log <filter>` > `TFTPD_R_LOG` environment variable > `info`.
 /// Errors from a second initialisation (for example under a test harness) are
 /// ignored.
 pub fn init(cli_filter: Option<&str>) {
     let filter = match cli_filter {
         Some(filter) => EnvFilter::new(filter),
-        None => EnvFilter::try_from_env("TFTP_LOG").unwrap_or_else(|_| EnvFilter::new("info")),
+        None => EnvFilter::try_from_env("TFTPD_R_LOG").unwrap_or_else(|_| EnvFilter::new("info")),
     };
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)

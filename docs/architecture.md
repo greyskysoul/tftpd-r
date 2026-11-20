@@ -6,29 +6,29 @@ Deviations from the plan are recorded in [`docs/adr/`](adr/).
 ## Crate boundaries
 
 ```text
-tftp-gui-slint ──┐
-                 ├──> tftp-core
-tftp-daemon ─────┘
+tftpd-r-gui-slint ──┐
+                    ├──> tftpd-r-core
+tftpd-r-daemon ────┘
 ```
 
-- **`tftp-core`** owns the TFTP protocol codec, option negotiation, the RRQ
+- **`tftpd-r-core`** owns the TFTP protocol codec, option negotiation, the RRQ
   session state machine, the filesystem sandbox, configuration validation and
   the event bus. It depends on Tokio, serde/toml, thiserror and tracing, but not
   on Slint, clap, tracing-subscriber or any IPC transport.
-- **`tftp-daemon`** is a thin front-end: clap CLI, TOML file loading, tracing
+- **`tftpd-r-daemon`** is a thin front-end: clap CLI, TOML file loading, tracing
   logging, signal handling and process exit codes.
-- **`tftp-gui-slint`** is a second front-end: a Slint window plus an embedded
-  controller that owns a Tokio runtime and a `tftp-core` server handle. It does
-  not talk to the daemon (no IPC in this release).
+- **`tftpd-r-gui-slint`** is a second front-end: a Slint window plus an embedded
+  controller that owns a Tokio runtime and a `tftpd-r-core` server handle. It
+  does not talk to the daemon (no IPC in this release).
 
-There is no `tftp-control-protocol` crate yet because embedded mode does not
+There is no `tftpd-r-control-protocol` crate yet because embedded mode does not
 need shared DTOs. When IPC is added, put versioned DTOs in a separate crate so
-`tftp-core` is not coupled to the transport.
+`tftpd-r-core` is not coupled to the transport.
 
 ## Runtime ownership
 
-`tftp-core` uses Tokio primitives but **never creates a runtime**. The front-end
-owns the runtime:
+`tftpd-r-core` uses Tokio primitives but **never creates a runtime**. The
+front-end owns the runtime:
 
 - The daemon builds a multi-thread runtime in `main` and `block_on`s
   `serve_async`; Ctrl-C, Ctrl-Break (Windows console events) and SIGINT/SIGTERM
@@ -150,7 +150,7 @@ re-validated. TOML syntax errors include the file path via `ConfigLoadError`.
 - Library code logs operational events at `debug`/`warn` through `tracing`; it
   does not print to stdout.
 - The daemon initialises a global `tracing-subscriber` (filter from `--log` or
-  `TFTP_LOG`, default `info`) and logs lifecycle events.
+  `TFTPD_R_LOG`, default `info`) and logs lifecycle events.
 - Error text sent to clients is a fixed, sanitised string per error class; local
   paths and OS error messages stay in local logs (and even there only the file
   name and error kind are used for client-visible paths).

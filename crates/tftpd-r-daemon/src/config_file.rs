@@ -7,7 +7,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use tftp_core::{ConfigError, ServerConfig};
+use tftpd_r_core::{ConfigError, ServerConfig};
 
 use crate::cli::ServeArgs;
 

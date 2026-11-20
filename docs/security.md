@@ -36,7 +36,7 @@ risks. It is intentionally specific about what is **not** protected.
 
 ## Filesystem sandbox
 
-Implemented in `crates/tftp-core/src/filesystem.rs`:
+Implemented in `crates/tftpd-r-core/src/filesystem.rs`:
 
 1. **Name validation** before touching the filesystem:
    - empty/overlong names, NUL and control characters rejected;

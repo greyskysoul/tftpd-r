@@ -1,6 +1,6 @@
 //! Slint desktop panel for the TFTP server (embedded mode).
 //!
-//! The GUI runs the `tftp-core` server in its own Tokio runtime, polls the
+//! The GUI runs the `tftpd-r-core` server in its own Tokio runtime, polls the
 //! bounded event bus from a Slint timer, and never blocks the UI thread while
 //! stopping the server.
 
@@ -17,9 +17,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use slint::{Model, ModelRc, Timer, TimerMode, VecModel};
-use tftp_core::events::{EventBus, EventKind, SessionId, TftpEvent};
-use tftp_core::server::ServerStatus;
-use tftp_core::ServerConfig;
+use tftpd_r_core::events::{EventBus, EventKind, SessionId, TftpEvent};
+use tftpd_r_core::server::ServerStatus;
+use tftpd_r_core::ServerConfig;
 
 use controller::EmbeddedController;
 
@@ -73,11 +73,11 @@ impl UiState {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().any(|argument| argument == "--help" || argument == "-h") {
-        println!("tftp-gui-slint {}", env!("CARGO_PKG_VERSION"));
+        println!("tftpd-r-gui {}", env!("CARGO_PKG_VERSION"));
         println!();
-        println!("Native Slint panel for the embedded TFTP server (read-only RRQ).");
+        println!("TftpdR native Slint panel for the embedded TFTP server (read-only RRQ).");
         println!();
-        println!("Usage: tftp-gui-slint [OPTIONS]");
+        println!("Usage: tftpd-r-gui [OPTIONS]");
         println!();
         println!("Options:");
         println!("  -h, --help        Print this help and exit");

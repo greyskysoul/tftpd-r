@@ -43,4 +43,4 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check -p tftp-gui-slint --all-targets
+      - run: cargo check -p tftpd-r-gui-slint --all-targets

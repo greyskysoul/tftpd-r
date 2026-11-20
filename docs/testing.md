@@ -28,23 +28,27 @@ with network access; subsequent builds/tests ran with `--offline`.
 | `cargo fmt --all -- --check` | Pass (exit 0) |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Pass (no warnings) |
 | `cargo test --workspace` | **97 passed, 0 failed** |
-| `cargo build --workspace --release` | Pass (~1 min 36 s including Slint) |
+| `cargo build --workspace --release` | Pass (~30 s incremental; ~1 min 36 s from clean including Slint) |
+
+The workspace was renamed from `rust-tftpd`/`tftp-*` to TftpdR/`tftpd-r-*` on
+2026-11-20. Every command in this section was re-run after the rename; the
+results shown here are from that run.
 
 Release artifacts on the verification machine (informational only; not an
 acceptance criterion and not a promise for other machines/toolchains):
-`target/release/tftp-daemon.exe` ≈ 2.03 MiB, `target/release/tftp-gui-slint.exe`
+`target/release/tftpd-r.exe` ≈ 2.04 MiB, `target/release/tftpd-r-gui.exe`
 ≈ 12.5 MiB (debug symbols stripped by the release profile).
 
 Test breakdown from `cargo test --workspace`:
 
 | Target | Tests | What is covered |
 | --- | --- | --- |
-| `tftp-core` unit tests (`src/lib.rs` target) | 53 | codec round-trips and malformed/oversized packets; option negotiation ranges, duplicates and clamping; configuration defaults/ranges/TOML errors; path sandbox traversal, device names, legacy root-prefix mapping and root-directory rejection, symlink/reparse rejection, size limits; event ring drop/sequence/clear; error-code mapping |
-| `tftp-core` integration `tests/rrq.rs` | 26 | real loopback UDP server and client: small/exact-multiple/empty files, missing file, traversal, legacy `/file` and `\file` requests, root-prefixed traversal rejection, `blksize`/`tsize`/`timeout` negotiation, clamping, invalid option, duplicate ACK, retransmission, unknown TID ERROR 5, duplicate RRQ resend without a new session, WRQ rejection, netascii rejection, unknown mode/malformed/oversized datagrams, size limit, concurrent transfers, lifecycle events, shutdown cancellation, idempotent stop, retry exhaustion, **block-number wrap 65535 → 0** with `blksize = 8` (65,537 blocks) |
-| `tftp-daemon` unit tests | 10 | CLI parsing/defaults/overrides, embedded example template validity, config loading errors, unknown fields, override validation, status-channel failure path |
-| `tftp-daemon` integration `tests/cli.rs` | 5 | binary `print-default-config` equals `config.example.toml`; `check-config` success/missing file/uploads-rejected exit code 2; `serve` refuses invalid config with exit code 1; `serve` stays running with a valid config |
-| `tftp-gui-slint` controller tests | 2 | embedded `ServerHandle` start/stop within a Tokio runtime, double-start rejection, invalid root does not start |
-| `tftp-core` doc test | 1 | crate-level usage example compiles |
+| `tftpd-r-core` unit tests (`src/lib.rs` target) | 53 | codec round-trips and malformed/oversized packets; option negotiation ranges, duplicates and clamping; configuration defaults/ranges/TOML errors; path sandbox traversal, device names, legacy root-prefix mapping and root-directory rejection, symlink/reparse rejection, size limits; event ring drop/sequence/clear; error-code mapping |
+| `tftpd-r-core` integration `tests/rrq.rs` | 26 | real loopback UDP server and client: small/exact-multiple/empty files, missing file, traversal, legacy `/file` and `\file` requests, root-prefixed traversal rejection, `blksize`/`tsize`/`timeout` negotiation, clamping, invalid option, duplicate ACK, retransmission, unknown TID ERROR 5, duplicate RRQ resend without a new session, WRQ rejection, netascii rejection, unknown mode/malformed/oversized datagrams, size limit, concurrent transfers, lifecycle events, shutdown cancellation, idempotent stop, retry exhaustion, **block-number wrap 65535 → 0** with `blksize = 8` (65,537 blocks) |
+| `tftpd-r-daemon` unit tests | 10 | CLI parsing/defaults/overrides, embedded example template validity, config loading errors, unknown fields, override validation, status-channel failure path |
+| `tftpd-r-daemon` integration `tests/cli.rs` | 5 | binary `print-default-config` equals `config.example.toml`; `check-config` success/missing file/uploads-rejected exit code 2; `serve` refuses invalid config with exit code 1; `serve` stays running with a valid config |
+| `tftpd-r-gui-slint` controller tests | 2 | embedded `ServerHandle` start/stop within a Tokio runtime, double-start rejection, invalid root does not start |
+| `tftpd-r-core` doc test | 1 | crate-level usage example compiles |
 
 The block-wrap test transfers 65,537 blocks in roughly 3–4 seconds on the
 verification machine.
@@ -60,8 +64,8 @@ verification machine.
 ## Manual end-to-end verification performed
 
 1. **Daemon + real UDP client.**
-   - Built `target/debug/tftp-daemon.exe`.
-   - Started `tftp-daemon serve --config <temp config>` with
+   - Built `target/debug/tftpd-r.exe`.
+   - Started `tftpd-r serve --config <temp config>` with
      `bind_address = "127.0.0.1:0"` and a 5,000-byte file `image.bin`.
    - A raw UDP TFTP client (Python, 512-byte `octet` RRQ, sequential ACKs)
      downloaded the file **as `/image.bin`**, i.e. with the legacy root prefix
@@ -72,11 +76,12 @@ verification machine.
    - This exercises CLI parsing, config loading, socket binding, RRQ, events,
      logging, signal handling and graceful shutdown together.
 2. **GUI smoke run.**
-   - `target/debug/tftp-gui-slint.exe --smoke-test` creates the Slint window,
+   - `target/debug/tftpd-r-gui.exe --smoke-test` creates the Slint window,
      runs the 200 ms UI timer, and quits after 1.5 s.
-   - Observed: process exited with code 0 after ~3.2 s, no stderr output or panic.
-     This verifies the winit/software-renderer backend initialises and the
-     generated UI compiles and instantiates on this machine.
+   - Observed: process exited with code 0 after ~1.5 s (re-measured after the
+     rename), no stderr output or panic. This verifies the winit/software-renderer
+     backend initialises and the generated UI compiles and instantiates on this
+     machine.
    - It is **not** a substitute for interactive acceptance: visually checking
      layout, Chinese font rendering, button behaviour and window-close cleanup
      on a target desktop remains to be done.
@@ -132,5 +137,5 @@ cargo test --workspace
 cargo build --workspace --release
 
 # GUI smoke test (opens a window for ~1.5 s)
-cargo run -p tftp-gui-slint -- --smoke-test
+cargo run -p tftpd-r-gui-slint -- --smoke-test
 ```

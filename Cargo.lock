@@ -4158,7 +4158,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f18aa187839b2bdb1ad2fa35ead8c4c2976b64e4363c386d45ac0f7ee85c9233"
 
 [[package]]
-name = "tftp-core"
+name = "tftpd-r-core"
 version = "0.1.0"
 dependencies = [
  "serde",
@@ -4171,13 +4171,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "tftp-daemon"
+name = "tftpd-r-daemon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
  "tempfile",
- "tftp-core",
+ "tftpd-r-core",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -4185,13 +4185,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "tftp-gui-slint"
+name = "tftpd-r-gui-slint"
 version = "0.1.0"
 dependencies = [
  "slint",
  "slint-build",
  "tempfile",
- "tftp-core",
+ "tftpd-r-core",
  "thiserror 2.0.21",
  "tokio",
 ]

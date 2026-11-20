@@ -1,10 +1,10 @@
 [package]
-name = "tftp-core"
+name = "tftpd-r-core"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "TFTP (RFC 1350) protocol engine with a sandboxed filesystem layer"
+description = "TftpdR protocol core: TFTP (RFC 1350) engine with a sandboxed filesystem layer"
 
 [dependencies]
 tokio.workspace = true

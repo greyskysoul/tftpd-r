@@ -1,15 +1,15 @@
 //! Embedded-mode controller used by the Slint GUI.
 //!
-//! The GUI owns the Tokio runtime and the `tftp-core` server handle; there is no
+//! The GUI owns the Tokio runtime and the `tftpd-r-core` server handle; there is no
 //! daemon or IPC dependency in this mode (see `docs/adr/0004-embedded-only.md`).
 //! All public methods are meant to be called from the UI thread.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use tftp_core::events::{EventBus, EventSink};
-use tftp_core::server::{ServerHandle, ServerStatus};
-use tftp_core::{ServerConfig, ServerError, TftpServer};
+use tftpd_r_core::events::{EventBus, EventSink};
+use tftpd_r_core::server::{ServerHandle, ServerStatus};
+use tftpd_r_core::{ServerConfig, ServerError, TftpServer};
 
 /// Errors returned when starting the embedded server.
 #[derive(Debug, thiserror::Error)]

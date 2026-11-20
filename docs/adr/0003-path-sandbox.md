@@ -12,7 +12,7 @@ names, ADS syntax and Unicode.
 
 ## Decision
 
-Defence in depth, implemented in `tftp-core::filesystem`:
+Defence in depth, implemented in `tftpd-r-core::filesystem`:
 
 1. **Syntactic validation** before any filesystem call: strip a leading `/` or
    `\` (legacy root prefix, see update below), then reject drive letters/`:`

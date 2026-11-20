@@ -1,13 +1,17 @@
 [package]
-name = "tftp-daemon"
+name = "tftpd-r-daemon"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Headless TFTP server daemon (CLI + config file + graceful shutdown)"
+description = "TftpdR headless daemon: CLI, TOML configuration and graceful shutdown"
+
+[[bin]]
+name = "tftpd-r"
+path = "src/main.rs"
 
 [dependencies]
-tftp-core.workspace = true
+tftpd-r-core.workspace = true
 tokio.workspace = true
 clap.workspace = true
 tracing.workspace = true

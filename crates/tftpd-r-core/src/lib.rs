@@ -1,8 +1,8 @@
 //! TFTP protocol engine, sandboxed file access, configuration and server runtime.
 //!
-//! `tftp-core` has no dependency on the GUI, the daemon binary or any IPC layer.
-//! It can be embedded in a GUI front-end (see `tftp-gui-slint`) or driven by the
-//! headless daemon (`tftp-daemon`).
+//! `tftpd-r-core` has no dependency on the GUI, the daemon binary or any IPC layer.
+//! It can be embedded in a GUI front-end (see `tftpd-r-gui-slint`) or driven by the
+//! headless daemon (`tftpd-r-daemon`).
 //!
 //! # Scope of this release (MVP)
 //!
@@ -26,7 +26,7 @@
 //!
 //! ```no_run
 //! use std::sync::Arc;
-//! use tftp_core::{EventBus, ServerConfig, TftpServer};
+//! use tftpd_r_core::{EventBus, ServerConfig, TftpServer};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let root = std::env::temp_dir().join("tftp-root");

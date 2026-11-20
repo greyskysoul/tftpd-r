@@ -36,14 +36,14 @@
 │   ├── testing.md                 # 实际执行记录与未验证项
 │   └── adr/0001–0006              # 已接受的决策（IPC 延后、上传关闭、octet only 等）
 ├── crates/
-│   ├── tftp-core/                 # 无 GUI/daemon/IPC 依赖
+│   ├── tftpd-r-core/             # 无 GUI/daemon/IPC 依赖
 │   │   ├── src/{lib,config,error,events,filesystem,server,session}.rs
 │   │   ├── src/protocol/{mod,packet,codec,options}.rs
 │   │   └── tests/rrq.rs           # 真实 loopback UDP 集成测试
-│   ├── tftp-daemon/               # CLI + TOML + tracing + 信号处理
+│   ├── tftpd-r-daemon/           # CLI + TOML + tracing + 信号处理
 │   │   ├── src/{main,cli,config_file,logging,shutdown}.rs
 │   │   └── tests/cli.rs           # 运行编译后的二进制
-│   └── tftp-gui-slint/            # Slint 面板 + EmbeddedController
+│   └── tftpd-r-gui-slint/        # Slint 面板 + EmbeddedController
 │       ├── src/{main,controller}.rs
 │       ├── ui/{app,dashboard,settings,logs,models}.slint
 │       └── build.rs
@@ -51,7 +51,7 @@
 └── （未跟踪）计划文档 .md          # 只用本地编辑，禁止提交
 ```
 
-依赖方向必须保持：`tftp-core` ← `tftp-daemon`；`tftp-core` ← `tftp-gui-slint`。GUI 目前不依赖 daemon；若新增 IPC，DTO/客户端协议必须放在独立 crate（例如 `tftp-control-protocol`），不要污染 `tftp-core`。
+依赖方向必须保持：`tftpd-r-core` ← `tftpd-r-daemon`；`tftpd-r-core` ← `tftpd-r-gui-slint`。GUI 目前不依赖 daemon；若新增 IPC，DTO/客户端协议必须放在独立 crate（例如 `tftpd-r-control-protocol`），不要污染 `tftpd-r-core`。
 
 ## 3. 不可破坏的契约
 
@@ -69,7 +69,7 @@
 
 ### 3.2 路径与文件系统沙箱
 
-实现核心在 [`crates/tftp-core/src/filesystem.rs`](crates/tftp-core/src/filesystem.rs)。必须保持以下不变量：
+实现核心在 [`crates/tftpd-r-core/src/filesystem.rs`](crates/tftpd-r-core/src/filesystem.rs)。必须保持以下不变量：
 
 1. **老客户端根目录前缀兼容**：文件名前导的任意 `/` 或 `\` 必须被剥离，并相对配置根目录解析（`get /firmware.bin` → `<root>/firmware.bin`）。只剥离**前导**分隔符；`a//b`、尾随分隔符仍拒绝；仅由分隔符组成的 `/` 表示根目录本身，作为无效文件名拒绝（TFTP 不传目录）。
 2. 剥离后仍拒绝：`..`、`.`、空组件、盘符/`:`（同时阻断 NTFS ADS）、Windows 保留设备名（`CON`/`NUL`/`COM1`…）、尾随点/空格、`< > " | ? *`、控制字符和 NUL。
@@ -131,9 +131,9 @@ cargo build --workspace --release
 其他有用命令：
 
 ```powershell
-cargo run -p tftp-daemon -- check-config --config config.toml
-cargo run -p tftp-daemon -- serve --config config.toml
-cargo run -p tftp-gui-slint -- --smoke-test
+cargo run -p tftpd-r-daemon -- check-config --config config.toml
+cargo run -p tftpd-r-daemon -- serve --config config.toml
+cargo run -p tftpd-r-gui-slint -- --smoke-test
 ```
 
 `.bootstrap/e2e_daemon.py`（若存在，git-ignored）会用原始 UDP 客户端以 `/image.bin` 形式做 daemon 端到端验证；不是交付物。
@@ -157,7 +157,7 @@ cargo run -p tftp-gui-slint -- --smoke-test
 ## 6. 后续路线与优先级
 
 1. **Phase 6：本机 IPC + GUI daemon 控制**
-   - 新建 `tftp-control-protocol`（版本化 DTO、长度前缀 framing、请求 ID、最大消息、错误码）。
+   - 新建 `tftpd-r-control-protocol`（版本化 DTO、长度前缀 framing、请求 ID、最大消息、错误码）。
    - Windows named pipe / Unix domain socket；本机 ACL/权限校验，拒绝远程；命令分权（只读状态 vs start/stop vs 配置变更）。
    - 连接数/速率/订阅上限；断线重连；契约与未授权客户端测试；GUI IPC controller。
    - 不要把“本地”当可信；默认不允许 IPC 改 root/上传权限。

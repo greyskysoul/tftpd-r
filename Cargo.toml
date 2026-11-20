@@ -1,19 +1,19 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/tftp-core",
-    "crates/tftp-daemon",
-    "crates/tftp-gui-slint",
+    "crates/tftpd-r-core",
+    "crates/tftpd-r-daemon",
+    "crates/tftpd-r-gui-slint",
 ]
 
 [workspace.package]
-authors = ["rust-tftpd contributors"]
+authors = ["TftpdR contributors"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
 version = "0.1.0"
 
 [workspace.dependencies]
-tftp-core = { path = "crates/tftp-core" }
+tftpd-r-core = { path = "crates/tftpd-r-core" }
 tokio = { version = "1.54", features = ["rt", "rt-multi-thread", "net", "time", "sync", "fs", "io-util", "macros", "signal"] }
 tokio-util = { version = "0.7.20", features = ["rt"] }
 thiserror = "2.0"
