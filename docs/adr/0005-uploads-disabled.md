@@ -1,0 +1,33 @@
+# ADR 0005: Uploads (WRQ) remain disabled
+
+- **Status:** accepted (deviation from the original phased plan)
+- **Date:** 2026-11-20
+
+## Context
+
+Phase 7 of the plan covers WRQ uploads behind explicit configuration. A safe
+implementation needs: path/overwrite checks before creating the target, a
+temporary file in the destination directory, atomic replacement semantics per
+platform, disk-full/cancel cleanup, upload size limits, race/TOCTOU analysis for
+creation, and its own interoperability tests.
+
+Shipping a half-reviewed write path would turn a read-only server into a data
+loss or path-escape vector.
+
+## Decision
+
+- WRQ is parsed and always answered with ERROR 2 (`Access violation`, message
+  "Uploads are disabled").
+- `allow_upload = true` and `overwrite = true` are **configuration validation
+  errors**, with messages explaining that uploads are not implemented. The GUI
+  shows the upload switch disabled.
+- The codec, `Mode` parsing and option negotiation already handle WRQ-shaped
+  requests, so the protocol groundwork exists.
+
+## Consequences
+
+- No create/replace/write code exists in this release; the sandbox only opens
+  files for reading.
+- The default and only behaviour is read-only, matching the plan's MVP scope.
+- Phase 7 must revisit this ADR, implement atomic temp writes plus cleanup, add
+  upload path security tests, and keep `allow_upload` opt-in and default false.

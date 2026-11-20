@@ -1,0 +1,48 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/tftp-core",
+    "crates/tftp-daemon",
+    "crates/tftp-gui-slint",
+]
+
+[workspace.package]
+authors = ["rust-tftpd contributors"]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.1.0"
+
+[workspace.dependencies]
+tftp-core = { path = "crates/tftp-core" }
+tokio = { version = "1.54", features = ["rt", "rt-multi-thread", "net", "time", "sync", "fs", "io-util", "macros", "signal"] }
+tokio-util = { version = "0.7.20", features = ["rt"] }
+thiserror = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+toml = "1.2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+clap = { version = "4.6", features = ["derive"] }
+anyhow = "1.0"
+tempfile = "3.27"
+slint = { version = "1.19", default-features = false, features = [
+    "std",
+    "backend-winit",
+    "renderer-software",
+    "software-renderer-systemfonts",
+    "compat-1-2",
+] }
+slint-build = "1.19"
+
+[workspace.lints.rust]
+# `deny` rather than `forbid`: the Slint code generator emits `#[allow(unsafe_code)]`
+# around its FFI shims, which is incompatible with `forbid`. Hand-written code in
+# this workspace contains no `unsafe` and must not add any without review.
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

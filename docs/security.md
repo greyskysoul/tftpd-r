@@ -1,0 +1,135 @@
+# Security
+
+This document covers the MVP threat model, implemented controls, and residual
+risks. It is intentionally specific about what is **not** protected.
+
+## Assumptions and deployment guidance
+
+- TFTP has **no authentication or encryption**. Anyone who can send UDP packets
+  to the listening port and reach the export tree can download any file the
+  server account can read under the root. Treat the exported directory as public
+  to the allowed network.
+- Defaults are conservative: loopback binding, read-only, uploads refused,
+  modest concurrency, 64 MiB file limit.
+- Bind to loopback unless a LAN deployment is intentional. For LAN use, restrict
+  the firewall to the client subnet, run the daemon under a dedicated
+  low-privilege account and export a dedicated directory containing only files
+  that may be public.
+- Do not expose the service directly to the Internet. The protocol has no
+  anti-spoofing or authentication; request spoofing and response amplification
+  are inherent to UDP/TFTP.
+- Port 69 requires administrator/root. The example uses `6969`, which does not.
+
+## Threat model
+
+| Threat | Relevant controls |
+| --- | --- |
+| Unauthorised LAN client downloading files | Read-only by default; sandbox limits to the root; operator must opt into LAN binding; firewall guidance. No authentication exists. |
+| Malicious/malformed UDP datagrams | Strict codec with length/field/UTF-8 checks; unknown opcodes and malformed requests answered with ERROR 4; oversized requests rejected; unknown options ignored, malformed known options fail negotiation. |
+| Resource exhaustion (sessions, ports, memory, retransmissions) | Global `max_sessions` semaphore; 8-session per-IP cap; bounded request size; bounded retransmissions; hard per-transfer deadline; file size limit; bounded event ring; duplicate-request dedup avoids task/port churn. |
+| Directory traversal / symlink escape | Component validation (`..`, absolute, drive, UNC, device names, ADS via `:`), per-component reparse-point rejection, canonical path check after open, component-wise prefix comparison (avoids `C:\root2` confusion). |
+| Silent data corruption | Exact-byte RRQ tests, ACK-block validation, retransmission of the exact encoded packet, idempotent duplicate handling, zero-length final block test, block wrap test. |
+| Overwriting or uploading data | WRQ rejected (ERROR 2) and `allow_upload = true` rejected at validation. No write path exists. |
+| Local IPC abuse | No IPC endpoint exists in this release. A future IPC must implement local authentication/ACL, framing limits and least-privilege commands. |
+| Log injection / sensitive data leakage | Client file names are sanitised for control characters and length before events/logs; ERROR text is fixed and path-free; detailed OS errors are not sent to clients. |
+| Configuration mistakes | `deny_unknown_fields`, range validation, root existence check, explicit rejection of uploads/overwrite, loopback default. |
+
+## Filesystem sandbox
+
+Implemented in `crates/tftp-core/src/filesystem.rs`:
+
+1. **Name validation** before touching the filesystem:
+   - empty/overlong names, NUL and control characters rejected;
+   - absolute paths (`/`, `\`), drive letters and any `:` rejected (also blocks
+     NTFS alternate data streams);
+   - both `/` and `\` are treated as separators; empty components rejected
+     (catches `//`, trailing separators);
+   - `.`/`..` components rejected;
+   - Windows reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`,
+     `LPT1`–`LPT9`) rejected, including `NUL.txt` forms;
+   - components ending in `.` or space rejected (Win32 would strip them);
+   - `< > " | ? *` rejected for cross-platform consistency.
+2. **Root canonicalisation**: `Sandbox::new` requires the root to exist and be a
+   directory and stores its canonical path (Windows verbatim paths are fine).
+3. **Per-component walk** with `symlink_metadata`: every intermediate component
+   must be a directory; the final component must be a regular file; any reparse
+   point (Windows `FILE_ATTRIBUTE_REPARSE_POINT`, Unix symlink) is rejected.
+4. **Open, then verify**: size is checked before and after opening; the final
+   canonical path is compared component-by-component against the canonical root
+   (case-insensitive on Windows). The component-wise comparison prevents
+   prefix confusion such as `C:\root` vs `C:\root2`.
+
+### Residual filesystem risks (accepted, documented)
+
+- **TOCTOU window.** Between the metadata walk and `open`, a local attacker with
+  write access inside the root could replace a component with a junction. The
+  post-open canonical check narrows this window but cannot eliminate it with
+  stable `std` APIs (no `openat`-style relative open with
+  `FILE_FLAG_OPEN_REPARSE_POINT`). Protection assumes the export tree is not
+  writable by an untrusted local user. A same-user attacker who can modify the
+  exported tree can already read those files directly.
+- **Hard links.** A hard link inside the root to a file outside cannot be
+  distinguished by path checks. Creating one requires write access to the root
+  and the target volume.
+- **8.3 short names and case/Unicode normalisation** are resolved by
+  `canonicalize`; the final component comparison is case-insensitive with an
+  ASCII fast path plus a lower-case fallback. Exotic Unicode case-folding is
+  not guaranteed to match Win32's internal table exactly. This can only cause a
+  *conservative rejection* or a path that is still under the root; it is not a
+  known escape vector, but no formal proof exists.
+- **Files changed during a transfer** are read as-is; a shrinking file produces
+  a shorter final block. No snapshotting is done.
+
+## UDP protocol controls
+
+- Only the first request (RRQ/WRQ) is accepted on the listening socket. DATA,
+  ACK, ERROR and OACK arriving there are answered with ERROR 4.
+- Each session validates the source address (IP + TID port). Packets from other
+  addresses receive ERROR 5, capped at 8 per block exchange to limit reflection
+  amplification. Spoofed sources can still receive those packets; TFTP cannot
+  prevent this.
+- Duplicate ACKs (same or old block) are ignored, never counted twice.
+- Unexpected packet types from the peer are ignored rather than answered, to
+  avoid error-packet loops.
+- Retransmission is bounded by `max_retries` and a per-transfer deadline; there
+  is no unbounded exponential backoff.
+- A repeated RRQ from the same peer is routed to the existing session and causes
+  a resend; it does not create a new session.
+
+Residual: **source spoofing** of the initial RRQ can make the server send DATA to
+a victim address (amplification). This is inherent to TFTP over UDP; mitigation
+is network ACL/firewall or loopback-only binding, not the protocol implementation.
+
+## Resource limits
+
+| Resource | Bound |
+| --- | --- |
+| Concurrent sessions | `max_sessions` (default 16, max 1024) |
+| Sessions per peer IP | 8 |
+| Request datagram | 1024 bytes |
+| DATA payload | negotiated `blksize`, capped by `block_size` (max 65464) |
+| File size | `max_file_bytes` (default 64 MiB) |
+| Retransmissions | `max_retries` (default 5, max 20) |
+| Transfer duration | `max_transfer_duration_secs` (default 1 hour) |
+| Event ring | `event_buffer` (default 1024; oldest dropped, counted) |
+| GUI log model | 500 rows |
+| Shutdown drain | `shutdown_grace_secs` (default 5) |
+
+## Logging and error hygiene
+
+- `sanitize_display_name` replaces control characters, normalises backslashes to
+  `/`, and truncates to 256 bytes before an event is emitted.
+- Client-visible ERROR messages come from fixed constants per error class
+  (for example `File not found`, `Access violation`, `Option negotiation
+  failed`). They never contain the local path or the underlying OS error text.
+- The daemon logs file names and error *kinds*; no credentials exist in the
+  design, and configuration is not dumped to logs.
+- `tracing` writes to stdout; redirect it to a file/service log as appropriate.
+
+## Explicitly out of scope for this release
+
+- Upload security (atomic temp writes, overwrite policy, path permissions).
+- IPC authentication/ACLs and any local control channel.
+- Windows Service hardening (service account, SCM recovery, privilege).
+- TLS, authentication, rate limiting per IP beyond the concurrent-session cap.
+- Audit logging with tamper evidence.

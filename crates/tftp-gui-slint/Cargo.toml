@@ -1,0 +1,22 @@
+[package]
+name = "tftp-gui-slint"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Slint native desktop panel for the TFTP server (embedded mode)"
+
+[dependencies]
+tftp-core.workspace = true
+tokio.workspace = true
+slint.workspace = true
+thiserror.workspace = true
+
+[build-dependencies]
+slint-build.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

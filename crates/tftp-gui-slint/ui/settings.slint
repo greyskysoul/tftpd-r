@@ -1,0 +1,88 @@
+import { Button, CheckBox, LineEdit } from "std-widgets.slint";
+
+export component SettingsPage inherits Rectangle {
+    in-out property <string> bind-address;
+    in-out property <string> root-dir;
+    in-out property <string> block-size;
+    in-out property <string> timeout-secs;
+    in-out property <string> max-sessions;
+    in property <string> error-text;
+    callback apply-requested();
+
+    background: transparent;
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 14px;
+
+        Rectangle {
+            background: white;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: #e2e8f0;
+            VerticalLayout {
+                padding: 18px;
+                spacing: 12px;
+                Text {
+                    text: "Server settings";
+                    font-size: 16px;
+                    font-weight: 600;
+                    color: #0f172a;
+                }
+                Text {
+                    text: "Values are validated with the same rules as the daemon configuration file. Changes take effect the next time the server starts.";
+                    color: #64748b;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+                VerticalLayout {
+                    spacing: 10px;
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text { text: "Bind address"; width: 170px; color: #334155; font-size: 13px; vertical-alignment: center; }
+                        LineEdit { text <=> root.bind-address; horizontal-stretch: 1; }
+                    }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text { text: "Root directory"; width: 170px; color: #334155; font-size: 13px; vertical-alignment: center; }
+                        LineEdit { text <=> root.root-dir; horizontal-stretch: 1; }
+                    }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text { text: "Max block size"; width: 170px; color: #334155; font-size: 13px; vertical-alignment: center; }
+                        LineEdit { text <=> root.block-size; horizontal-stretch: 1; }
+                    }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text { text: "Timeout (seconds)"; width: 170px; color: #334155; font-size: 13px; vertical-alignment: center; }
+                        LineEdit { text <=> root.timeout-secs; horizontal-stretch: 1; }
+                    }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text { text: "Max concurrent sessions"; width: 170px; color: #334155; font-size: 13px; vertical-alignment: center; }
+                        LineEdit { text <=> root.max-sessions; horizontal-stretch: 1; }
+                    }
+                }
+                CheckBox {
+                    text: "Allow uploads (WRQ) — not implemented in this release";
+                    checked: false;
+                    enabled: false;
+                }
+                if root.error-text != "" : Text {
+                    text: root.error-text;
+                    color: #b91c1c;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                    Button {
+                        text: "Apply settings";
+                        clicked => { root.apply-requested(); }
+                    }
+                }
+            }
+        }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}

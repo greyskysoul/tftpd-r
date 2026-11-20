@@ -1,0 +1,207 @@
+# rust-tftpd
+
+A read-only TFTP (RFC 1350) server written in Rust, with a headless daemon and a
+native [Slint](https://slint.dev/) desktop panel. The GUI uses a native window and
+rendering backend — **no WebView / WebView2 is involved** — but see
+[Runtime dependencies](#runtime-dependencies) before repeating that claim.
+
+> **Status: MVP (Phase 0–5 vertical slice).** RRQ downloads, option negotiation,
+> the path sandbox, the daemon CLI and the embedded-mode GUI are implemented and
+> tested. WRQ uploads, daemon IPC and Windows Service packaging are explicitly
+> **not** part of this release. See [Scope](#scope-and-non-goals).
+
+## Scope and non-goals
+
+Implemented:
+
+- RFC 1350 RRQ (read) transfers over UDP, with a dedicated transfer ID (TID)
+  socket per session.
+- RFC 2347/2348/2349 option negotiation: `blksize`, `timeout`, `tsize`; `octet`
+  mode only. `netascii` and `mail` requests are rejected explicitly instead of
+  being silently treated as `octet`.
+- Block-number wraparound, zero-length final DATA for exact block multiples,
+  bounded retransmission, duplicate-ACK tolerance, unknown-TID ERROR 5 handling
+  and duplicate-request resend without spawning a second session.
+- Sandboxed root directory: traversal, drive letters, UNC/device paths, NTFS
+  alternate data streams, Windows reserved device names and reparse points
+  (symlinks/junctions) are rejected.
+- Bounded concurrency (global and per-peer), per-transfer deadline, file-size
+  limit and bounded event ring.
+- Headless daemon: TOML configuration, `check-config`, `print-default-config`,
+  structured logs and Ctrl-C / Ctrl-Break / SIGTERM graceful shutdown.
+- Slint GUI (embedded mode): start/stop, status, active transfers, activity log,
+  settings validation. Layout is in `crates/tftp-gui-slint/ui/`.
+
+Not implemented in this release (deliberate, tracked in `docs/adr/`):
+
+- **WRQ uploads.** `allow_upload = true` is rejected by configuration
+  validation; the server answers WRQ with ERROR 2 (access violation). Uploads
+  need a separate security review and atomic-temp-file design first.
+- **IPC / GUI-managed daemon.** The GUI embeds the server in its own process
+  (`docs/adr/0004-embedded-only.md`). There is no named-pipe protocol yet.
+- **Windows Service registration**, system tray, automatic updates, remote
+  management and user/role management.
+- `netascii` mode (`docs/adr/0006-octet-only.md`).
+
+## Requirements
+
+- Rust **1.100.0** is the toolchain used to develop and verify this workspace.
+  An MSRV is not yet claimed; older compilers have not been tested.
+- Windows 10/11 is the primary target. The protocol engine is platform-neutral
+  and its tests also run on Linux (see CI), but this repository has only been
+  executed on Windows so far.
+- On Windows, a linker is required: the MSVC Build Tools (`link.exe`) for the
+  default `x86_64-pc-windows-msvc` toolchain, or MinGW-w64 for
+  `x86_64-pc-windows-gnu`. The verification described in
+  [docs/testing.md](docs/testing.md) used the GNU toolchain with MinGW-w64.
+- No WebView2, Node.js or browser is needed at runtime by the GUI.
+
+## Build
+
+```powershell
+cargo build --workspace            # debug
+cargo build --workspace --release  # release binaries in target\release
+```
+
+The workspace contains three crates:
+
+| Crate | Purpose |
+| --- | --- |
+| `tftp-core` | Protocol, session engine, sandbox, configuration, events. No GUI/daemon/IPC dependency. |
+| `tftp-daemon` | Headless server binary: CLI, TOML config, logging, graceful shutdown. |
+| `tftp-gui-slint` | Native Slint desktop panel; embeds `tftp-core` (no daemon required). |
+
+## Quick start (daemon)
+
+```powershell
+# 1. Create the exported directory (the example config points here).
+New-Item -ItemType Directory -Force tftp-root | Out-Null
+Set-Content tftp-root\hello.txt "hello over tftp"
+
+# 2. Validate the configuration (does not bind a socket).
+Copy-Item config.example.toml config.toml
+cargo run -p tftp-daemon -- check-config --config config.toml
+
+# 3. Run the server in the foreground; Ctrl-C (or Ctrl-Break) stops it gracefully.
+cargo run -p tftp-daemon -- serve --config config.toml
+```
+
+Then point any TFTP client at `127.0.0.1:6969` and request `hello.txt`. The
+server is read-only: uploads are refused.
+
+CLI summary:
+
+```text
+tftp-daemon serve --config config.toml [--bind 0.0.0.0:6969] [--root DIR]
+tftp-daemon check-config --config config.toml
+tftp-daemon print-default-config
+```
+
+Exit codes: `0` success, `2` configuration/CLI validation failure, `1` runtime
+startup or server failure. `--bind`/`--root` override the file and are validated
+again. `TFTP_LOG` (or `--log`) selects the `tracing` filter, e.g.
+`TFTP_LOG=debug`.
+
+## Quick start (GUI)
+
+```powershell
+cargo run -p tftp-gui-slint
+```
+
+The GUI loads `config.toml` from the current directory when present; otherwise it
+uses safe defaults. Start the server from the dashboard, edit settings on the
+Settings tab (validated with the same rules as the daemon) and watch activity on
+the Logs tab. Settings changes are stored for the next start; the currently
+running server is not reconfigured in place.
+
+Closing the window stops the embedded server and waits for active transfers,
+bounded by `shutdown_grace_secs`.
+
+## Configuration
+
+`config.example.toml` is the authoritative annotated example and is embedded in
+the daemon (`print-default-config` prints exactly that file). Fields:
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `bind_address` | `127.0.0.1:6969` | UDP. Keep loopback unless intentionally serving a LAN. Port 69 needs administrator/root. |
+| `root_dir` | `tftp-root` | Must exist and be a directory. |
+| `allow_upload` | `false` | Must stay `false` in this release; `true` is a validation error. |
+| `overwrite` | `false` | Requires uploads; rejected in this release. |
+| `max_file_bytes` | 64 MiB | Larger files are refused. |
+| `block_size` | 512 | Maximum negotiated `blksize` (8..=65464). Raise for faster LAN transfers. |
+| `timeout_secs` | 3 | Default retransmission timeout (1..=255); a client `timeout` option can override it. |
+| `max_retries` | 5 | Retransmissions before a transfer fails (1..=20). |
+| `max_sessions` | 16 | Concurrent transfers (1..=1024). Also capped at 8 per peer IP. |
+| `max_transfer_duration_secs` | 3600 | Hard wall-clock limit per transfer. |
+| `shutdown_grace_secs` | 5 | How long shutdown waits for sessions before aborting them (1..=60). |
+| `event_buffer` | 1024 | In-memory event ring size (16..=65536). |
+
+Unknown keys are rejected so typos do not silently fall back to defaults.
+
+## Ports and firewall
+
+- The server listens on **UDP** `bind_address` (default `127.0.0.1:6969`). Port
+  `69` is privileged on Windows and Linux; use `6969` for unprivileged runs.
+- Each transfer uses an additional **ephemeral UDP port** (the transfer ID) in
+  the same address family as the listener. A firewall must allow inbound UDP to
+  the listening port *and* the return traffic from those ephemeral ports. On
+  Windows Defender Firewall this normally follows automatically for
+  stateful/loopback traffic, but a restrictive policy may require an explicit
+  rule; this was not tested in this repository.
+- Binding `0.0.0.0` (or `[::]`) exposes the service to the network; there is no
+  authentication in TFTP, so only the exported tree and read-only access limit
+  what a client can reach.
+
+## Security defaults
+
+- Read-only: uploads are disabled and refused by validation.
+- Loopback binding by default; no `unsafe` code in hand-written crates.
+- Path sandbox rejects traversal, absolute/drive/UNC paths, device names,
+  alternate data streams and reparse points; the final canonical path is
+  compared component-wise with the canonical root.
+- Concurrency, file size, retransmission count, transfer duration and event
+  memory are bounded.
+- Client-facing ERROR text never includes local paths or raw OS errors; log
+  file names are sanitised and length-limited.
+- Residual risks (notably a TOCTOU window between path checks and open, and
+  spoofed UDP sources) are documented in [docs/security.md](docs/security.md).
+
+## Tests
+
+```powershell
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo build --workspace --release
+```
+
+The test suite includes codec boundary tests, configuration/path-sandbox tests,
+24 loopback-UDP RRQ integration tests (including block-number wraparound and
+shutdown cancellation), daemon CLI/config integration tests and GUI controller
+tests. See [docs/testing.md](docs/testing.md) for what was actually executed and
+what still needs manual/target-machine verification.
+
+## Runtime dependencies
+
+The GUI uses Slint's `winit` backend with the **software renderer**, so it does
+not require WebView2 or a GPU/OpenGL driver for rendering. It still depends on
+the normal Windows system DLLs and on the CRT that the Rust toolchain links
+against; "no system DLLs" is not claimed. Binary size and memory usage have not
+been measured as acceptance criteria and are therefore not published here.
+
+## Documentation
+
+- [docs/architecture.md](docs/architecture.md) — crate boundaries, lifecycle,
+  data flow and threading.
+- [docs/security.md](docs/security.md) — threat model, sandbox and limits.
+- [docs/testing.md](docs/testing.md) — automated and manual verification.
+- [docs/adr/](docs/adr/) — decision records, including deliberate deviations
+  from the original implementation plan.
+- [Rust + Slint 无 WebView 依赖解耦式 TFTP 服务端架构设计方案.md](Rust%20%2B%20Slint%20无%20WebView%20依赖解耦式%20TFTP%20服务端架构设计方案.md)
+  — the original implementation blueprint (Chinese).
+
+## License
+
+MIT OR Apache-2.0 (see `Cargo.toml`; no license files are bundled yet — add them
+before distributing binaries).

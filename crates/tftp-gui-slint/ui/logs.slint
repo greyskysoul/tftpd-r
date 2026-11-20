@@ -1,0 +1,73 @@
+import { Button, ScrollView } from "std-widgets.slint";
+import { LogRow } from "models.slint";
+
+export component LogsPage inherits Rectangle {
+    in property <[LogRow]> rows;
+    callback clear-requested();
+
+    background: transparent;
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 12px;
+
+        Rectangle {
+            background: white;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: #e2e8f0;
+            VerticalLayout {
+                padding: 18px;
+                spacing: 10px;
+                HorizontalLayout {
+                    Text {
+                        text: "Activity log";
+                        font-size: 16px;
+                        font-weight: 600;
+                        color: #0f172a;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                    Button {
+                        text: "Clear view";
+                        clicked => { root.clear-requested(); }
+                    }
+                }
+                ScrollView {
+                    height: 440px;
+                    VerticalLayout {
+                        spacing: 6px;
+                        if root.rows.length == 0 : Text {
+                            text: "No events yet. Start the server and serve a file to populate this view.";
+                            color: #94a3b8;
+                            font-size: 13px;
+                        }
+                        for row in root.rows: HorizontalLayout {
+                            spacing: 10px;
+                            Text {
+                                text: row.time;
+                                color: #94a3b8;
+                                font-size: 12px;
+                                width: 64px;
+                            }
+                            Text {
+                                text: row.level;
+                                color: row.level == "ERROR" ? #b91c1c : row.level == "WARN" ? #b45309 : #1d4ed8;
+                                font-size: 12px;
+                                font-weight: 600;
+                                width: 52px;
+                            }
+                            Text {
+                                text: row.message;
+                                color: #0f172a;
+                                font-size: 13px;
+                                horizontal-stretch: 1;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

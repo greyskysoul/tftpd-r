@@ -1,0 +1,125 @@
+import { Button } from "std-widgets.slint";
+import { Dashboard } from "dashboard.slint";
+import { SettingsPage } from "settings.slint";
+import { LogsPage } from "logs.slint";
+import { LogRow, TransferRow } from "models.slint";
+
+export component AppWindow inherits Window {
+    title: "TFTP Server";
+    width: 1040px;
+    height: 720px;
+    background: #f1f5f9;
+
+    in-out property <int> current-page: 0;
+    in-out property <string> status-text: "Stopped";
+    in-out property <int> status-kind: 0;
+    in-out property <bool> can-start: true;
+    in-out property <bool> can-stop: false;
+    in-out property <string> bind-text: "—";
+    in-out property <string> root-text: "—";
+    in-out property <string> session-count: "0";
+    in-out property <string> throughput-text: "—";
+    in-out property <string> error-text: "";
+    in-out property <[TransferRow]> transfers: [];
+    in-out property <[LogRow]> logs: [];
+    in-out property <string> settings-bind: "127.0.0.1:6969";
+    in-out property <string> settings-root: "tftp-root";
+    in-out property <string> settings-block-size: "512";
+    in-out property <string> settings-timeout: "3";
+    in-out property <string> settings-max-sessions: "16";
+    in-out property <string> settings-error: "";
+
+    callback start-requested();
+    callback stop-requested();
+    callback apply-settings();
+    callback clear-logs();
+
+    VerticalLayout {
+        Rectangle {
+            height: 60px;
+            background: #0f172a;
+            HorizontalLayout {
+                padding-left: 20px;
+                padding-right: 20px;
+                spacing: 8px;
+                Text {
+                    text: "TFTP Server";
+                    color: white;
+                    font-size: 20px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+                Rectangle { width: 16px; background: transparent; }
+                Button {
+                    text: "Dashboard";
+                    clicked => { root.current-page = 0; }
+                }
+                Button {
+                    text: "Settings";
+                    clicked => { root.current-page = 1; }
+                }
+                Button {
+                    text: "Logs";
+                    clicked => { root.current-page = 2; }
+                }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                Text {
+                    text: "Rust · Slint · no WebView";
+                    color: #94a3b8;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        VerticalLayout {
+            if root.current-page == 0 : Dashboard {
+                status-text: root.status-text;
+                status-kind: root.status-kind;
+                can-start: root.can-start;
+                can-stop: root.can-stop;
+                bind-text: root.bind-text;
+                root-text: root.root-text;
+                session-count: root.session-count;
+                throughput-text: root.throughput-text;
+                error-text: root.error-text;
+                transfers: root.transfers;
+                start-requested => { root.start-requested(); }
+                stop-requested => { root.stop-requested(); }
+            }
+            if root.current-page == 1 : SettingsPage {
+                bind-address <=> root.settings-bind;
+                root-dir <=> root.settings-root;
+                block-size <=> root.settings-block-size;
+                timeout-secs <=> root.settings-timeout;
+                max-sessions <=> root.settings-max-sessions;
+                error-text: root.settings-error;
+                apply-requested => { root.apply-settings(); }
+            }
+            if root.current-page == 2 : LogsPage {
+                rows: root.logs;
+                clear-requested => { root.clear-logs(); }
+            }
+        }
+        Rectangle {
+            height: 30px;
+            background: #e2e8f0;
+            HorizontalLayout {
+                padding-left: 20px;
+                padding-right: 20px;
+                Text {
+                    text: "Default mode: read-only RRQ · loopback binding · uploads disabled";
+                    color: #64748b;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                Text {
+                    text: root.error-text == "" ? root.status-text : root.error-text;
+                    color: #64748b;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

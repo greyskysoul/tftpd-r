@@ -1,0 +1,45 @@
+# TFTP daemon configuration (safe defaults).
+# Validate with: tftp-daemon check-config --config config.example.toml
+# Run with:      tftp-daemon serve --config config.example.toml
+#
+# The server is read-only in this release: WRQ uploads are rejected and
+# `allow_upload = true` is refused by configuration validation.
+
+# UDP listen address. Keep loopback unless you intentionally serve a LAN.
+# Binding port 69 requires administrator/root privileges; 6969 works unprivileged.
+bind_address = "127.0.0.1:6969"
+
+# Directory exposed to TFTP clients. It must exist when the server starts.
+# Clients cannot escape it: absolute paths, drive letters, `..`, device names,
+# alternate data streams and reparse points (symlinks/junctions) are rejected.
+root_dir = "tftp-root"
+
+# Uploads are not implemented in this release; this must remain false.
+allow_upload = false
+overwrite = false
+
+# Largest single file the server will send, in bytes (64 MiB).
+max_file_bytes = 67108864
+
+# Largest `blksize` the server will negotiate (RFC 2348 range is 8..=65464).
+# 512 is the conservative RFC 1350 baseline; raise it (for example 1468) for
+# faster transfers on a trusted LAN. The client may negotiate a smaller value.
+block_size = 512
+
+# Retransmission timeout in seconds (RFC 2349 range is 1..=255).
+timeout_secs = 3
+
+# Retransmissions before a transfer is failed.
+max_retries = 5
+
+# Maximum number of concurrent transfers.
+max_sessions = 16
+
+# Hard limit on the wall-clock duration of one transfer.
+max_transfer_duration_secs = 3600
+
+# How long shutdown waits for active transfers before aborting them.
+shutdown_grace_secs = 5
+
+# Number of transfer events retained in memory for status consumers.
+event_buffer = 1024
