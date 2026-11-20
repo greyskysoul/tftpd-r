@@ -208,7 +208,8 @@ been measured as acceptance criteria and are therefore not published here.
 - [docs/testing.md](docs/testing.md) — automated and manual verification.
 - [docs/adr/](docs/adr/) — decision records, including deliberate deviations
   from the original implementation plan.
-- [Rust + Slint 无 WebView 依赖解耦式 TFTP 服务端架构设计方案.md](Rust%20%2B%20Slint%20无%20WebView%20依赖解耦式%20TFTP%20服务端架构设计方案.md)
+- [AGENTS.md](AGENTS.md) — development guide for follow-up coding agents:
+  invariants, workflow, verification commands and roadmap (in Chinese).
   — the original implementation blueprint (Chinese).
 
 ## License
