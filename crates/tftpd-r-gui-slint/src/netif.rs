@@ -17,10 +17,14 @@
 
 use std::net::{IpAddr, Ipv6Addr};
 use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
+use std::process::Command;
+#[cfg(windows)]
+use std::process::{Output, Stdio};
+#[cfg(windows)]
 use std::time::{Duration, Instant};
 
 /// Longest a platform helper may take before it is killed.
+#[cfg(windows)]
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Windows `CREATE_NO_WINDOW`: the helper must not flash a console window.
@@ -141,6 +145,7 @@ fn with_no_console(command: &mut Command) {
 }
 
 /// Spawn a helper, give it a bounded amount of time and collect its stdout.
+#[cfg(windows)]
 fn run_with_timeout(mut command: Command, timeout: Duration) -> Option<Output> {
     let mut child = command
         .stdin(Stdio::null())
