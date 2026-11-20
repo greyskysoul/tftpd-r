@@ -39,6 +39,11 @@ acceptance criterion and not a promise for other machines/toolchains):
 `target/release/tftpd-r.exe` ≈ 2.04 MiB, `target/release/tftpd-r-gui.exe`
 ≈ 12.43 MiB (debug symbols stripped by the release profile).
 
+The suite also runs on `ubuntu-latest` in CI. One core unit test
+(`prefix_confusion_is_rejected_by_component_comparison`) therefore has a
+Windows and a Unix variant, so the component-comparison invariant is checked on
+both platforms instead of only where `C:\` paths are meaningful.
+
 Test breakdown from `cargo test --workspace`:
 
 | Target | Tests | What is covered |

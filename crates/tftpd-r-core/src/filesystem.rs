@@ -614,11 +614,24 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
     #[test]
     fn prefix_confusion_is_rejected_by_component_comparison() {
         let root = Path::new(r"C:\root");
         assert!(path_is_within(root, Path::new(r"C:\root\a.bin")));
         assert!(!path_is_within(root, Path::new(r"C:\root2\a.bin")));
         assert!(!path_is_within(root, Path::new(r"C:\other\a.bin")));
+    }
+
+    // The same prefix confusion on Unix, where `/` is the separator: a string
+    // prefix check would accept `/root2/a.bin` for the root `/root`, while the
+    // component comparison must reject it.
+    #[cfg(unix)]
+    #[test]
+    fn prefix_confusion_is_rejected_by_component_comparison() {
+        let root = Path::new("/root");
+        assert!(path_is_within(root, Path::new("/root/a.bin")));
+        assert!(!path_is_within(root, Path::new("/root2/a.bin")));
+        assert!(!path_is_within(root, Path::new("/other/a.bin")));
     }
 }
