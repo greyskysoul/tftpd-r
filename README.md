@@ -46,6 +46,11 @@ Not implemented in this release (deliberate, tracked in `docs/adr/`):
   management and user/role management.
 - `netascii` mode (`docs/adr/0006-octet-only.md`).
 
+Requirements accepted for the next release — port 69 as the default with a
+non-forcing hint when privileges are missing, multi-select bind addresses, and
+INI configuration stored at `~/.tftpdr.ini` — are recorded in
+[docs/roadmap.md](docs/roadmap.md). They are **not** part of 0.1.0.
+
 ## Requirements
 
 - Rust **1.100.0** is the toolchain used to develop and verify this workspace.

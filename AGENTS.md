@@ -34,6 +34,7 @@
 │   ├── architecture.md            # crate 边界、生命周期、数据流、线程模型
 │   ├── security.md                # 威胁模型、沙箱、残余风险
 │   ├── testing.md                 # 实际执行记录与未验证项
+│   ├── roadmap.md                 # 已接受但未实现的需求（端口 69、多选绑定、INI 配置）
 │   └── adr/0001–0006              # 已接受的决策（IPC 延后、上传关闭、octet only 等）
 ├── crates/
 │   ├── tftpd-r-core/             # 无 GUI/daemon/IPC 依赖
@@ -49,7 +50,9 @@
 │       │       root-menu,widgets,theme,icons,models}.slint
 │       ├── ui/icons/{LICENSE,README.md}   # Material Design 图标来源与 Apache-2.0
 │       └── build.rs
-├── .github/workflows/ci.yml       # 已编写，尚未在托管 runner 实际运行
+├── .github/workflows/ci.yml       # push/PR：fmt、clippy、test、release 构建、GUI 编译
+├── .github/workflows/release.yml  # v* tag：四目标原生构建并发布 GitHub Release
+├── .github/release-notes/         # 每个 tag 一个发布说明文件（<version>.md）
 └── （未跟踪）计划文档 .md          # 只用本地编辑，禁止提交
 ```
 
@@ -145,7 +148,7 @@ cargo run -p tftpd-r-gui-slint -- --smoke-test
 - **绝不提交计划文档**：它未跟踪且被 `.git/info/exclude` 忽略；不要 `git add -f`，不要把它复制进 `docs/` 或其他跟踪文件。
 - 不提交 `target/`、`.dsh-toolchain/`、`.bootstrap/`、日志和临时文件。
 - 提交信息说明行为变化、验证命令与结果；一个提交聚焦一个主题。
-- 历史重写/强推只在用户明确要求时进行；本项目没有远程仓库，但仍应避免无谓改写。
+- 历史重写/强推只在用户明确要求时进行；远程为 `origin`（GitHub），但仍应避免无谓改写。
 
 ## 5. 测试要求
 
@@ -158,19 +161,24 @@ cargo run -p tftpd-r-gui-slint -- --smoke-test
 
 ## 6. 后续路线与优先级
 
-1. **Phase 6：本机 IPC + GUI daemon 控制**
+1. **0.2.0 需求（已接受，未实现，详见 [docs/roadmap.md](docs/roadmap.md)）**
+   - **R1 默认端口 69**：默认绑定端口改为 69；权限不足时向用户提示可改用非特权端口（如 6969），但**不得强制**、不得静默回退、不得自动提权、不得改写配置。需要新 ADR + 安全评审（默认值变更）。
+   - **R2 多选绑定地址**：GUI 用多选下拉框替代单一地址输入，自动导入本机各网卡 IP，并始终提供「全部网络 (0.0.0.0)」与「本地回环 (127.0.0.1)」两个特殊项；可多选。这是服务端改造（多监听 socket、部分失败状态），不只是 UI 改动。
+   - **R3 INI 配置**：配置格式由 TOML 改为 INI；CLI 可用参数指定 ini 路径；GUI 固定使用用户主目录 `~/.tftpdr.ini`，不再读工作目录的 `config.toml`。需要 ADR（格式与位置变更 + 旧 TOML 迁移策略）。
+   - 0.1.0 已发布的内容**不包含**以上任何一项：仍是 TOML、单一 `bind_address`、默认 `127.0.0.1:6969`。
+2. **Phase 6：本机 IPC + GUI daemon 控制**
    - 新建 `tftpd-r-control-protocol`（版本化 DTO、长度前缀 framing、请求 ID、最大消息、错误码）。
    - Windows named pipe / Unix domain socket；本机 ACL/权限校验，拒绝远程；命令分权（只读状态 vs start/stop vs 配置变更）。
    - 连接数/速率/订阅上限；断线重连；契约与未授权客户端测试；GUI IPC controller。
    - 不要把“本地”当可信；默认不允许 IPC 改 root/上传权限。
-2. **Phase 7：WRQ 上传**
+3. **Phase 7：WRQ 上传**
    - 必须显式配置开启；默认禁止覆盖；临时文件 + 原子替换；取消/磁盘满清理；上传大小/空间/时长限制；路径检查与 TOCTOU 复核。
    - 补齐 RFC 互操作与安全测试，更新 ADR 0005 后才可默认以外的行为。
-3. **Phase 8：目标机验证**
+4. **Phase 8：目标机验证**
    - MSVC Release、真实/老式 TFTP 客户端（含 `get /file`）、LAN/防火墙/TID 端口、69 端口权限、RDP、GUI 中文与交互、关闭窗口资源释放。
    - 依赖/许可证审计、支持矩阵、打包与升级/回滚说明；如实记录产物大小与依赖，不作未验证承诺。
-4. **CI**：当前 `.github/workflows/ci.yml` 未在托管 runner 运行；启用后确保 fmt/clippy/test/release 与 GUI 编译均通过。
-5. **Windows Service**：独立后续工作，不要混入前台 daemon 生命周期；不得自动注册服务或提权。
+5. **CI**：`.github/workflows/ci.yml` 已在公开仓库运行（Windows x64 + Linux x64）；发布由 `.github/workflows/release.yml` 在 `v*` tag 上构建并发布 Windows/Linux × x64/arm64 四个原生目标的归档。
+6. **Windows Service**：独立后续工作，不要混入前台 daemon 生命周期；不得自动注册服务或提权。
 
 ## 7. 常见错误（禁止）
 
