@@ -63,6 +63,14 @@ runs on a `v*` tag, or manually without publishing.
 | CI on 2026-11-20 ([44681897220](https://github.com/greyskysoul/tftpd-r/actions/runs/44681897220)) | Pass: fmt, clippy `-D warnings` and `cargo test --workspace` on `windows-latest` (MSVC) and `ubuntu-latest` (GNU); GUI `cargo check` on Windows |
 | Release dry run ([44681934004](https://github.com/greyskysoul/tftpd-r/actions/runs/44681934004)) | Pass: the same test gate, then all four targets built and packaged; the publish job was correctly skipped for a non-tag run |
 | `v0.1.0` release ([44684633030](https://github.com/greyskysoul/tftpd-r/actions/runs/44684633030)) | Pass: [release published](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.1.0) with four archives plus `SHA256SUMS` |
+| CI for the `0.2.0` release commit ([44719058814](https://github.com/greyskysoul/tftpd-r/actions/runs/44719058814)) | Pass: fmt, clippy `-D warnings`, `cargo test --workspace` and the release build on `windows-latest` (MSVC) and `ubuntu-latest` (GNU); GUI `cargo check` on Windows |
+
+The first `v0.2.0` tag run ([44718170093](https://github.com/greyskysoul/tftpd-r/actions/runs/44718170093))
+failed before building anything: Linux clippy reported `DISCOVERY_TIMEOUT` and
+`run_with_timeout` as dead code because `src/netif.rs` used them only in the
+Windows discovery path. They are now `#[cfg(windows)]`; the fixed commit passed
+the CI run above and the tag was moved to it. The failed run published no
+release and no artifacts.
 
 What CI proves, and what it does not:
 
