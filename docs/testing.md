@@ -16,7 +16,7 @@ are defined in [roadmap.md](roadmap.md).
 | Linker | MinGW-w64 GCC 15.3.0 (winlibs, msvcrt runtime); `windres` 2.46.1 from the same binutils for the executable icon |
 | Slint | 1.19.0, features `std`, `backend-winit`, `renderer-software`, `software-renderer-systemfonts`, `compat-1-2` |
 | Release profile | `opt-level = "z"`, `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = "symbols"` (ADR 0010; measured 2026-11-21) |
-| Date | 2026-11-20 (size-profile verification and executable icon added 2026-11-21) |
+| Date | 2026-11-20 (size-profile, executable-icon and `v0.2.1` release checks added 2026-11-21) |
 
 The development environment used a portable toolchain stored in
 `.dsh-toolchain/` (git-ignored) because the agent sandbox could not perform
@@ -31,7 +31,7 @@ with network access; subsequent builds/tests ran with `--offline`.
 | `cargo fmt --all -- --check` | Pass (exit 0) |
 | `cargo clippy --workspace --all-targets --offline -- -D warnings` | Pass (exit 0, no warnings) |
 | `cargo test --workspace --offline` | **148 passed, 0 failed** |
-| `cargo build --workspace --release --locked --offline` | Pass (exit 0, 50.08 s, 2026-11-21, with the embedded Windows icon resource). The first full size-profile build was 116.4 s. |
+| `cargo build --workspace --release --locked --offline` | Pass (exit 0, 54.50 s, 2026-11-21, `v0.2.1` with the embedded Windows icon resource). The first full size-profile build was 116.4 s. |
 
 The workspace was renamed from `rust-tftpd`/`tftp-*` to TftpdR/`tftpd-r-*` on
 2026-11-20. The original `0.2.0` verification ran on 2026-11-20 (offline, GNU toolchain)
@@ -79,6 +79,7 @@ runs on a `v*` tag, or manually without publishing.
 | `v0.1.0` release ([44684633030](https://github.com/greyskysoul/tftpd-r/actions/runs/44684633030)) | Pass: [release published](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.1.0) with four archives plus `SHA256SUMS` |
 | CI for the `0.2.0` release commit ([44719058814](https://github.com/greyskysoul/tftpd-r/actions/runs/44719058814)) | Pass: fmt, clippy `-D warnings`, `cargo test --workspace` and the release build on `windows-latest` (MSVC) and `ubuntu-latest` (GNU); GUI `cargo check` on Windows |
 | `v0.2.0` release ([44719989555](https://github.com/greyskysoul/tftpd-r/actions/runs/44719989555)) | Pass: [release published](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.2.0) with four archives plus `SHA256SUMS`; GitHub's SHA-256 digest for every archive matches the attached checksum file |
+| `v0.2.1` release ([44882456726](https://github.com/greyskysoul/tftpd-r/actions/runs/44882456726)) | Pass: the MSVC/Linux test gate, all four native builds and the [GitHub Release](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.2.1); the downloaded x64 MSVC archive matches `SHA256SUMS`, and its executables were run (see the seventh run below) |
 
 The first `v0.2.0` tag run ([44718170093](https://github.com/greyskysoul/tftpd-r/actions/runs/44718170093))
 failed before building anything: Linux clippy reported `DISCOVERY_TIMEOUT` and
@@ -90,7 +91,10 @@ release and no artifacts.
 What CI proves, and what it does not:
 
 - The suite passes with the **MSVC** toolchain (`x86_64-pc-windows-msvc`) and on
-  Linux (GNU). The hand-verified build documented above is still the GNU one.
+  Linux (GNU). The hand-verified build documented above is the GNU one; in
+  addition, the published x86_64 MSVC `v0.2.1` executables were downloaded and
+  exercised for `--version`, `--help`, `--smoke-test` and a 5,000-byte daemon
+  transfer (seventh run below).
 - `aarch64-pc-windows-msvc` and `aarch64-unknown-linux-gnu` are built on native
   arm64 runners and packaged, but no test is executed there and no arm64 binary
   has ever been run.
@@ -440,15 +444,49 @@ Not verified in this run: the MSVC resource path (there is no MSVC toolchain or
 Windows SDK on this machine, so `link.exe` consuming the generated `.res` was
 not executed), aarch64, Explorer's icon cache and shortcut icons, and the
 CI/release workflows (not rerun after the change). Only the GNU x64 binaries had
-their PE resources inspected.
+their PE resources inspected. The later `v0.2.1` release run below exercised the
+MSVC path through CI and the published MSVC artifact; aarch64 and Explorer
+remain open.
+
+### v0.2.1 release artifacts (2026-11-21, seventh run)
+
+The `v0.2.1` release workflow
+([44882456726](https://github.com/greyskysoul/tftpd-r/actions/runs/44882456726))
+passed the Windows MSVC and Linux GNU test gate, built all four native targets
+and published the [GitHub Release](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.2.1).
+This is the first release whose CI-built MSVC executables were downloaded and
+run.
+
+- **Checksum.** `tftpd-r-0.2.1-x86_64-pc-windows-msvc.zip` is 5,111,579 bytes;
+  its SHA-256
+  `32b4e58ff180fc448d1d4ca665a985c3c5be67da43c471d2e2e74b2ff05bcf2f`
+  matches both `SHA256SUMS` and GitHub's asset digest.
+- **Contents.** `tftpd-r.exe` 1,193,984 B, `tftpd-r-gui.exe` 8,513,024 B,
+  `tftpd-r-gui.ico`, `config.example.toml`, `README.md`, `LICENSE-MIT` and
+  `LICENSE-APACHE`.
+- **PE resources.** Both MSVC executables contain `RT_GROUP_ICON` id 1 with the
+  same seven frames as the GNU build; every `RT_ICON` byte count matches the
+  ICO (1,128 / 2,440 / 4,264 / 9,640 / 16,936 / 67,624 / 9,944).
+  `ExtractAssociatedIcon` returns a 32x32 icon for both. This verifies the MSVC
+  `.res`/`CVTRES` path that could not be checked on the GNU-only machine.
+- **Execution.** `tftpd-r.exe --version` reports `tftpd-r 0.2.1`;
+  `tftpd-r-gui.exe --help` reports `tftpd-r-gui 0.2.1` and exits 0;
+  `--smoke-test` exits 0 with empty stdout/stderr. The MSVC daemon downloaded a
+  5,000-byte `/image.bin` byte-for-byte and exited 0 after Ctrl-Break, logging
+  `TFTP server stopped`.
+- **Not run.** The x86_64 Linux archive and both aarch64 archives were not
+  downloaded or executed; their icon resources were not inspected. The
+  interactive MSVC GUI, Explorer's icon cache and shortcut rendering, other
+  DPIs, and real/legacy TFTP clients remain unverified.
 
 ## Not verified (and therefore not claimed)
 - **External TFTP client interoperability** (tftp-hpa, Tftpd64, PXE firmware,
   U-Boot, etc.). Only the in-repo test client and the raw Python client were
   used.
-- **MSVC runtime behaviour.** CI compiles and tests `x86_64-pc-windows-msvc` and
-  compiles `aarch64-pc-windows-msvc`, but no MSVC binary has been run by hand on
-  a target machine; only the GNU build above was.
+- **MSVC runtime coverage.** The x86_64 MSVC release binaries were run for
+  `--version`, `--help`, `--smoke-test` and one daemon transfer in the 0.2.1
+  check, but the interactive GUI, long-running service behaviour, LAN operation
+  and the arm64 MSVC binaries were not run.
 - **Linux/macOS runtime.** CI runs the full suite on Linux, but the GUI has never
   been run on a Linux desktop, and macOS is untested.
 - **LAN/deployment behaviour:** binding `0.0.0.0`, Windows Defender Firewall
@@ -461,11 +499,11 @@ their PE resources inspected.
   address discovery was exercised only through the .NET API on this machine
   (not on Linux, not with VPN adapters appearing/disappearing, and not through
   the `hostname -I` fallback).
-- **Release artifacts:** sizes and checksums are recorded above; they are
-  informational for the recorded build and are not a guarantee for other
-  machines or toolchains. The size-first profile was measured only on GNU x64;
-  MSVC, Linux and arm64 sizes and rebuilt archives are not claimed. No
-  release-mode throughput benchmark was run, so the CPU cost of
+- **Release artifacts:** sizes and checksums are recorded for the GNU x64 local
+  build and for the downloaded x64 MSVC `v0.2.1` archive; they are not a
+  guarantee for other machines or toolchains. The x86_64 Linux archive and both
+  aarch64 archives were not downloaded or run, and their icon resources were not
+  inspected. No release-mode throughput benchmark was run, so the CPU cost of
   `opt-level = "z"` is unquantified.
 - **MSVC/ARM64 executable icon.** The GNU x64 PE resources were verified (see
   the sixth run above); the MSVC path (passing the generated `.res` to

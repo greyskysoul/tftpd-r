@@ -2,8 +2,10 @@
 
 - **Status:** accepted
 - **Date:** 2026-11-21
-- **Verification:** GNU x64 only; the MSVC and aarch64 resource paths are not
-  executed on this machine (see [testing.md](../testing.md))
+- **Verification:** GNU x64 build plus the published `v0.2.1`
+  `x86_64-pc-windows-msvc` archive (PE resources inspected and binaries run);
+  aarch64 was built but not executed or inspected (see
+  [testing.md](../testing.md))
 
 ## Context
 
@@ -34,7 +36,9 @@ binaries:
   target OS is not Windows.
 - **MSVC targets:** the `.res` file is passed to `link.exe` directly. `LINK`
   documents `.res` as an input and runs `CVTRES`; no `rc.exe` discovery is
-  needed.
+  needed. The `v0.2.1` CI build and the downloaded
+  `x86_64-pc-windows-msvc` archive confirmed that both executables carry the
+  seven-frame resource.
 - **GNU targets:** `windres` (from `PATH`, or the `WINDRES` environment variable)
   converts the same `.res` to a COFF object with a `.rsrc` section. `-F` is
   passed for x86/x86_64 so an x86 build on an x86_64 toolchain gets the right
@@ -85,7 +89,7 @@ the session and the generator/parser/res layout is covered by unit tests in
 - The unit test pins the current seven-frame dimensions and byte sizes; replacing
   the artwork requires updating those assertions as well as regenerating the
   PNG/ICO/RGBA files.
-- Not verified here: the MSVC and aarch64 resource paths, Linux (no icon is
-  expected), Explorer icon caching, and icon selection at every Windows DPI.
-  The release-readiness phase still needs a target-machine check for the MSVC
-  and arm64 artifacts.
+- Not verified here: the aarch64 resource path, Linux (no icon is expected),
+  Explorer icon caching, and icon selection at every Windows DPI. The
+  `x86_64-pc-windows-msvc` resource path was verified with the published
+  `v0.2.1` archive; arm64 still needs a target-machine check.

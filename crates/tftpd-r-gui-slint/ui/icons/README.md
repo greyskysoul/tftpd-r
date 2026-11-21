@@ -78,3 +78,7 @@ enough to rebuild the resource (`rerun-if-changed` is emitted for it).
 The running panel keeps using `app-icon-128.rgba` for its window and task-bar
 icon (see above); the PE resource is what Explorer, shortcuts and the task bar
 show for the executable file itself.
+
+The `v0.2.1` release artifacts for GNU x64 and x86_64 MSVC were inspected: both
+executables in each build contain the same seven frames. The aarch64 resource
+path was built by CI but not executed or inspected.

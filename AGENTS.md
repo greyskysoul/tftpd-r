@@ -13,14 +13,15 @@
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
 | Phase 0–5 | ✅ 已完成 | workspace、codec/沙箱、RRQ 引擎、daemon、GUI 面板重设计（无边框自定义标题栏与窗口控件、工具栏状态徽标、状态栏、日志/传输列表、设置/关于、最近根目录）、文档/ADR/CI 文件 |
-| Phase 6 目标机验证/发布收尾 | 🟡 部分完成 | [0.1.0](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.1.0) 与 [0.2.0](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.2.0) 已发布（Windows/Linux × x64/arm64 四目标原生构建）；Windows/Linux CI 门已通过；真实/老式客户端、LAN/防火墙、Linux GUI、RDP、IME、其他 DPI、发布归档在目标机运行与依赖审计仍待完成 |
+| Phase 6 目标机验证/发布收尾 | 🟡 部分完成 | [0.1.0](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.1.0)、[0.2.0](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.2.0) 与 [0.2.1](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.2.1) 已发布（Windows/Linux × x64/arm64 四目标原生构建）；Windows/Linux CI 门已通过；真实/老式客户端、LAN/防火墙、Linux GUI、RDP、IME、其他 DPI、发布归档在目标机运行与依赖审计仍待完成 |
 | Phase 7 IPC | ⏳ 未开始 | GUI 仅 Embedded 模式；无 named pipe / daemon 控制 |
 | Phase 8 WRQ 上传 | ⏳ 未开始 | 默认且唯一行为是只读；`allow_upload=true` 被配置校验拒绝 |
 | 0.2.0 R1/R2 | ✅ 已发布（2026-11-20） | 默认端口 69 + 非强制提示（ADR 0007）；`port` + `bind_addresses` 多监听、GUI 多选地址选择器与目录选择器（ADR 0008）；首次启动自动打开设置（每用户一次）、选择器「全部网络」独占且不可清空、「全部网络」为首次启动默认、最近根目录可清空、空闲时配置/根目录变更自动重启（ADR 0009）；配置格式破坏性变更，`bind_address` 已删除 |
 | release 体积优化（2026-11-21） | ✅ 已完成（仅 GNU x64 实测） | release profile 改为 `opt-level="z"` + fat LTO + `panic="abort"` + strip；GUI 12.81 → 8.33 MiB（-35.0%）、daemon 2.07 → 1.19 MiB（-42.7%）；当时148 tests、fmt/clippy、release 构建、GUI smoke、release daemon 端到端均通过；后续合并重复测试函数后为145项，加入 exe 图标构建测试后当前148项；MSVC/Linux/arm64 体积与发布归档未重测，CI/release 工作流未用新 profile 重跑（ADR 0010） |
-| Windows exe 图标（2026-11-21） | ✅ 已完成（仅 GNU x64 实测） | 两个 exe 内嵌 `app-icon.ico` 的 `RT_GROUP_ICON`/`RT_ICON`（7 帧）；新增 build-time crate `tftpd-r-build-support`；MSVC 直接链接构建期生成的 `.res`，GNU 用 `windres` 转 COFF；各 +112,640 B；MSVC/arm64 资源路径未运行（ADR 0011） |
+| Windows exe 图标（2026-11-21） | ✅ 已完成（GNU x64 与 v0.2.1 MSVC x64 产物实测） | 两个 exe 内嵌 `app-icon.ico` 的 `RT_GROUP_ICON`/`RT_ICON`（7 帧）；新增 build-time crate `tftpd-r-build-support`；MSVC 直接链接构建期生成的 `.res`，GNU 用 `windres` 转 COFF；GNU 构建各 +112,640 B；arm64 资源路径未运行（ADR 0011） |
+| 0.2.1 发布（2026-11-21） | ✅ 已发布 | tag `v0.2.1` 的 [release workflow 44882456726](https://github.com/greyskysoul/tftpd-r/actions/runs/44882456726) 全绿（MSVC/Linux 测试门 + 四目标构建 + 发布）；下载 x64 MSVC 归档，SHA-256 与 `SHA256SUMS` 一致；MSVC 两个 exe 均含 7 帧图标，`--version`/`--help`/`--smoke-test`/5,000 字节 daemon e2e 均通过；arm64 与 Linux 产物未运行 |
 
-已验证环境：Windows 11（10.0.26300）+ Rust 1.100.0 `x86_64-pc-windows-gnu` + MinGW-w64 GCC 15.3 + Slint 1.19.0；CI 另在 `windows-latest`（MSVC x64）与 `ubuntu-latest`（GNU x64）跑通 fmt/clippy/test，并在原生 arm64 runner 上构建 arm64 产物。**未验证**：MSVC、Linux 与 arm64 产物的**运行**（CI 只对 x64 跑测试，arm64 仅编译）、GUI 在 Linux 桌面上的运行、真实/外部 TFTP 客户端互操作、Windows Service、RDP、69 端口权限、真实键盘/IME 输入、其他 DPI/语言下的字体渲染与无障碍。不要在文档或回复中把这些写成已通过。
+已验证环境：Windows 11（10.0.26300）+ Rust 1.100.0 `x86_64-pc-windows-gnu` + MinGW-w64 GCC 15.3 + Slint 1.19.0；CI 另在 `windows-latest`（MSVC x64）与 `ubuntu-latest`（GNU x64）跑通 fmt/clippy/test，并在原生 arm64 runner 上构建 arm64 产物。**未验证**：MSVC 交互式 GUI 与长期服务行为、Linux 与 arm64 产物的**运行**（CI 只对 x64 跑测试，arm64 仅编译）、GUI 在 Linux 桌面上的运行、真实/外部 TFTP 客户端互操作、Windows Service、RDP、69 端口权限、真实键盘/IME 输入、其他 DPI/语言下的字体渲染与无障碍。不要在文档或回复中把这些写成已通过。
 
 此前最近一次 GUI 人工验证结果（2026-11-20 第四轮，GUI 首次启动/地址选择/历史清空/空闲自动重启）：`cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`（**147 passed**：core 单元 63、RRQ UDP 集成 29、daemon 单元 10、daemon CLI 集成 5、GUI 单元 39、doctest 1）、`cargo build --workspace --release` 全部通过；隔离 `APPDATA` 启动 GUI 确认无 `config.toml` 时自动打开设置且默认选中「全部网络 (0.0.0.0)」，同一 profile 第二次启动不再弹窗；窗口消息点击验证选择器五种切换状态（选具体地址清空「全部网络」、可叠加多个具体地址、选「全部网络」清空其他、再次点击「全部网络」仍保持选中、取消最后一个具体地址回退到「全部网络」）；最近目录「清空」删除 `recent-dirs.txt` 并显示空状态；运行中切换根目录且无传输时自动重启，新根目录可下载 `two.txt`，旧根目录文件返回 file not found；有活跃传输时只记录 WARN 并保持旧根目录/传输不中断。[0.2.0 发布工作流](https://github.com/greyskysoul/tftpd-r/actions/runs/44719989555) 全绿（Windows/Linux 测试门 + 四目标原生构建 + GitHub Release 发布），四个归档的 GitHub SHA-256 digest 与 `SHA256SUMS` 一致；**未验证**：真实鼠标硬件（点击为窗口消息）、其他 DPI、真实/外部 TFTP 客户端、Linux GUI 运行、下载后重新执行 MSVC/arm64 归档。首次 `v0.2.0` tag 运行因 Linux clippy 把 `netif.rs` 的 Windows-only 辅助函数判为 dead code 而失败，修复后移动了 tag（失败运行未发布任何资产）。此前的 0.1.0 人工验收与图标/配色结果见 `docs/testing.md`。执行新改动后必须重新运行并更新真实数字。
 
@@ -40,9 +41,11 @@
 - **构建**：新增 workspace 成员 [`tftpd-r-build-support`](crates/tftpd-r-build-support/src/lib.rs)，只作为 `tftpd-r-daemon` 与 `tftpd-r-gui-slint` 的 build-dependency；两个 crate 的 `build.rs` 调用 `embed_windows_icon`，从 [`app-icon.ico`](crates/tftpd-r-gui-slint/ui/icons/app-icon.ico) 在 `OUT_DIR` 生成 `.res`，非 Windows 目标直接 no-op。MSVC 把 `.res` 交给 `link.exe`；GNU 用 `windres` 转成 `.rsrc` COFF 目标文件。没有提交生成的 `.res`/`.o`，没有新增运行时依赖，也没有新增 unsafe。
 - **体积**：GNU x64 实测两个 exe 各 +112,640 B：daemon 1,245,184 → **1,357,824 B（1.29 MiB）**，GUI 8,734,208 → **8,846,848 B（8.44 MiB）**。ADR 0010 的 profile 结论不变，绝对基线更新见 §4.3。
 - **验证**：`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --offline -- -D warnings`、`cargo test --workspace --offline`（**148 passed**：build-support 3 + core 61 + RRQ 29 + daemon 9 + daemon CLI 5 + GUI 40 + doctest 1）、`cargo build --workspace --release --locked --offline`（50.08 s）全部 exit 0；生成的 `.res` 与 `windres -O res` 对同一 `.rc` 的输出逐字节一致（112,368 B，SHA-256 `29ccb912…d6a1`）；debug/release 两个 exe 用 `LoadLibraryExW(LOAD_LIBRARY_AS_DATAFILE)` + `FindResourceW` 均找到 `RT_GROUP_ICON` 1 的 7 帧且每帧字节数匹配；`ExtractAssociatedIcon` 返回 32x32 的 dns 图标；release GUI `--smoke-test` exit 0 且 stdout/stderr 为空；release daemon 完成 5,000 字节 `/image.bin` 下载并 Ctrl-Break exit 0。
-- **未验证**：MSVC（本机无 MSVC/SDK，`link.exe` 消费 `.res` 未实际执行）与 aarch64 资源路径；Linux 无图标（预期 no-op）；Explorer 图标缓存、快捷方式图标与其他 DPI 未在目标机目视确认；CI/release 未重跑；GNU arm64 交叉 `windres` 未测。
-- **文档影响**：新增 [ADR 0011](docs/adr/0011-windows-executable-icon.md)；更新 [README.md](README.md)（Downloads/Requirements/Build/CRATE 表）、[docs/architecture.md](docs/architecture.md)（crate 边界）、[docs/testing.md](docs/testing.md)（第六轮验证、测试数、体积、未验证项）、[docs/adr/0010](docs/adr/0010-size-first-release-profile.md)（体积后记）、[`ui/icons/README.md`](crates/tftpd-r-gui-slint/ui/icons/README.md)、[.github/workflows/release.yml](.github/workflows/release.yml) 注释，以及本文件 §3.5/§4.3/§5/§7。
-- **后续要求**：在 MSVC 与 arm64 目标机上构建并确认 `.res`/资源路径；不要在 GNU 上绕过 `windres`，不要提交生成的 `.res`/`.o`；更换图标时同步更新 build-support 单测中固定的帧尺寸与字节数。
+- **未验证**：aarch64 资源路径（arm64 产物未运行）；Linux 无图标（预期 no-op）；Explorer 图标缓存、快捷方式图标与其他 DPI 未在目标机目视确认；GNU arm64 交叉 `windres` 未测。MSVC x64 路径已由 `v0.2.1` release workflow 的 MSVC 构建与下载归档实测（见下）。
+- **文档影响**：新增 [ADR 0011](docs/adr/0011-windows-executable-icon.md)；更新 [README.md](README.md)（Downloads/Requirements/Build/CRATE 表）、[docs/architecture.md](docs/architecture.md)（crate 边界）、[docs/testing.md](docs/testing.md)（第六/七轮验证、测试数、体积、未验证项）、[docs/adr/0010](docs/adr/0010-size-first-release-profile.md)（体积后记）、[`ui/icons/README.md`](crates/tftpd-r-gui-slint/ui/icons/README.md)、[.github/workflows/release.yml](.github/workflows/release.yml) 注释，以及本文件 §3.5/§4.3/§5/§7。
+- **后续要求**：在 arm64 目标机上构建并确认 `.res`/资源路径（MSVC x64 已由 v0.2.1 归档确认）；不要在 GNU 上绕过 `windres`，不要提交生成的 `.res`/`.o`；更换图标时同步更新 build-support 单测中固定的帧尺寸与字节数。
+
+`0.2.1` 发布（2026-11-21）：tag `v0.2.1` 触发 [release workflow 44882456726](https://github.com/greyskysoul/tftpd-r/actions/runs/44882456726)，MSVC/Linux 测试门与四目标构建全绿并发布 [GitHub Release](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.2.1)。下载 `tftpd-r-0.2.1-x86_64-pc-windows-msvc.zip`（5,111,579 B）：SHA-256 `32b4e58f…bf2f` 与 `SHA256SUMS`/GitHub digest 一致；`tftpd-r.exe` 1,193,984 B、`tftpd-r-gui.exe` 8,513,024 B；两个 MSVC exe 均含 `RT_GROUP_ICON` 1 的 7 帧，`--version` 为 0.2.1、GUI `--help`/`--smoke-test` exit 0、daemon 完成 5,000 字节 `/image.bin` 并 Ctrl-Break exit 0。Linux 与 arm64 归档未下载/运行，Explorer 图标缓存未目视确认。
 
 此前的完整验证结果（2026-11-20 第二轮，0.2.0 改动）：`cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`（**131 passed**：core 单元 63、RRQ UDP 集成 29、daemon 单元 10、daemon CLI 集成 5、GUI 单元 23、doctest 1）、`cargo build --workspace --release` 全部通过；多监听 daemon 以 `127.0.0.1` 与 `192.168.3.17` 的**同一临时端口**各下载 5000 字节（`/image.bin`）并 Ctrl-Break 优雅退出；GUI debug/release `--smoke-test` 退出码 0、stderr 为空，PE 子系统为 Windows GUI（daemon 仍为 console）；`PrintWindow` 截图确认状态栏根目录仅显示末级目录名、状态栏横线修复、设置对话框的新端口/多选地址/浏览按钮，以及地址选择器列出 `192.168.3.17` 与两个全局 IPv6 地址。进度条方向用合成传输行（`TFTPD_R_GUI_PREVIEW=transfer`）截图确认左侧起算；**未验证**：真实鼠标点击、原生目录对话框、GUI 中的绑定失败提示、真实多网卡切换、真实 GUI 传输在修复后的渲染、Linux 上的低端口权限路径。此前的 0.1.0 人工验收记录（真实 2 MiB 传输、窗口控件、最近根目录等）见 `docs/testing.md`。执行新改动后必须重新运行并更新真实数字。
 
@@ -59,7 +62,7 @@
 │   ├── architecture.md            # crate 边界、生命周期、数据流、线程模型
 │   ├── security.md                # 威胁模型、沙箱、残余风险
 │   ├── testing.md                 # 实际执行记录与未验证项
-│   ├── roadmap.md                 # 0.2.0 已发布项与后续未实现项
+│   ├── roadmap.md                 # 0.2.1 已发布项与后续未实现项
 │   └── adr/0001–0011              # 已接受的决策（IPC 延后、上传关闭、octet only、端口 69、多地址绑定、GUI 首次启动/自动重启、体积优先 release profile、exe 图标资源等）
 ├── crates/
 │   ├── tftpd-r-build-support/    # 构建期辅助：从 app-icon.ico 生成 Windows PE 图标资源，不链接进产物
@@ -166,7 +169,7 @@ cargo build --workspace --release
 
 当前自动化基线是 **148 tests passed**（build-support 3、core 单元 61、RRQ UDP 集成 29、daemon 单元 9、daemon CLI 集成 5、GUI 单元 40（控制器 5 + 最近目录 7 + 网卡枚举 4 + 目录选择 2 + 用户状态 4 + 地址模型/首次启动/自动重启/产品图标/日志上限 18）、doctest 1）。其中 build-support 的 3 项覆盖 ICO 解析（正常 7 帧、截断/非法/越界拒绝）与 `.res` 的 null 资源、`RT_ICON`/`RT_GROUP_ICON`、帧字节和对齐。本轮之前合并了纯 RRQ codec 的无选项报文断言、合并了通用/旧 bind_address 配置拒绝用例，并移除了与同一 `include_str!` 重复比较的 daemon 测试；原断言分别保留在合并测试、默认模板解析和 CLI 集成覆盖中。最新复验结果见 `docs/testing.md`。
 
-release 体积基线（GNU x64，2026-11-21，含 112,640 B 的 exe 图标资源，ADR 0010/0011）：`target/release/tftpd-r.exe` **1,357,824 B（1.29 MiB）**、`target/release/tftpd-r-gui.exe` **8,846,848 B（8.44 MiB）**。换工具链/目标平台后必须重测；这不是对其他平台的承诺。
+release 体积基线（GNU x64，2026-11-21，含 112,640 B 的 exe 图标资源，ADR 0010/0011）：`target/release/tftpd-r.exe` **1,357,824 B（1.29 MiB）**、`target/release/tftpd-r-gui.exe` **8,846,848 B（8.44 MiB）**。`v0.2.1` 的 MSVC x64 归档（CI 构建，已下载校验）为 `tftpd-r.exe` **1,193,984 B**、`tftpd-r-gui.exe` **8,513,024 B**；GNU 与 MSVC 体积不可直接比较。换工具链/目标平台后必须重测；这不是对其他平台的承诺。
 
 其他有用命令：
 
