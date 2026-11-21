@@ -412,24 +412,19 @@ mod tests {
     }
 
     #[test]
-    fn unknown_fields_are_rejected() {
-        let (_dir, _config) = temp_root();
-        let text = r#"
+    fn unknown_and_legacy_fields_are_rejected() {
+        let unknown = r#"
 bind_addresses = ["127.0.0.1"]
 root_dir = "does-not-matter"
 surprise = true
 "#;
         assert!(matches!(
-            ServerConfig::from_toml_str(text),
+            ServerConfig::from_toml_str(unknown),
             Err(ConfigError::Toml(_))
         ));
-    }
 
-    #[test]
-    fn the_old_single_bind_address_key_is_rejected() {
-        let (_dir, _config) = temp_root();
-        let text = "bind_address = \"127.0.0.1:6969\"\nroot_dir = \"does-not-matter\"\n";
-        let error = ServerConfig::from_toml_str(text).expect_err("old key must not be accepted");
+        let legacy = "bind_address = \"127.0.0.1:6969\"\nroot_dir = \"does-not-matter\"\n";
+        let error = ServerConfig::from_toml_str(legacy).expect_err("old key must not be accepted");
         let message = error.to_string();
         assert!(
             message.contains("bind_address"),

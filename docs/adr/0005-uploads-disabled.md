@@ -5,10 +5,11 @@
 
 ## Context
 
-Phase 7 of the plan covers WRQ uploads behind explicit configuration. A safe
-implementation needs: path/overwrite checks before creating the target, a
-temporary file in the destination directory, atomic replacement semantics per
-platform, disk-full/cancel cleanup, upload size limits, race/TOCTOU analysis for
+At the time of this decision, Phase 7 covered WRQ uploads. The roadmap now
+places target-machine validation in Phase 6 and IPC in Phase 7; WRQ is current
+Phase 8. A safe implementation needs path/overwrite checks before creating the
+target, a temporary file in the destination directory, platform-specific atomic
+replacement semantics, disk-full/cancel cleanup, upload size limits, race/TOCTOU analysis for
 creation, and its own interoperability tests.
 
 Shipping a half-reviewed write path would turn a read-only server into a data
@@ -29,5 +30,6 @@ loss or path-escape vector.
 - No create/replace/write code exists in this release; the sandbox only opens
   files for reading.
 - The default and only behaviour is read-only, matching the plan's MVP scope.
-- Phase 7 must revisit this ADR, implement atomic temp writes plus cleanup, add
-  upload path security tests, and keep `allow_upload` opt-in and default false.
+- Current Phase 8 (formerly Phase 7) must revisit this ADR, implement atomic
+  temp writes plus cleanup, add upload path security tests, and keep
+  `allow_upload` opt-in and default false.

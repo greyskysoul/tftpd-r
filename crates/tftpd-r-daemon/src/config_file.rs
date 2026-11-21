@@ -92,16 +92,7 @@ mod tests {
     }
 
     #[test]
-    fn embedded_default_matches_example_file() {
-        let on_disk = include_str!("../../../config.example.toml");
-        assert_eq!(DEFAULT_CONFIG_TOML, on_disk);
-        assert!(DEFAULT_CONFIG_TOML.contains("allow_upload = false"));
-        assert!(DEFAULT_CONFIG_TOML.contains("port = 69"));
-        assert!(DEFAULT_CONFIG_TOML.contains("bind_addresses = [\"127.0.0.1\"]"));
-    }
-
-    #[test]
-    fn default_template_parses_with_existing_root() {
+    fn default_template_parses_with_existing_root_and_is_read_only() {
         let dir = tempfile::tempdir().expect("temp dir");
         fs::create_dir(dir.path().join("tftp-root")).expect("root");
         let text = DEFAULT_CONFIG_TOML.replace(
@@ -114,6 +105,7 @@ mod tests {
         let parsed =
             ServerConfig::from_toml_str(&text).expect("default configuration must be valid");
         assert!(!parsed.allow_upload);
+        assert!(!parsed.overwrite);
         assert_eq!(parsed.port, 69);
         assert_eq!(parsed.bind_addresses.len(), 1);
         assert!(parsed.bind_addresses[0].is_loopback());

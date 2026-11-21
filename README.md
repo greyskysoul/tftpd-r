@@ -96,6 +96,14 @@ cargo build --workspace            # debug
 cargo build --workspace --release  # release binaries in target\release
 ```
 
+Release builds use a size-first profile (`opt-level = "z"`, fat LTO,
+`panic = "abort"` and symbol stripping). On the GNU x64 verification build this
+gives about 1.19 MiB for the daemon and 8.33 MiB for the GUI. `panic = "abort"`
+is a deliberate fail-fast choice: a panic in a spawned task terminates the
+process instead of being contained by Tokio. Debug and test builds keep the
+default unwind strategy. See
+[ADR 0010](docs/adr/0010-size-first-release-profile.md).
+
 The workspace contains three crates:
 
 | Crate | Purpose |
@@ -116,8 +124,8 @@ Copy-Item config.example.toml config.toml
 cargo run -p tftpd-r-daemon -- check-config --config config.toml
 
 # 3. Run the server in the foreground; Ctrl-C (or Ctrl-Break) stops it gracefully.
-#    The example configuration uses the standard TFTP port 69, which needs
-#    administrator/root. For an unprivileged trial run, override the port:
+#    Port 69 needs root/CAP_NET_BIND_SERVICE on Linux; Windows normally permits
+#    a standard user unless the port is reserved. For a high-port trial run:
 cargo run -p tftpd-r-daemon -- serve --config config.toml --bind 127.0.0.1:6969
 ```
 

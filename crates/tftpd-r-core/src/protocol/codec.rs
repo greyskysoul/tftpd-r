@@ -297,9 +297,15 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_every_packet_kind() {
+    fn packet_roundtrips_include_the_minimal_rrq_wire_form() {
+        let minimal_rrq = Packet::Rrq(Request {
+            filename: "a.txt".into(),
+            mode: Mode::Octet,
+            options: vec![],
+        });
         let packets = vec![
             rrq(),
+            minimal_rrq.clone(),
             Packet::Wrq(Request {
                 filename: "upload.bin".into(),
                 mode: Mode::Octet,
@@ -329,24 +335,10 @@ mod tests {
             let decoded = decode(&bytes, 65_464).expect("decode");
             assert_eq!(decoded, packet, "roundtrip failed for {packet:?}");
         }
-    }
 
-    #[test]
-    fn request_without_options_roundtrips() {
-        let bytes = encode(&Packet::Rrq(Request {
-            filename: "a.txt".into(),
-            mode: Mode::Octet,
-            options: vec![],
-        }))
-        .expect("encode");
-        assert_eq!(bytes, b"\x00\x01a.txt\x00octet\x00");
         assert_eq!(
-            decode(&bytes, 512).expect("decode"),
-            Packet::Rrq(Request {
-                filename: "a.txt".into(),
-                mode: Mode::Octet,
-                options: vec![]
-            })
+            encode(&minimal_rrq).expect("encode minimal RRQ"),
+            b"\x00\x01a.txt\x00octet\x00"
         );
     }
 

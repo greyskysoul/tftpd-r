@@ -1542,6 +1542,34 @@ mod tests {
     }
 
     #[test]
+    fn log_model_stays_bounded_and_keeps_newest_entries_first() {
+        let mut state = UiState::new(
+            gui_default_config(),
+            RecentDirs::empty_for_tests(),
+            Arc::new(StdMutex::new(Some(Vec::new()))),
+        );
+
+        for index in 0..=MAX_LOG_ROWS {
+            state.push_log("INFO", format!("entry-{index}"));
+        }
+
+        assert_eq!(state.logs.row_count(), MAX_LOG_ROWS);
+        assert_eq!(
+            state.logs.row_data(0).expect("newest row").message.as_str(),
+            format!("entry-{MAX_LOG_ROWS}")
+        );
+        assert_eq!(
+            state
+                .logs
+                .row_data(MAX_LOG_ROWS - 1)
+                .expect("oldest retained row")
+                .message
+                .as_str(),
+            "entry-1"
+        );
+    }
+
+    #[test]
     fn product_icon_pixels_are_a_valid_rounded_tile() {
         assert_eq!(
             APP_ICON_RGBA.len(),

@@ -67,6 +67,6 @@ checks the embedded RGBA buffer (size, transparent corners, `#263238` tile,
 `#fafafa` glyph).
 
 Known gap: the Windows `.exe` files do not embed the icon as a PE resource, so
-Explorer shows the generic executable icon until the packaging step (Phase 8)
-adds a resource compiler. The running application does use it for the window and
-task-bar icon.
+Explorer shows the generic executable icon until the release-readiness work
+(current Phase 6) adds a resource compiler. The running application does use it
+for the window and task-bar icon.

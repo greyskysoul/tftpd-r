@@ -1,8 +1,10 @@
 # Testing and verification
 
-This document records what was **actually executed** for this MVP, with the
-environment used, and what still requires manual or target-machine verification.
-It is not a wish list.
+This document is the evidence log for checks that were **actually executed** and
+the acceptance matrix for work that remains. Historical results are kept
+separate from future test recommendations: a listed test idea is not evidence
+that the test or feature already exists. The current phase order and test gates
+are defined in [roadmap.md](roadmap.md).
 
 ## Environment used for verification
 
@@ -13,7 +15,8 @@ It is not a wish list.
 | Cargo | `cargo 1.100.0 (3acc79c0c 2026-11-05)` |
 | Linker | MinGW-w64 GCC 15.3.0 (winlibs, msvcrt runtime) |
 | Slint | 1.19.0, features `std`, `backend-winit`, `renderer-software`, `software-renderer-systemfonts`, `compat-1-2` |
-| Date | 2026-11-20 |
+| Release profile | `opt-level = "z"`, `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = "symbols"` (ADR 0010; measured 2026-11-21) |
+| Date | 2026-11-20 (size-profile verification added 2026-11-21) |
 
 The development environment used a portable toolchain stored in
 `.dsh-toolchain/` (git-ignored) because the agent sandbox could not perform
@@ -26,25 +29,31 @@ with network access; subsequent builds/tests ran with `--offline`.
 | Command | Result |
 | --- | --- |
 | `cargo fmt --all -- --check` | Pass (exit 0) |
-| `cargo clippy --workspace --all-targets -- -D warnings` | Pass (exit 0, no warnings) |
-| `cargo test --workspace` | **147 passed, 0 failed** |
-| `cargo build --workspace --release` | Pass (59.6 s in the final run) |
+| `cargo clippy --workspace --all-targets --offline -- -D warnings` | Pass (exit 0, no warnings) |
+| `cargo test --workspace --offline` | **145 passed, 0 failed** |
+| `cargo build --workspace --release --locked --offline` | Pass (exit 0, 47.02 s, 2026-11-21). The first full size-profile build was 116.4 s. |
 
 The workspace was renamed from `rust-tftpd`/`tftp-*` to TftpdR/`tftpd-r-*` on
-2026-11-20. Every command in this section was re-run on 2026-11-20 for `0.2.0`;
-the results shown here are from that run (offline, GNU toolchain).
-The GUI crate now contributes 39 tests (24 before the first-run / auto-restart
-work): `product_icon_pixels_are_a_valid_rounded_tile` guards the embedded
-window-icon pixels (size, transparent corners, `#263238` tile, `#fafafa`
-glyph); `SetupState` guards the one-time setup flag; the address-toggle and
-`RestartDisposition` tests cover the picker rules and the idle auto-restart
-decision, and one test performs a real embedded-server restart.
+2026-11-20. The original `0.2.0` verification ran on 2026-11-20 (offline, GNU toolchain)
+with 147 tests. On 2026-11-21, a GUI log-model bound test was added (148 total),
+then three redundant test functions were removed by consolidation without
+losing their distinct assertions: the no-option RRQ exact-wire case is now part
+of the all-packet roundtrip test; generic and legacy unknown TOML key rejection
+share one config test; and the tautological comparison of two identical
+`include_str!` sources was replaced by assertions on the parsed default template.
+The current suite has 145 test functions (61 core unit, 29 RRQ integration, 9
+daemon unit, 5 CLI integration, 40 GUI, 1 doctest). GUI coverage includes
+`log_model_stays_bounded_and_keeps_newest_entries_first`, a deterministic
+501-entry check for the 500-row newest-first cap. The current four
+workspace-check results are shown in the table above.
 
-The `0.2.0` release artifacts built on the verification machine (informational
-only; not an acceptance criterion and not a promise for other
-machines/toolchains):
-`target/release/tftpd-r.exe` ≈ 2.07 MiB (2,174,976 bytes), `target/release/tftpd-r-gui.exe`
-≈ 12.81 MiB (13,430,272 bytes; debug symbols stripped by the release profile).
+The `0.2.0` release artifacts built on the verification machine measured
+`tftpd-r.exe` ≈ 2.07 MiB (2,174,976 bytes) and `tftpd-r-gui.exe` ≈ 12.81 MiB
+(13,430,272 bytes, thin LTO and symbols stripped). After the size-first release
+profile (ADR 0010) the same tree produced `tftpd-r.exe` **1,245,184 bytes
+(1.19 MiB)** and `tftpd-r-gui.exe` **8,734,208 bytes (8.33 MiB)** — 42.7 % and
+35.0 % smaller. These figures are informational only; they are not an
+acceptance criterion and not a promise for other machines/toolchains.
 
 The suite also runs on `ubuntu-latest` in CI. One core unit test
 (`prefix_confusion_is_rejected_by_component_comparison`) therefore has a
@@ -104,26 +113,47 @@ Test breakdown from `cargo test --workspace`:
 
 | Target | Tests | What is covered |
 | --- | --- | --- |
-| `tftpd-r-core` unit tests (`src/lib.rs` target) | 63 | codec round-trips and malformed/oversized packets; option negotiation ranges, duplicates and clamping; configuration defaults/ranges/TOML errors, bind list emptiness/limit/multicast/broadcast rejection, wildcard collapsing and duplicate removal, shared-port summary; privileged-port bind classification and the non-forcing hint; path sandbox traversal, device names, legacy root-prefix mapping and root-directory rejection, symlink/reparse rejection, size limits; event ring drop/sequence/clear; error-code mapping |
+| `tftpd-r-core` unit tests (`src/lib.rs` target) | 61 | codec round-trips (including the exact no-option RRQ wire form) and malformed/oversized packets; option negotiation ranges, duplicates and clamping; configuration defaults/ranges/TOML errors, unknown and legacy keys, bind list emptiness/limit/multicast/broadcast rejection, wildcard collapsing and duplicate removal, shared-port summary; privileged-port bind classification and the non-forcing hint; path sandbox traversal, device names, legacy root-prefix mapping and root-directory rejection, symlink/reparse rejection, size limits; event ring drop/sequence/clear; error-code mapping |
 | `tftpd-r-core` integration `tests/rrq.rs` | 29 | real loopback UDP server and client: small/exact-multiple/empty files, missing file, traversal, legacy `/file` and `\file` requests, root-prefixed traversal rejection, `blksize`/`tsize`/`timeout` negotiation, clamping, invalid option, duplicate ACK, retransmission, unknown TID ERROR 5, duplicate RRQ resend without a new session, WRQ rejection, netascii rejection, unknown mode/malformed/oversized datagrams, size limit, concurrent transfers, lifecycle events, shutdown cancellation, idempotent stop, retry exhaustion, **block-number wrap 65535 → 0** with `blksize = 8` (65,537 blocks); multiple listeners on one resolved port (IPv6 checked when available), wildcard collapsing to one listener, and an unbindable address aborting the whole start |
-| `tftpd-r-daemon` unit tests | 10 | CLI parsing/defaults/overrides, embedded example template validity, config loading errors, unknown fields, override validation, status-channel failure path |
+| `tftpd-r-daemon` unit tests | 9 | CLI parsing/defaults/overrides, parsed embedded example template safety/validity, config loading errors, unknown fields, override validation, status-channel failure path |
 | `tftpd-r-daemon` integration `tests/cli.rs` | 5 | binary `print-default-config` equals `config.example.toml`; `check-config` success/missing file/uploads-rejected exit code 2; `serve` refuses invalid config with exit code 1; `serve` stays running with a valid config |
-| `tftpd-r-gui-slint` unit tests | 39 | embedded controller start/stop, double-start rejection, invalid root, asynchronous restart (old server → new config), failed-restart error reporting and the no-stale-`Running`-after-stop guarantee; recent-root ordering, de-duplication, cap, persistence, canonicalisation, stale-directory cleanup and clearing the state file; one-time setup-flag persistence and read-only-profile tolerance; interface-address parsing/filtering/sorting; folder-selection validation; address picker model (two permanent entries, selected-but-undiscovered addresses preserved, duplicate removal, summaries) and the exclusive/sticky/fallback "全部网络" toggle rules; first-run all-network defaults; idle auto-restart with a real embedded server, deferral while a transfer is tracked, unchanged configuration and a deliberate stop; status-bar address summary and leaf-directory name |
+| `tftpd-r-gui-slint` unit tests | 40 | embedded controller start/stop, double-start rejection, invalid root, asynchronous restart (old server → new config), failed-restart error reporting and the no-stale-`Running`-after-stop guarantee; recent-root ordering, de-duplication, cap, persistence, canonicalisation, stale-directory cleanup and clearing the state file; one-time setup-flag persistence and read-only-profile tolerance; interface-address parsing/filtering/sorting; folder-selection validation; address picker model (two permanent entries, selected-but-undiscovered addresses preserved, duplicate removal, summaries) and the exclusive/sticky/fallback "全部网络" toggle rules; first-run all-network defaults; idle auto-restart with a real embedded server, deferral while a transfer is tracked, unchanged configuration and a deliberate stop; status-bar address summary and leaf-directory name; newest-first 500-row log-model bound under a 501-entry flood |
 | `tftpd-r-core` doc test | 1 | crate-level usage example compiles |
 
 The block-wrap test transfers 65,537 blocks in roughly 3–4 seconds on the
 verification machine.
 
-### Deliberate limitations of the automated tests
+### Current automated-test gaps and improvement order
 
-- Timeouts use real timers (typically 1 s), not Tokio time pausing, so tests are
-  slower than ideal and could be flaky on extremely loaded machines.
-- Packet loss is not injected with a proxy; retransmission behaviour is tested by
-  withholding ACKs deterministically.
-- The GUI tests cover the controller, setup state, recent-root state, address
-  toggles and the restart decision, not window rendering or real user
-  interaction. Rendering and interaction were checked manually as
-  described below; that check is not an automated acceptance test.
+These are known limits of the recorded suite, not claims that a test failed:
+
+1. **Clock control:** timeout tests use real timers (typically 1 s), not paused
+   Tokio time. Keep them deterministic; consider a small clock abstraction or
+   paused-time tests only where it reduces runtime/flakiness without weakening
+   real UDP coverage.
+2. **Packet-loss coverage:** packet loss is not injected with a proxy;
+   retransmission is tested by withholding ACKs deterministically. A controlled
+   loss/reorder harness is a future improvement, not currently implemented.
+3. **Input-space exploration:** codec checks are table-driven and boundary
+   focused; no fuzz/property-testing harness is recorded. Add one only after
+   reviewing its toolchain, CI runtime, dependency/license impact, and seed
+   corpus. Preserve deterministic regression cases for every discovered issue.
+4. **GUI/event load:** the new regression test calls the log-model insertion path
+   501 times and verifies its 500-row cap/order; it does not flood `EventBus`,
+   measure renderer/UI-thread responsiveness, or exercise rendering/input end to
+   end. Add a bounded event-load test only if it can assert a stable resource or
+   latency contract; otherwise retain it as a target-machine acceptance check.
+5. **Platform/manual boundaries:** real TFTP clients, GUI mouse/IME, native
+   dialogs, DPI/font/accessibility, Linux desktop execution, LAN/firewall, and
+   downloaded release-binary execution require the target matrix below. A
+   `cargo check` or synthetic window message is not a substitute.
+
+The 147-test result is the original 0.2.0 baseline. The suite briefly reached 148
+after the GUI log-bound regression test, then was reduced to 145 by consolidating
+or removing three redundant test functions while retaining their unique
+assertions. This is not a requirement to add low-value tests merely to increase
+the count. New tests should protect an invariant or close a named gap, and their
+actual result must be recorded after execution.
 
 ## Manual end-to-end verification performed
 
@@ -317,6 +347,56 @@ this agent desktop reports 200 % scaling; captures are `PrintWindow` images.
   the native folder dialog. The file transfer used the in-repo raw Python client,
   not an external TFTP implementation.
 
+### Release size optimization (2026-11-21, fifth run)
+
+The release profile was changed to reduce the shipped binary size without
+changing features, dependencies, UI code or protocol behaviour (ADR 0010).
+Every candidate was a full `cargo build --workspace --release --offline` of the
+same tree on the documented GNU x64 toolchain; sizes are file lengths of
+`target/release/tftpd-r*.exe`:
+
+| Profile | Daemon | GUI |
+| --- | ---: | ---: |
+| `thin` LTO, default optimisation, unwind (0.2.0) | 2,174,976 B (2.07 MiB) | 13,430,272 B (12.81 MiB) |
+| `opt-level = "z"`, `lto = "fat"`, unwind | 1,429,504 B (1.36 MiB) | 9,242,112 B (8.81 MiB) |
+| `opt-level = "z"`, `lto = "thin"`, abort | 1,443,328 B (1.38 MiB) | 9,827,840 B (9.37 MiB) |
+| `opt-level = "s"`, `lto = "fat"`, abort | 1,351,680 B (1.29 MiB) | 9,483,776 B (9.04 MiB) |
+| **`opt-level = "z"`, `lto = "fat"`, abort (chosen)** | **1,245,184 B (1.19 MiB)** | **8,734,208 B (8.33 MiB)** |
+
+The chosen profile cuts the daemon by 42.7 % and the GUI by 35.0 %. Symbol
+stripping was already present in `0.2.0`; the additional gain comes from fat LTO,
+`opt-level = "z"` and `panic = "abort"`. `panic = "abort"` is an intentional
+fail-fast trade-off: a panic in a Tokio task now terminates the process instead
+of being contained as a `JoinError` (see ADR 0010). Tests and debug builds keep
+the default unwind strategy.
+
+Verification run with the chosen profile on 2026-11-21 (before the later test-case consolidation; 148 tests at that point):
+
+- `cargo fmt --all -- --check`: exit 0.
+- `cargo clippy --workspace --all-targets --offline -- -D warnings`: exit 0, no
+  warnings.
+- `cargo test --workspace --offline`: **148 passed, 0 failed** (core unit 63,
+  RRQ UDP integration 29, daemon unit 10, daemon CLI integration 5, GUI unit 40,
+  doctest 1). Test targets use the dev/test profile, so they still unwind.
+- `target/release/tftpd-r-gui.exe --smoke-test`: exit 0, empty stdout and
+  stderr. It created the window, ran the UI timer and exited after 1.5 s, using
+  an isolated `APPDATA`; this is the same smoke check as earlier runs, not a new
+  interactive visual review.
+- Release daemon end-to-end: a temporary config with `port = 0` and
+  `bind_addresses = ["127.0.0.1"]` started `target/release/tftpd-r.exe serve`; a
+  raw UDP client downloaded a 5,000-byte `image.bin` as `/image.bin`
+  byte-for-byte; `CTRL_BREAK_EVENT` logged `TFTP server stopped` and the process
+  exited with code 0.
+- `target/release/tftpd-r.exe print-default-config` still equals
+  `config.example.toml`.
+
+Not re-verified in this run: MSVC/Linux/arm64 binary sizes (only the GNU x64
+build was measured), rebuilt release archives, release-mode throughput or CPU
+cost of `opt-level = "z"`, interactive GUI rendering after the profile change,
+and the CI/release workflows (they have not been rerun since the profile change;
+their next run builds from the updated `Cargo.toml`). Those remain open until a
+target-machine/release run records them.
+
 ## Not verified (and therefore not claimed)
 - **External TFTP client interoperability** (tftp-hpa, Tftpd64, PXE firmware,
   U-Boot, etc.). Only the in-repo test client and the raw Python client were
@@ -338,11 +418,14 @@ this agent desktop reports 200 % scaling; captures are `PrintWindow` images.
   the `hostname -I` fallback).
 - **Release artifacts:** sizes and checksums are recorded above; they are
   informational for the recorded build and are not a guarantee for other
-  machines or toolchains.
+  machines or toolchains. The size-first profile was measured only on GNU x64;
+  MSVC, Linux and arm64 sizes and rebuilt archives are not claimed. No
+  release-mode throughput benchmark was run, so the CPU cost of
+  `opt-level = "z"` is unquantified.
 - **Executable icon.** Neither `.exe` embeds the product icon as a PE resource
   yet, so Windows Explorer shows the generic executable icon. The running
   window/task-bar icon and the `app-icon.ico` shipped in the archives carry the
-  artwork; adding a resource compiler belongs to the packaging work (Phase 8).
+  artwork; adding a resource compiler belongs to the release-readiness work (new Phase 6).
 - **Keyboard/IME input in the settings fields.** The fields received focus and
   rendered correctly, but the synthetic `WM_CHAR` used here was not conclusive
   for normal typing or Chinese IME composition; this needs a person on a target
@@ -380,7 +463,7 @@ this agent desktop reports 200 % scaling; captures are `PrintWindow` images.
 6. Open the settings dialog and type into every field (including Chinese IME
    composition); select several bind addresses (including a real LAN address),
    use 浏览… to pick a root directory, save, then restart and confirm the new
-   values are used. Try port 69 without administrator/root and confirm the
+   values are used. When port 69 is denied (for example, Linux without root/CAP_NET_BIND_SERVICE or Windows with a reserved port), confirm that the
    failure hint appears without any automatic fallback; then switch to an
    unprivileged port.
 7. Click the root path in the status bar and switch between at least two recent
@@ -407,3 +490,56 @@ cargo build --workspace --release
 # GUI smoke test (opens a window for ~1.5 s)
 cargo run -p tftpd-r-gui-slint -- --smoke-test
 ```
+
+## Forward test gates for the reordered phases
+
+The following are planned acceptance tests; they have **not** been run unless a
+result is later added to the evidence sections above.
+
+### Phase 6 — Current-product validation
+
+- Windows MSVC: full workspace fmt/clippy/test/release-build gate; record runner
+  or target OS/toolchain and the exact artifact tested.
+- Linux desktop: launch and interact with the Slint GUI in a real graphical
+  session; separately record daemon/core test results. Headless CI compilation
+  does not establish desktop usability.
+- Independent TFTP client: record implementation/version, OS, options, transfer
+  size and SHA-256; include legacy `get /file`, exact-block-size transfer,
+  missing file and traversal rejection.
+- LAN deployment: record client/server interfaces, firewall rules for the
+  listener and TID traffic, and outcomes. Do not expose the test server to the
+  public Internet.
+- GUI hands-on: ordinary typing and IME composition, native directory picker,
+  real mouse title-bar/resize controls, first-run/restart/close paths, Chinese
+  rendering and a non-default DPI; test RDP only if it is in the declared support
+  matrix.
+- Release readiness: download each target archive, check its published digest,
+  inspect contents and dependencies, execute only on available target hardware,
+  and record unavailable targets as unverified. Complete dependency/license
+  review and installation/upgrade/rollback documentation.
+
+### Phase 7 — IPC
+
+- Protocol tests cover exact framing limits, truncation, malformed DTOs, version
+  negotiation, request IDs, response/event bounds and unsupported commands.
+- Native transport tests cover ACL/peer rejection, remote access denial, stale
+  endpoints, connection/rate/subscription caps, disconnects, reconnects and
+  shutdown cleanup. Run platform-specific security tests on native CI runners.
+- Controller contract tests cover status/start/stop, concurrent or duplicate
+  commands, daemon restart, protocol mismatch, event resubscription and the GUI
+  remaining responsive. Verify IPC cannot change the root or enable uploads.
+
+### Phase 8 — WRQ uploads
+
+- Only after ADR/security approval: test WRQ negotiation and state transitions,
+  duplicate/reordered DATA, retries, TID validation, final blocks, wraparound,
+  limits, cancellation and sanitized errors.
+- Inject write, flush, disk-full, rename/commit and shutdown failures; verify temp
+  cleanup and preservation of any pre-existing destination.
+- Test traversal/symlink/reparse/overwrite policy and declared atomicity on each
+  supported OS, then interoperate with an independent client and verify final
+  file hashes. Retest that uploads remain rejected by default.
+
+Every test record should include date, environment, command or manual steps,
+expected/observed result, artifact or client identity, and a clear **pass / fail /
+not run / blocked** status. Do not convert an unrun checklist into a pass claim.

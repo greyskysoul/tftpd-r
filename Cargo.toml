@@ -42,7 +42,14 @@ unsafe_code = "deny"
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 
+# Size-first release profile for the two shipped binaries. On the verification
+# toolchain (GNU x64) this cuts the GUI from ~12.8 MiB to ~8.3 MiB and the daemon
+# from ~2.1 MiB to ~1.2 MiB. `panic = "abort"` is a deliberate fail-fast choice:
+# a panic in a spawned task terminates the process instead of being contained by
+# Tokio. See docs/adr/0010-size-first-release-profile.md.
 [profile.release]
-lto = "thin"
+opt-level = "z"
+lto = "fat"
 codegen-units = 1
+panic = "abort"
 strip = "symbols"

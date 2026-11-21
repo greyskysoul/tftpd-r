@@ -167,6 +167,25 @@ unreadable or unwritable state never prevents the panel from starting. Neither
 file is read by the TFTP server; the recent-root list does not affect the
 sandbox root unless the operator selects one of those directories.
 
+## Release panic strategy (fail-fast)
+
+Release binaries are built with `panic = "abort"` (ADR 0010). A panic in a Tokio
+task therefore terminates the process instead of being contained as a
+`JoinError`. This is a deliberate fail-fast decision:
+
+- A panic on untrusted input is treated as a bug, not as a recoverable condition.
+  Codec, path-sandbox, session and UDP integration tests cover malformed
+  datagrams and traversal attempts; the hand-written code contains no `unsafe`.
+- Continuing after a panic could leave shared server state inconsistent; aborting
+  avoids serving from an unknown state.
+- Availability trade-off: an unknown, reachable panic would become a remote
+  denial of service (process exit) instead of one failed session. The mitigation
+  is testing and, for long-running deployments, a supervisor with
+  restart-on-failure. Panics must not become normal error handling: request paths
+  and `EventSink::emit` return/handle errors instead.
+- Debug/test profiles keep unwinding, so test assertions and Tokio `JoinError`
+  behaviour remain available during development.
+
 ## GUI helper processes
 
 The desktop panel has no native interface-enumeration or file-dialog dependency
