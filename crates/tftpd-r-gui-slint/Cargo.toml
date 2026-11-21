@@ -18,6 +18,7 @@ thiserror.workspace = true
 
 [build-dependencies]
 slint-build.workspace = true
+tftpd-r-build-support.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -15,9 +15,10 @@ daemon and a native [Slint](https://slint.dev/) desktop panel.
 Prebuilt archives for Windows and Linux on x64 and arm64 are attached to the
 [latest release](https://github.com/greyskysoul/tftpd-r/releases/latest). Each
 archive contains the `tftpd-r` daemon, the `tftpd-r-gui` panel,
-`config.example.toml`, `README.md` and both license files; the Windows archives
-also ship `tftpd-r-gui.ico` (the product icon, for shortcuts); `SHA256SUMS`
-covers every asset.
+`config.example.toml`, `README.md` and both license files. Both Windows
+executables embed the product icon as a PE resource, and the Windows archives
+also ship `tftpd-r-gui.ico` for tools that want the file; `SHA256SUMS` covers
+every asset.
 
 The protocol engine and the daemon are portable; the desktop panel needs a
 graphical session (an X11 or Wayland session on Linux).
@@ -53,7 +54,8 @@ Implemented:
   clickable recently-used root selector; activity log and active transfers;
   settings validation. The header is one flat `#37474f` block carrying the
   product mark; the same artwork (`crates/tftpd-r-gui-slint/ui/icons/app-icon.svg`,
-  Material `dns` glyph) is the window and task-bar icon. Layout and icons are in
+  Material `dns` glyph) is the window and task-bar icon and is embedded in both
+  Windows executables as their PE icon. Layout and icons are in
   `crates/tftpd-r-gui-slint/ui/`.
 
 Not implemented in this release (deliberate, tracked in `docs/adr/`):
@@ -86,7 +88,9 @@ considered and dropped.
   been run by hand on Windows so far.
 - On Windows, a linker is required: the MSVC Build Tools (`link.exe`) for the
   default `x86_64-pc-windows-msvc` toolchain, or MinGW-w64 for
-  `x86_64-pc-windows-gnu`. The verification described in
+  `x86_64-pc-windows-gnu`. GNU builds also use `windres` from MinGW-w64 binutils
+  to compile the product icon into the executable (MSVC links the generated
+  `.res` directly). The verification described in
   [docs/testing.md](docs/testing.md) used the GNU toolchain with MinGW-w64.
 
 ## Build
@@ -98,19 +102,21 @@ cargo build --workspace --release  # release binaries in target\release
 
 Release builds use a size-first profile (`opt-level = "z"`, fat LTO,
 `panic = "abort"` and symbol stripping). On the GNU x64 verification build this
-gives about 1.19 MiB for the daemon and 8.33 MiB for the GUI. `panic = "abort"`
-is a deliberate fail-fast choice: a panic in a spawned task terminates the
-process instead of being contained by Tokio. Debug and test builds keep the
-default unwind strategy. See
-[ADR 0010](docs/adr/0010-size-first-release-profile.md).
+gives about 1.29 MiB for the daemon and 8.44 MiB for the GUI, including the
+~110 KiB Windows icon resource. `panic = "abort"` is a deliberate fail-fast
+choice: a panic in a spawned task terminates the process instead of being
+contained by Tokio. Debug and test builds keep the default unwind strategy. See
+[ADR 0010](docs/adr/0010-size-first-release-profile.md) and
+[ADR 0011](docs/adr/0011-windows-executable-icon.md).
 
-The workspace contains three crates:
+The workspace contains three runtime crates and one build-time helper:
 
 | Crate | Purpose |
 | --- | --- |
 | `tftpd-r-core` | Protocol, session engine, sandbox, configuration, events. No GUI/daemon/IPC dependency. |
 | `tftpd-r-daemon` | Headless server binary: CLI, TOML config, logging, graceful shutdown. |
 | `tftpd-r-gui-slint` | Native Slint desktop panel; embeds `tftpd-r-core` (no daemon required). |
+| `tftpd-r-build-support` | Build-time only: embeds the product icon in both Windows executables. Not linked into either binary. |
 
 ## Quick start (daemon)
 

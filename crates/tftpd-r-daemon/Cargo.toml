@@ -19,6 +19,9 @@ tracing-subscriber.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 
+[build-dependencies]
+tftpd-r-build-support.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
 

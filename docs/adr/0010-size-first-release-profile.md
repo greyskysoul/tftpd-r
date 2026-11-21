@@ -87,3 +87,12 @@ restart-on-failure, not silently swallowing the panic.
 - Debug/test profiles are unchanged, so assertions still unwind in tests. The
   verification gate is `cargo test --workspace` (dev profile), not
   `cargo test --release`.
+
+## Post-decision note: executable icon (2026-11-21)
+
+[ADR 0011](0011-windows-executable-icon.md) embeds the product icon as a Windows
+PE resource in both binaries. On the GNU x64 build the resource adds 112,640
+bytes: `tftpd-r.exe` 1,245,184 → **1,357,824 B (1.29 MiB)** and
+`tftpd-r-gui.exe` 8,734,208 → **8,846,848 B (8.44 MiB)**. The profile comparison
+and decisions above are unaffected; the current absolute baseline is recorded in
+[testing.md](../testing.md).

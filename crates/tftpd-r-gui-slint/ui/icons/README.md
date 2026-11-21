@@ -48,7 +48,7 @@ top edge fading out by 42 %, black up to 10 % at the bottom edge).
 | --- | --- | --- |
 | `app-icon.svg` | 256x256 SVG, master artwork | Source of every other file |
 | `app-icon.png` | 256x256 PNG, straight alpha | General artwork / packaging |
-| `app-icon.ico` | ICO with 16, 24, 32, 48, 64, 128, 256 px (BMP frames below 256, PNG for 256) | Windows shortcuts, future `.exe` resource |
+| `app-icon.ico` | ICO with 16, 24, 32, 48, 64, 128, 256 px (BMP frames below 256, PNG for 256) | Windows shortcuts and both `.exe` PE icon resources (embedded at build time) |
 | `app-icon-128.rgba` | 128x128 straight-alpha RGBA, no header (64 KiB) | Window / task-bar icon: `src/main.rs` embeds it with `include_bytes!` and uploads it through `Window.icon`, because the panel build has no runtime image decoder (it does not enable `image-default-formats`) |
 
 The in-app brand mark (`Widgets.BrandMark` in `../widgets.slint`) draws the
@@ -66,7 +66,15 @@ tftpd-r-gui-slint` still passes: `product_icon_pixels_are_a_valid_rounded_tile`
 checks the embedded RGBA buffer (size, transparent corners, `#263238` tile,
 `#fafafa` glyph).
 
-Known gap: the Windows `.exe` files do not embed the icon as a PE resource, so
-Explorer shows the generic executable icon until the release-readiness work
-(current Phase 6) adds a resource compiler. The running application does use it
-for the window and task-bar icon.
+## Windows executable icon
+
+Both Windows binaries (`tftpd-r.exe` and `tftpd-r-gui.exe`) embed `app-icon.ico`
+as an `RT_GROUP_ICON`/`RT_ICON` PE resource. `crates/tftpd-r-build-support`
+converts the ICO to a `.res` file at build time, so no generated `.res` or COFF
+object is committed. MSVC links the `.res` directly; GNU targets convert it to a
+COFF object with `windres` from MinGW-w64 binutils. Replacing `app-icon.ico` is
+enough to rebuild the resource (`rerun-if-changed` is emitted for it).
+
+The running panel keeps using `app-icon-128.rgba` for its window and task-bar
+icon (see above); the PE resource is what Explorer, shortcuts and the task bar
+show for the executable file itself.

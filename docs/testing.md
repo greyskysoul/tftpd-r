@@ -13,10 +13,10 @@ are defined in [roadmap.md](roadmap.md).
 | OS | Windows 11 (build 10.0.26300) |
 | Rust | `rustc 1.100.0 (0ef1bc386 2026-11-09)`, host `x86_64-pc-windows-gnu` |
 | Cargo | `cargo 1.100.0 (3acc79c0c 2026-11-05)` |
-| Linker | MinGW-w64 GCC 15.3.0 (winlibs, msvcrt runtime) |
+| Linker | MinGW-w64 GCC 15.3.0 (winlibs, msvcrt runtime); `windres` 2.46.1 from the same binutils for the executable icon |
 | Slint | 1.19.0, features `std`, `backend-winit`, `renderer-software`, `software-renderer-systemfonts`, `compat-1-2` |
 | Release profile | `opt-level = "z"`, `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = "symbols"` (ADR 0010; measured 2026-11-21) |
-| Date | 2026-11-20 (size-profile verification added 2026-11-21) |
+| Date | 2026-11-20 (size-profile verification and executable icon added 2026-11-21) |
 
 The development environment used a portable toolchain stored in
 `.dsh-toolchain/` (git-ignored) because the agent sandbox could not perform
@@ -30,8 +30,8 @@ with network access; subsequent builds/tests ran with `--offline`.
 | --- | --- |
 | `cargo fmt --all -- --check` | Pass (exit 0) |
 | `cargo clippy --workspace --all-targets --offline -- -D warnings` | Pass (exit 0, no warnings) |
-| `cargo test --workspace --offline` | **145 passed, 0 failed** |
-| `cargo build --workspace --release --locked --offline` | Pass (exit 0, 47.02 s, 2026-11-21). The first full size-profile build was 116.4 s. |
+| `cargo test --workspace --offline` | **148 passed, 0 failed** |
+| `cargo build --workspace --release --locked --offline` | Pass (exit 0, 50.08 s, 2026-11-21, with the embedded Windows icon resource). The first full size-profile build was 116.4 s. |
 
 The workspace was renamed from `rust-tftpd`/`tftp-*` to TftpdR/`tftpd-r-*` on
 2026-11-20. The original `0.2.0` verification ran on 2026-11-20 (offline, GNU toolchain)
@@ -41,8 +41,10 @@ losing their distinct assertions: the no-option RRQ exact-wire case is now part
 of the all-packet roundtrip test; generic and legacy unknown TOML key rejection
 share one config test; and the tautological comparison of two identical
 `include_str!` sources was replaced by assertions on the parsed default template.
-The current suite has 145 test functions (61 core unit, 29 RRQ integration, 9
-daemon unit, 5 CLI integration, 40 GUI, 1 doctest). GUI coverage includes
+That left 145 test functions. The executable-icon work then added 3
+`tftpd-r-build-support` tests, so the current suite has **148 test functions**
+(3 build-support, 61 core unit, 29 RRQ integration, 9 daemon unit, 5 CLI
+integration, 40 GUI, 1 doctest). GUI coverage includes
 `log_model_stays_bounded_and_keeps_newest_entries_first`, a deterministic
 501-entry check for the 500-row newest-first cap. The current four
 workspace-check results are shown in the table above.
@@ -52,8 +54,11 @@ The `0.2.0` release artifacts built on the verification machine measured
 (13,430,272 bytes, thin LTO and symbols stripped). After the size-first release
 profile (ADR 0010) the same tree produced `tftpd-r.exe` **1,245,184 bytes
 (1.19 MiB)** and `tftpd-r-gui.exe` **8,734,208 bytes (8.33 MiB)** — 42.7 % and
-35.0 % smaller. These figures are informational only; they are not an
-acceptance criterion and not a promise for other machines/toolchains.
+35.0 % smaller. Embedding the Windows icon resource (ADR 0011) adds 112,640
+bytes to each and gives the current measurements **1,357,824 bytes (1.29 MiB)**
+and **8,846,848 bytes (8.44 MiB)**. These figures are informational only; they
+are not an acceptance criterion and not a promise for other
+machines/toolchains.
 
 The suite also runs on `ubuntu-latest` in CI. One core unit test
 (`prefix_confusion_is_rejected_by_component_comparison`) therefore has a
@@ -397,6 +402,46 @@ and the CI/release workflows (they have not been rerun since the profile change;
 their next run builds from the updated `Cargo.toml`). Those remain open until a
 target-machine/release run records them.
 
+### Windows executable icon (2026-11-21, sixth run)
+
+Both Windows binaries now embed `app-icon.ico` as an `RT_GROUP_ICON`/`RT_ICON`
+PE resource; the implementation and trade-offs are in
+[ADR 0011](adr/0011-windows-executable-icon.md). The resource is generated from
+the committed ICO at build time by `tftpd-r-build-support`; no generated file is
+committed.
+
+- **Build.** `cargo build --workspace --release --locked --offline` exited 0 in
+  50.08 s on the GNU x64 toolchain. The generated
+  `target/*/build/*/out/tftpd-r-icon.res` is 112,368 bytes and its SHA-256
+  (`29ccb912…d6a1`) is identical to the `.res` that `windres -O res` produces
+  from `1 ICON "app-icon.ico"`: the Rust generator and binutils agree byte for
+  byte.
+- **PE resource.** A `ctypes` probe loaded both debug and release executables
+  with `LoadLibraryExW(..., LOAD_LIBRARY_AS_DATAFILE)` and called
+  `FindResourceW`/`SizeofResource`. Each executable has `RT_GROUP_ICON` id 1
+  with seven frames, and every `RT_ICON` lookup returned exactly the byte count
+  listed in the group: 1,128 / 2,440 / 4,264 / 9,640 / 16,936 / 67,624 / 9,944
+  bytes for 16 / 24 / 32 / 48 / 64 / 128 / 256 px.
+- **Extracted file icon.** `[System.Drawing.Icon]::ExtractAssociatedIcon`
+  returned a 32x32 icon for both release binaries; the saved PNG shows the
+  `dns` glyph on the `#263238` tile. This is the icon used for the file, not a
+  capture of the running window.
+- **Smoke tests.** Release `tftpd-r-gui.exe --smoke-test` exited 0 with empty
+  stdout and stderr. Release `tftpd-r.exe` served a 5,000-byte `/image.bin`
+  byte-for-byte and exited 0 after Ctrl-Break, logging `TFTP server stopped`.
+- **Sizes.** `tftpd-r.exe` 1,357,824 B (1.29 MiB) and `tftpd-r-gui.exe`
+  8,846,848 B (8.44 MiB); both grew by 112,640 B over the pre-icon build.
+- **Automated gates.** `cargo fmt --all -- --check`, `cargo clippy --workspace
+  --all-targets --offline -- -D warnings` and `cargo test --workspace --offline`
+  all exited 0; the suite is **148 passed** (3 build-support, 61 core unit, 29
+  RRQ integration, 9 daemon unit, 5 CLI integration, 40 GUI, 1 doctest).
+
+Not verified in this run: the MSVC resource path (there is no MSVC toolchain or
+Windows SDK on this machine, so `link.exe` consuming the generated `.res` was
+not executed), aarch64, Explorer's icon cache and shortcut icons, and the
+CI/release workflows (not rerun after the change). Only the GNU x64 binaries had
+their PE resources inspected.
+
 ## Not verified (and therefore not claimed)
 - **External TFTP client interoperability** (tftp-hpa, Tftpd64, PXE firmware,
   U-Boot, etc.). Only the in-repo test client and the raw Python client were
@@ -422,10 +467,11 @@ target-machine/release run records them.
   MSVC, Linux and arm64 sizes and rebuilt archives are not claimed. No
   release-mode throughput benchmark was run, so the CPU cost of
   `opt-level = "z"` is unquantified.
-- **Executable icon.** Neither `.exe` embeds the product icon as a PE resource
-  yet, so Windows Explorer shows the generic executable icon. The running
-  window/task-bar icon and the `app-icon.ico` shipped in the archives carry the
-  artwork; adding a resource compiler belongs to the release-readiness work (new Phase 6).
+- **MSVC/ARM64 executable icon.** The GNU x64 PE resources were verified (see
+  the sixth run above); the MSVC path (passing the generated `.res` to
+  `link.exe`) and the aarch64 resource were not executed or inspected here.
+  Explorer's icon cache, shortcut icons and icon selection at non-default DPI
+  were not checked visually on a target desktop.
 - **Keyboard/IME input in the settings fields.** The fields received focus and
   rendered correctly, but the synthetic `WM_CHAR` used here was not conclusive
   for normal typing or Chinese IME composition; this needs a person on a target

@@ -9,6 +9,9 @@ Deviations from the plan are recorded in [`docs/adr/`](adr/).
 tftpd-r-gui-slint ──┐
                     ├──> tftpd-r-core
 tftpd-r-daemon ────┘
+
+tftpd-r-gui-slint ──┐  (build-dependencies only)
+tftpd-r-daemon ────┴──> tftpd-r-build-support
 ```
 
 - **`tftpd-r-core`** owns the TFTP protocol codec, option negotiation, the RRQ
@@ -20,6 +23,11 @@ tftpd-r-daemon ────┘
 - **`tftpd-r-gui-slint`** is a second front-end: a Slint window plus an embedded
   controller that owns a Tokio runtime and a `tftpd-r-core` server handle. It
   does not talk to the daemon (no IPC in this release).
+- **`tftpd-r-build-support`** is build-time only and is not linked into either
+  binary. It turns `crates/tftpd-r-gui-slint/ui/icons/app-icon.ico` into a
+  Windows `.res` resource: MSVC links the `.res` directly, GNU targets convert
+  it to a COFF `.rsrc` object with `windres`. On non-Windows targets it is a
+  no-op, so Linux builds do not need a resource compiler.
 
 There is no `tftpd-r-control-protocol` crate yet because embedded mode does not
 need shared DTOs. When IPC is added, put versioned DTOs in a separate crate so
