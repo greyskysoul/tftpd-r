@@ -5,7 +5,11 @@ implemented. A phase is complete only when its code (where applicable), tests,
 documentation, and acceptance evidence satisfy the stated Definition of Done.
 A checklist item marked **not verified** must not be described as passed.
 
-## Current baseline: `0.2.0`
+## Current baseline: `0.2.1`
+
+`0.2.1` is a patch release on `0.2.0`: both Windows executables now embed the
+product icon as a PE resource ([ADR 0011](adr/0011-windows-executable-icon.md)).
+Configuration, protocol, defaults and all other runtime behaviour are unchanged.
 
 `0.2.0` ships TOML configuration (`port` + `bind_addresses`, defaulting to
 `127.0.0.1:69`), the read-only RRQ server, a standalone daemon, and the embedded
@@ -33,6 +37,14 @@ from its working directory and does not write that file.
   when settings change while the server is idle are implemented. See
   [ADR 0009](adr/0009-gui-first-run-and-auto-restart.md).
 - **R3 (INI) was withdrawn.** Configuration remains TOML.
+
+### Patch releases
+
+- **0.2.1 — Windows executable icon.** `tftpd-r.exe` and `tftpd-r-gui.exe` embed
+  `app-icon.ico` as an `RT_GROUP_ICON`/`RT_ICON` resource, generated at build
+  time by `tftpd-r-build-support` (MSVC links the `.res` directly; GNU converts
+  it with `windres`). No configuration or protocol change. See
+  [ADR 0011](adr/0011-windows-executable-icon.md).
 
 ## Revised phase order
 
@@ -93,9 +105,10 @@ verification and defect correction, not a feature phase.
    random sleeps. Track any test not yet automated in the manual matrix.
 7. **Documentation and packaging.** Publish a support matrix and concise
    install/upgrade/rollback instructions. Correct platform-specific port-69
-   guidance and distinguish “built” from “executed”. The Windows executable icon
-   resource may be added here if a resource compiler can be used without
-   violating the no-`unsafe`/dependency constraints.
+   guidance and distinguish “built” from “executed”. The Windows executable
+   icon resource is embedded at build time for both binaries (ADR 0011);
+   confirming the MSVC and arm64 resource paths on target machines remains part
+   of this phase.
 
 ### Definition of Done
 
