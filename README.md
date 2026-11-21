@@ -84,7 +84,10 @@ considered and dropped.
 The GUI root-selection rules (unset state, remembered last root, recent-menu
 选择…) are recorded in [ADR 0012](docs/adr/0012-gui-root-selection-and-memory.md),
 and the activity-log timestamps, display filter and explicit text export in
-[ADR 0013](docs/adr/0013-gui-activity-log.md).
+[ADR 0013](docs/adr/0013-gui-activity-log.md). The native folder dialog is served
+by a background helper that is pre-warmed when the settings dialog or the
+recent-root menu opens, so the click does not pay for PowerShell startup
+([ADR 0014](docs/adr/0014-prewarmed-folder-picker-helper.md)).
 
 ## Requirements
 
@@ -351,10 +354,11 @@ shutdown cancellation, legacy `/file` requests, multiple listeners on one port
 and all-or-nothing binding), daemon CLI/config integration tests and GUI tests
 for the embedded controller (start/stop, asynchronous restart, failed restart),
 the recent-root persistence and clearing, the one-time setup flag,
-interface-address parsing, folder-selection validation, the exclusive
-address-picker model and the idle/deferred auto-restart decision. See
-[docs/testing.md](docs/testing.md) for what was actually executed and what still
-needs manual/target-machine verification.
+interface-address parsing, folder-selection validation and the pre-warmed
+folder-picker protocol/UTF-8 handling, the exclusive address-picker model and the
+idle/deferred auto-restart decision. See [docs/testing.md](docs/testing.md) for
+what was actually executed and what still needs manual/target-machine
+verification.
 
 ## Runtime dependencies
 

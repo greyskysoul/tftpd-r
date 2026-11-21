@@ -35,6 +35,7 @@ use tftpd_r_core::server::ServerStatus;
 use tftpd_r_core::ServerConfig;
 
 use controller::EmbeddedController;
+use folder_picker::FolderPicker;
 use log_export::SaveChoice;
 use logging::{
     export_file_name, format_export, write_export, LogEntry, LogFilter, LogLevel, MAX_LOG_ROWS,
@@ -113,8 +114,13 @@ struct UiState {
     /// Local interface addresses discovered on a background thread.
     discovered: Arc<StdMutex<Option<Vec<IpAddr>>>>,
     discovery_applied: bool,
-    /// Pending native folder picker; polled from the UI timer.
-    folder_picker: Option<PendingFolderPick>,
+    /// Background native folder picker; the helper is pre-warmed when a dialog
+    /// opens so the click path only pays for the dialog itself.
+    folder_picker: FolderPicker,
+    /// Pending native folder dialog; polled from the UI timer.
+    pending_pick: Option<PendingFolderPick>,
+    /// Whether the warm picker helper was requested in this session.
+    picker_prewarmed: bool,
     /// Pending log-export save dialog; polled from the UI timer.
     log_export: Option<PendingLogExport>,
 }
@@ -131,7 +137,18 @@ enum FolderPickTarget {
 /// A folder dialog running in a helper process.
 struct PendingFolderPick {
     target: FolderPickTarget,
+    /// Settings-form hint shown before the dialog opened; restored when the
+    /// dialog is cancelled or the selected path is unusable.
+    previous_hint: String,
     receiver: Receiver<Option<PathBuf>>,
+}
+
+/// Finished folder-dialog request, handed from [`poll_folder_picker`] to the
+/// matching UI action.
+struct FolderPickOutcome {
+    target: FolderPickTarget,
+    picked: Option<PathBuf>,
+    previous_hint: String,
 }
 
 /// A save-file dialog plus the log text snapshot it will write.
@@ -167,7 +184,9 @@ impl UiState {
             address_options: Vec::new(),
             discovered,
             discovery_applied: false,
-            folder_picker: None,
+            folder_picker: FolderPicker::new(),
+            pending_pick: None,
+            picker_prewarmed: false,
             log_export: None,
         }
     }
@@ -503,11 +522,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if state.apply_discovered() {
                 apply_address_options(&app, &state);
             }
-            if let Some((target, picked)) = poll_folder_picker(&mut state) {
-                match target {
-                    FolderPickTarget::SettingsForm => handle_folder_pick(&app, &mut state, picked),
+            // Start the helper as soon as a dialog that contains a folder
+            // picker opens. The first click then usually only waits for the
+            // dialog itself (~0.2 s) instead of PowerShell startup (~1.6 s).
+            // The recent-root menu is included because its 选择… button opens
+            // the same picker without the settings dialog.
+            if !state.picker_prewarmed && (app.get_settings_open() || app.get_recent_menu_open()) {
+                state.picker_prewarmed = true;
+                state.folder_picker.prewarm();
+            }
+            if let Some(outcome) = poll_folder_picker(&mut state) {
+                match outcome.target {
+                    FolderPickTarget::SettingsForm => {
+                        handle_folder_pick(&app, &mut state, outcome.picked, &outcome.previous_hint)
+                    }
                     FolderPickTarget::Root => {
-                        handle_root_pick(&app, &controller, &mut state, picked)
+                        handle_root_pick(&app, &controller, &mut state, outcome.picked)
                     }
                 }
             }
@@ -533,6 +563,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let result = app.run();
     timer.stop();
     quit_timer.stop();
+    // Stop the pre-warmed picker helper (including an open dialog) before the
+    // process exits; otherwise PowerShell would outlive the panel.
+    state.borrow().folder_picker.shutdown();
     controller.borrow_mut().shutdown();
     result?;
     Ok(())
@@ -658,16 +691,23 @@ fn toggle_address_choice(options: &mut [AddressChoice], address: IpAddr) {
     }
 }
 
-fn poll_folder_picker(state: &mut UiState) -> Option<(FolderPickTarget, Option<PathBuf>)> {
-    let pending = state.folder_picker.as_ref()?;
-    let result = match pending.receiver.try_recv() {
+fn poll_folder_picker(state: &mut UiState) -> Option<FolderPickOutcome> {
+    let pending = state.pending_pick.as_ref()?;
+    let picked = match pending.receiver.try_recv() {
         Ok(result) => result,
         Err(TryRecvError::Empty) => return None,
+        // A disconnected worker means the dialog cannot report a selection;
+        // treat it as a cancel so the UI does not stay in the pending state.
         Err(TryRecvError::Disconnected) => None,
     };
     let target = pending.target;
-    state.folder_picker = None;
-    Some((target, result))
+    let previous_hint = pending.previous_hint.clone();
+    state.pending_pick = None;
+    Some(FolderPickOutcome {
+        target,
+        picked,
+        previous_hint,
+    })
 }
 
 fn poll_log_export(state: &mut UiState) -> Option<(SaveChoice, String)> {
@@ -680,7 +720,12 @@ fn poll_log_export(state: &mut UiState) -> Option<(SaveChoice, String)> {
     Some((choice, text))
 }
 
-fn handle_folder_pick(app: &AppWindow, state: &mut UiState, picked: Option<PathBuf>) {
+fn handle_folder_pick(
+    app: &AppWindow,
+    state: &mut UiState,
+    picked: Option<PathBuf>,
+    previous_hint: &str,
+) {
     match picked {
         Some(path) if path.is_dir() => {
             let display = display_root_path(&path);
@@ -703,8 +748,11 @@ fn handle_folder_pick(app: &AppWindow, state: &mut UiState, picked: Option<PathB
                 LogLevel::Error,
                 format!("所选路径不是目录：{}。", display_path(&path)),
             );
+            // Remove the "opening…" hint without discarding an older reminder.
+            app.set_settings_hint(previous_hint.into());
         }
-        None => {}
+        // Cancelled dialog or unavailable helper: restore the form as it was.
+        None => app.set_settings_hint(previous_hint.into()),
     }
     refresh_models(app, state);
 }
@@ -983,8 +1031,9 @@ fn install_callbacks(
         });
     }
     // Native folder picker for the settings root field. The dialog runs in a
-    // helper process on a background thread; the result arrives through the
-    // timer. Opening a picker is internal UI activity and is not logged.
+    // pre-warmed helper process on a background thread; the result arrives
+    // through the timer. Opening a picker is internal UI activity and is not
+    // logged.
     {
         let weak = app.as_weak();
         let state = state.clone();
@@ -993,7 +1042,7 @@ fn install_callbacks(
                 return;
             };
             let mut state = state.borrow_mut();
-            if state.folder_picker.is_some() {
+            if state.pending_pick.is_some() {
                 return;
             }
             let typed = PathBuf::from(app.get_settings_root().trim());
@@ -1004,10 +1053,17 @@ fn install_callbacks(
             } else {
                 None
             };
-            state.folder_picker = Some(PendingFolderPick {
+            let previous_hint = app.get_settings_hint().to_string();
+            let receiver = state.folder_picker.request(initial);
+            state.pending_pick = Some(PendingFolderPick {
                 target: FolderPickTarget::SettingsForm,
-                receiver: folder_picker::pick_folder_async(initial),
+                previous_hint,
+                receiver,
             });
+            // The dialog is not visible yet while the pre-warmed helper is
+            // still loading; show that the click was registered instead of
+            // leaving the form unchanged for a moment.
+            app.set_settings_hint("正在打开文件夹选择器…".into());
         });
     }
     // Native folder picker opened from the recent-root menu. Unlike the form
@@ -1017,7 +1073,7 @@ fn install_callbacks(
         let state = state.clone();
         app.on_browse_root_menu(move || {
             let mut state = state.borrow_mut();
-            if state.folder_picker.is_some() {
+            if state.pending_pick.is_some() {
                 return;
             }
             let initial = if root_is_set(&state.config.root_dir) && state.config.root_dir.is_dir() {
@@ -1025,9 +1081,11 @@ fn install_callbacks(
             } else {
                 None
             };
-            state.folder_picker = Some(PendingFolderPick {
+            let receiver = state.folder_picker.request(initial);
+            state.pending_pick = Some(PendingFolderPick {
                 target: FolderPickTarget::Root,
-                receiver: folder_picker::pick_folder_async(initial),
+                previous_hint: String::new(),
+                receiver,
             });
         });
     }
@@ -2000,18 +2058,19 @@ mod tests {
             Arc::new(StdMutex::new(Some(Vec::new()))),
         );
         let (sender, receiver) = std::sync::mpsc::channel();
-        state.folder_picker = Some(PendingFolderPick {
+        state.pending_pick = Some(PendingFolderPick {
             target: FolderPickTarget::Root,
+            previous_hint: String::new(),
             receiver,
         });
         assert!(poll_folder_picker(&mut state).is_none());
         sender
             .send(Some(PathBuf::from("C:/share")))
             .expect("send pick");
-        let (target, picked) = poll_folder_picker(&mut state).expect("picker result");
-        assert_eq!(target, FolderPickTarget::Root);
-        assert_eq!(picked, Some(PathBuf::from("C:/share")));
-        assert!(state.folder_picker.is_none());
+        let outcome = poll_folder_picker(&mut state).expect("picker result");
+        assert_eq!(outcome.target, FolderPickTarget::Root);
+        assert_eq!(outcome.picked, Some(PathBuf::from("C:/share")));
+        assert!(state.pending_pick.is_none());
 
         let (sender, receiver) = std::sync::mpsc::channel();
         state.log_export = Some(PendingLogExport {

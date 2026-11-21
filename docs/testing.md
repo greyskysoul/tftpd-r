@@ -30,8 +30,8 @@ with network access; subsequent builds/tests ran with `--offline`.
 | --- | --- |
 | `cargo fmt --all -- --check` | Pass (exit 0) |
 | `cargo clippy --workspace --all-targets --offline -- -D warnings` | Pass (exit 0, no warnings) |
-| `cargo test --workspace --offline` | **175 passed, 0 failed** |
-| `cargo build --workspace --release --locked --offline` | Pass (exit 0, 55.42 s, 2026-11-21, with the embedded Windows icon resource, GUI root/log/state changes and the portable state fallback). The first full size-profile build was 116.4 s. |
+| `cargo test --workspace --offline` | **177 passed, 0 failed, 1 ignored** (the ignored test opens the native folder dialog; see the eleventh run) |
+| `cargo build --workspace --release --locked --offline` | Pass (exit 0, 49.08 s on the final tree; 53.74 s on the previous incremental run, 2026-11-21). The first full size-profile build was 116.4 s. |
 
 The workspace was renamed from `rust-tftpd`/`tftp-*` to TftpdR/`tftpd-r-*` on
 2026-11-20. The original `0.2.0` verification ran on 2026-11-20 (offline, GNU toolchain)
@@ -43,11 +43,15 @@ share one config test; and the tautological comparison of two identical
 `include_str!` sources was replaced by assertions on the parsed default template.
 That left 145 test functions. The executable-icon work then added 3
 `tftpd-r-build-support` tests. The GUI root-memory and activity-log changes added
-25 GUI tests, and the portable state-directory fallback added 2 more, so the
-current suite has **175 test functions** (3 build-support, 61 core unit, 29 RRQ
-integration, 9 daemon unit, 5 CLI integration, 67 GUI, 1 doctest). GUI coverage
-includes `log_model_stays_bounded_and_keeps_newest_entries_first`, a
-deterministic 501-entry check for the 500-row newest-first cap, and the
+25 GUI tests, and the portable state-directory fallback added 2 more. The
+pre-warmed folder-picker work added 2 GUI tests plus one ignored Windows
+integration test, so the current suite has **177 test functions** (3
+build-support, 61 core unit, 29 RRQ integration, 9 daemon unit, 5 CLI
+integration, 69 GUI, 1 doctest) and one ignored test. GUI coverage includes
+`log_model_stays_bounded_and_keeps_newest_entries_first`, a deterministic
+501-entry check for the 500-row newest-first cap,
+`helper_replies_are_parsed_without_mangling_the_path` /
+`a_non_ascii_directory_is_accepted` for the picker's UTF-8 protocol, and the
 state-directory selection tests (`the_first_writable_state_directory_is_used`,
 `a_blocked_state_directory_falls_back_to_the_portable_one`). The current
 workspace-check results are shown in the table above.
@@ -60,9 +64,10 @@ profile (ADR 0010) the same tree produced `tftpd-r.exe` **1,245,184 bytes
 35.0 % smaller. Embedding the Windows icon resource (ADR 0011) adds 112,640
 bytes to each. The GUI root-memory/log/state work and the later save hint,
 diagnostics and portable fallback bring the current measurements to
-**1,357,824 bytes (1.29 MiB)** for the daemon and **8,909,312 bytes (8.50 MiB)**
-for the GUI. These figures are informational only; they are not an acceptance
-criterion and not a promise for other machines/toolchains.
+**1,357,824 bytes (1.29 MiB)** for the daemon and **8,931,328 bytes (8.52 MiB)**
+for the GUI (the pre-warmed picker added 22,016 bytes to the GUI). These figures
+are informational only; they are not an acceptance criterion and not a promise
+for other machines/toolchains.
 
 The suite also runs on `ubuntu-latest` in CI. One core unit test
 (`prefix_confusion_is_rejected_by_component_comparison`) therefore has a
@@ -130,7 +135,7 @@ Test breakdown from `cargo test --workspace`:
 | `tftpd-r-core` integration `tests/rrq.rs` | 29 | real loopback UDP server and client: small/exact-multiple/empty files, missing file, traversal, legacy `/file` and `\file` requests, root-prefixed traversal rejection, `blksize`/`tsize`/`timeout` negotiation, clamping, invalid option, duplicate ACK, retransmission, unknown TID ERROR 5, duplicate RRQ resend without a new session, WRQ rejection, netascii rejection, unknown mode/malformed/oversized datagrams, size limit, concurrent transfers, lifecycle events, shutdown cancellation, idempotent stop, retry exhaustion, **block-number wrap 65535 → 0** with `blksize = 8` (65,537 blocks); multiple listeners on one resolved port (IPv6 checked when available), wildcard collapsing to one listener, and an unbindable address aborting the whole start |
 | `tftpd-r-daemon` unit tests | 9 | CLI parsing/defaults/overrides, parsed embedded example template safety/validity, config loading errors, unknown fields, override validation, status-channel failure path |
 | `tftpd-r-daemon` integration `tests/cli.rs` | 5 | binary `print-default-config` equals `config.example.toml`; `check-config` success/missing file/uploads-rejected exit code 2; `serve` refuses invalid config with exit code 1; `serve` stays running with a valid config |
-| `tftpd-r-gui-slint` unit tests | 40 | embedded controller start/stop, double-start rejection, invalid root, asynchronous restart (old server → new config), failed-restart error reporting and the no-stale-`Running`-after-stop guarantee; recent-root ordering, de-duplication, cap, persistence, canonicalisation, stale-directory cleanup and clearing the state file; one-time setup-flag persistence and read-only-profile tolerance; interface-address parsing/filtering/sorting; folder-selection validation; address picker model (two permanent entries, selected-but-undiscovered addresses preserved, duplicate removal, summaries) and the exclusive/sticky/fallback "全部网络" toggle rules; first-run all-network defaults; idle auto-restart with a real embedded server, deferral while a transfer is tracked, unchanged configuration and a deliberate stop; status-bar address summary and leaf-directory name; newest-first 500-row log-model bound under a 501-entry flood |
+| `tftpd-r-gui-slint` unit tests | 69 | embedded controller start/stop, double-start rejection, invalid root, asynchronous restart (old server → new config), failed-restart error reporting and the no-stale-`Running`-after-stop guarantee; recent-root ordering, de-duplication, cap, persistence, canonicalisation, stale-directory cleanup and clearing the state file; one-time setup-flag persistence and read-only-profile tolerance; interface-address parsing/filtering/sorting; folder-selection validation and the warm picker's `PICK:` reply parsing/UTF-8 path handling; address picker model (two permanent entries, selected-but-undiscovered addresses preserved, duplicate removal, summaries) and the exclusive/sticky/fallback "全部网络" toggle rules; first-run all-network defaults; idle auto-restart with a real embedded server, deferral while a transfer is tracked, unchanged configuration and a deliberate stop; status-bar address summary and leaf-directory name; newest-first 500-row log-model bound under a 501-entry flood |
 | `tftpd-r-core` doc test | 1 | crate-level usage example compiles |
 
 The block-wrap test transfers 65,537 blocks in roughly 3–4 seconds on the
@@ -550,6 +555,47 @@ for each round; only the latest numbers are retained in the checks table.
     tested; portable state is not migrated when the per-user directory becomes
     writable again.
 
+### GUI pre-warmed folder picker (2026-11-21, eleventh run)
+
+A user reported that the folder picker appeared about 1–2 s after pressing
+浏览…/选择…. The delay was the per-click PowerShell + WinForms startup, not the
+dialog. Measurements on this machine (Windows PowerShell 5.1, `x86_64-pc-windows-gnu`):
+
+| Step | Measured |
+| --- | --- |
+| `powershell.exe -NoLogo -NoProfile -Command exit` | 1.10–1.14 s |
+| One-shot helper: `Add-Type System.Windows.Forms` + `System.Drawing` + construct dialog/owner | 1.61–1.64 s |
+| Warm helper: `READY` after process start (background, not in the click path) | 1.53 s |
+| Warm helper: request → visible `#32770` dialog (first dialog in the process) | 368 ms |
+| Warm helper: request → visible dialog (second dialog, reused process) | 62 ms |
+| Warm helper memory (WinForms loaded, before a dialog) | ~73 MB working set / ~49 MB private |
+
+Verification performed:
+
+- `cargo test -p tftpd-r-gui-slint --offline -- --ignored` ran
+  `the_warm_helper_closes_its_dialog_on_shutdown`: pre-warm, open the real
+  dialog, `shutdown()` closes it and reports a cancelled pick (1 passed, 4.02 s).
+- A PowerShell probe using the exact persistent script confirmed `READY`, a
+  visible `#32770` window after one request, `PICK:` after closing it with
+  `WM_CLOSE`, a second request on the same process (62 ms to the dialog) and a
+  clean exit (code 0) when stdin was closed.
+- A raw-byte probe (bypassing the harness's OEM-encoded `StandardInput`)
+  confirmed UTF-8 round-trip: `PICK:C:\srv\固件 共享\` came back unchanged. The
+  old one-shot helper was also checked: `[Console]::Out` emitted the Chinese
+  path as GBK bytes (`D6 D0 CE C4 …`), which the Rust side decoded as UTF-8 and
+  silently rejected; both helpers now write via a UTF-8 `StreamWriter`.
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --offline
+  -- -D warnings`, `cargo test --workspace --offline` (177 passed, 1 ignored) and
+  `cargo build --workspace --release --locked --offline` (49.08 s) passed. The
+  GUI grew from 8,909,312 to 8,931,328 bytes.
+
+Not verified here: a real click selecting a directory and confirming the native
+dialog inside the Slint panel (the agent session cannot drive the GUI; the
+`--smoke-test` process did not exit under this session and was killed), dialog
+z-order on a real desktop after the helper change, and non-Chinese/non-GBK
+Windows installations. The ignored test covers the Rust worker and the real
+dialog lifecycle, not the Slint click wiring. ADR 0014.
+
 ## Not verified (and therefore not claimed)
 - **External TFTP client interoperability** (tftp-hpa, Tftpd64, PXE firmware,
   U-Boot, etc.). Only the in-repo test client and the raw Python client were
@@ -566,16 +612,18 @@ for each round; only the latest numbers are retained in the checks table.
   low ports), so the "permission denied" hint was exercised only by unit tests,
   not by a real failed bind; the Linux root/`CAP_NET_BIND_SERVICE` path is
   untested.
-- **GUI helper features:** the native folder dialog was not completed by an
-  automated check (the user reported that selecting works after the topmost-owner
-  fix, but the harness cannot drive the helper's piped stdout end-to-end), and
-  address discovery was exercised only through the .NET API on this machine
-  (not on Linux, not with VPN adapters appearing/disappearing, and not through
-  the `hostname -I` fallback). The save/remember/restore path was verified by
-  saving a prefilled settings form and relaunching, including the portable
-  `.tftpd-r` fallback with a real unwritable `APPDATA`; the inline "not saved
-  yet" hint was compiled but not visually captured. The native save dialog for
-  log export opened but was not completed, so a file produced through the GUI
+- **GUI helper features:** the pre-warmed folder helper was exercised end to end
+  by the ignored Rust test (start, open a real dialog, close it on shutdown) and
+  its protocol was probed from PowerShell (READY, `PICK:`, reuse, UTF-8), but a
+  real click on 浏览…/选择… followed by selecting a directory and confirming the
+  dialog inside the Slint panel was not driven here (the agent session cannot run
+  the GUI window). Address discovery was exercised only through the .NET API on
+  this machine (not on Linux, not with VPN adapters appearing/disappearing, and
+  not through the `hostname -I` fallback). The save/remember/restore path was
+  verified by saving a prefilled settings form and relaunching, including the
+  portable `.tftpd-r` fallback with a real unwritable `APPDATA`; the inline "not
+  saved yet" hint was compiled but not visually captured. The native save dialog
+  for log export opened but was not completed, so a file produced through the GUI
   remains unverified; its formatting and write path are unit-tested.
 - **Release artifacts:** sizes and checksums are recorded for the GNU x64 local
   build and for the downloaded x64 MSVC `v0.2.1` archive; they are not a

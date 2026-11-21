@@ -178,9 +178,12 @@ The GUI crate stays deliberately small:
   clears the other addresses, selecting another address clears it, and it cannot
   be unchecked (unchecking the last specific address selects it again), so the
   bind list is never empty. The root field has a 浏览… button backed by a native
-  directory dialog. Picking a directory only edits the form (取消 must be able to
-  restore the active value), so the form shows an inline "点击“保存设置”后生效"
-  reminder; 保存设置 applies and remembers it. When no valid `config.toml` exists,
+  directory dialog; the helper behind it is pre-warmed when the settings dialog
+  (or the recent-root menu) opens, so the click does not pay for PowerShell
+  startup (see [ADR 0014](adr/0014-prewarmed-folder-picker-helper.md)). Picking a
+  directory only edits the form (取消 must be able to restore the active value),
+  so the form shows an inline "点击“保存设置”后生效" reminder; 保存设置 applies
+  and remembers it. When no valid `config.toml` exists,
   the panel preselects `0.0.0.0`; the core and daemon defaults stay loopback. On
   the first start of a profile without a valid configuration the dialog opens
   automatically, once (see `src/user_state.rs`).
@@ -221,18 +224,28 @@ The GUI crate stays deliberately small:
   table is rebuilt only when entries or the filter change, so the scroll
   position survives the 200 ms refresh. Opening a folder/save picker is not
   logged; only the chosen directory, export result and real errors are.
-- `src/folder_picker.rs` and `src/log_export.rs` share the fixed PowerShell
-  discovery for the Windows dialogs; both validate that the helper's output is
-  usable (an existing directory, or a non-empty save path) before the UI applies
-  it.
+- `src/folder_picker.rs` owns the native directory dialog. On Windows one
+  PowerShell + WinForms helper process is kept warm for the session: a
+  background worker starts it the first time the settings dialog or the
+  recent-root menu opens, waits for its `READY` line and then sends one UTF-8
+  request line (the initial directory) per click, receiving `PICK:<path>` or
+  `PICK:` back. Reusing the helper keeps PowerShell/.NET startup out of the
+  click path (about 0.2 s for a warm dialog instead of about 1.6 s). If the
+  helper cannot be started or dies, the worker falls back to the one-shot
+  helper for the rest of the session; `shutdown()` kills a helper (and an open
+  dialog) when the panel closes. On Unix the worker keeps the one-shot
+  `zenity`/`kdialog` behaviour. `src/log_export.rs` still runs a one-shot
+  PowerShell `SaveFileDialog` (or `zenity`/`kdialog`) for the log export.
+- Both dialogs use fixed, absolute commands without a shell. The folder
+  picker's initial directory and selected path travel over stdin/stdout as
+  UTF-8 — a Windows path cannot contain a line break — so a non-ASCII directory
+  name survives the round trip; the save dialog receives its default file name
+  through `TFTPD_R_LOG_NAME`. The directory is accepted only if it still is an
+  existing directory; the save path does not have to exist yet.
 - `src/netif.rs` discovers interface addresses on a background thread; the UI
   timer merges the result into the picker. It asks the platform runtime for the
   list (Windows PowerShell + .NET `NetworkInterface`, `hostname -I` on Unix) and
   parses only IP literals; failure is not fatal.
-- `src/folder_picker.rs` runs the native directory dialog in a helper process on
-  a background thread and validates that the result is a directory; the UI timer
-  applies it to the settings form. Both helpers are fixed, absolute commands
-  without a shell, with the initial directory passed via the environment.
 - `src/recent.rs` persists at most eight canonicalised root directories
   (most-recent first). The drop-down's 清空 button removes the state file; the
   configured/running root is not history and is unaffected. It is local UI

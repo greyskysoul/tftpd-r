@@ -206,8 +206,13 @@ The desktop panel has no native interface-enumeration or file-dialog dependency
   `NetworkInterface` API, or `hostname -I` on Unix, on a background thread. Only
   IP literals are parsed; the helper is killed after 5 s.
 - The root directory picker runs `FolderBrowserDialog` through the same
-  PowerShell 5.1 binary, or `zenity`/`kdialog` on Unix, also on a background
-  thread. The selected path is accepted only if it is an existing directory.
+  PowerShell 5.1 binary, or `zenity`/`kdialog` on Unix. On Windows the panel
+  keeps one helper process warm for the session (started when the settings
+  dialog or the recent-root menu first opens) and sends one UTF-8 request line
+  over stdin per dialog; the helper answers with `PICK:<path>` or `PICK:` over
+  UTF-8 stdout. If the helper cannot start or dies, the picker falls back to the
+  one-shot helper. The selected path is accepted only if it is an existing
+  directory.
 - The activity-log export uses a `SaveFileDialog` (same PowerShell binary) or
   `zenity --save`/`kdialog --getsavefilename`. The chosen path is only a
   destination for the text the Rust side writes; it is never executed and does
@@ -217,11 +222,13 @@ The desktop panel has no native interface-enumeration or file-dialog dependency
   visible above the panel and other windows. It does not add privileges or
   change the path validation described above.
 - None of these helpers is started with a shell, with user-controlled arguments
-  or with elevation. The initial directory is passed through
-  `TFTPD_R_INITIAL_DIR`, and the default log file name through
-  `TFTPD_R_LOG_NAME`, so a value containing quotes cannot become script text.
-  Helpers are started with `CREATE_NO_WINDOW`, and the panel itself is a
-  windowed-subsystem binary.
+  or with elevation. The pre-warmed picker receives its initial directory over
+  stdin; the one-shot fallback passes it through `TFTPD_R_INITIAL_DIR`, and the
+  default log file name travels through `TFTPD_R_LOG_NAME`, so a value
+  containing quotes cannot become script text. The helpers are started with
+  `CREATE_NO_WINDOW`, and the panel itself is a windowed-subsystem binary. The
+  warm picker is killed when the panel shuts down (including an open dialog);
+  closing its stdin also ends an idle helper.
 
 A machine policy that blocks PowerShell or the dialog tools only degrades these
 convenience features; the panel and the server keep working with the two special

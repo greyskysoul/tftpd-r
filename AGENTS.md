@@ -38,7 +38,7 @@
 │   ├── security.md                # 威胁模型、沙箱、残余风险
 │   ├── testing.md                 # 实际执行记录与未验证项
 │   ├── roadmap.md                 # 已发布项与后续未实现项
-│   └── adr/0001–0013              # 已接受决策
+│   └── adr/0001–0014              # 已接受决策
 ├── crates/
 │   ├── tftpd-r-build-support/    # 构建期图标资源，不链接进产物
 │   ├── tftpd-r-core/             # 无 GUI/daemon/IPC 依赖
@@ -96,7 +96,7 @@
 - 三个状态文件优先写入 per-user 配置目录（Windows `%APPDATA%\TftpdR`，Unix `$XDG_CONFIG_HOME/tftpd-r` 或 `~/.config/tftpd-r`）。该目录不可创建/不可写（受限 profile、Low 完整性、沙箱）时，依次回退到 exe 旁 `.tftpd-r`、工作目录 `.tftpd-r`，启动日志 WARN 说明实际目录；不得因 `%APPDATA%` 写入失败放弃根目录记忆/最近历史/首次启动标记。
 - 不要把空根目录写进 `ServerConfig::default()`/daemon；不要把 `tftp-root` 当作 GUI 占位值显示或写入（ADR 0012）。
 - 绑定特权端口失败必须给出可操作提示，**不得**静默回退、提权或改写配置（ADR 0007）。
-- GUI 网卡枚举与目录/保存对话框通过固定绝对路径的 PowerShell/.NET（Unix 为 `hostname`/`zenity`/`kdialog`）辅助进程完成，后台线程执行；不得引入 shell、用户可控参数、提权或手写 unsafe。辅助失败时必须降级或给出可操作错误，不得崩溃。
+- GUI 网卡枚举与目录/保存对话框通过固定绝对路径的 PowerShell/.NET（Unix 为 `hostname`/`zenity`/`kdialog`）辅助进程完成，后台线程执行；不得引入 shell、用户可控参数、提权或手写 unsafe。辅助失败时必须降级或给出可操作错误，不得崩溃。Windows 目录选择器使用**按需预热的常驻 helper**（ADR 0014）：设置页或最近目录菜单打开后预热，路径经 UTF-8 stdin/stdout 传递（不得用 `[Console]::Out` 输出路径，OEM 代码页会破坏非 ASCII 名称）；helper 启动失败或退出时回退一次性 helper；面板关闭时必须 kill helper（包括仍打开的对话框），不得遗留 PowerShell 进程。预热只在用户实际打开相关对话框时发生，不要在启动时无条件常驻。
 - `root_dir` 必须存在且为目录；低端口权限按平台处理，README/security 与 ADR 0007 的表述必须一致，不要笼统写成“Windows 需要管理员”。
 - `config.example.toml` 由 daemon `include_str!` 内嵌，`print-default-config` 必须与文件完全一致；修改示例时同步测试。
 
@@ -144,11 +144,11 @@ cargo test --workspace
 cargo build --workspace --release
 ```
 
-当前自动化基线是 **175 tests passed**：build-support 3、core 单元 61、RRQ UDP 集成 29、daemon 单元 9、daemon CLI 集成 5、GUI 单元 67（控制器 5 + 最近目录 7 + 网卡枚举 4 + 目录选择 2 + 用户状态 12 + 日志 9 + 保存对话框 2 + 根目录/地址模型/首次启动/自动重启/产品图标/日志模型/轮询 26）、doctest 1。
+当前自动化基线是 **177 tests passed**：build-support 3、core 单元 61、RRQ UDP 集成 29、daemon 单元 9、daemon CLI 集成 5、GUI 单元 69（控制器 5 + 最近目录 7 + 网卡枚举 4 + 目录选择 4 + 用户状态 12 + 日志 9 + 保存对话框 2 + 根目录/地址模型/首次启动/自动重启/产品图标/日志模型/轮询 26）、doctest 1；另有 1 个 ignored 的 Windows 集成测试（`the_warm_helper_closes_its_dialog_on_shutdown`，需桌面会话，手动运行）。
 
-其中 build-support 覆盖 ICO 解析（7 帧、截断/非法/越界拒绝）与 `.res` 的 null 资源、`RT_ICON`/`RT_GROUP_ICON`、帧字节与对齐；GUI 根目录相关 13 项覆盖 `LastRoot` 持久化/失效/只读降级、状态目录选择/便携回退、启动优先级（`config.toml` > 记忆根目录 > 未指定）、空根目录拒绝与「未指定根目录」；日志相关 14 项覆盖级别/筛选/单行化/500 行上限/导出格式与写文件/轮询目标。最新复验见 `docs/testing.md`。
+其中 build-support 覆盖 ICO 解析（7 帧、截断/非法/越界拒绝）与 `.res` 的 null 资源、`RT_ICON`/`RT_GROUP_ICON`、帧字节与对齐；GUI 根目录相关 13 项覆盖 `LastRoot` 持久化/失效/只读降级、状态目录选择/便携回退、启动优先级（`config.toml` > 记忆根目录 > 未指定）、空根目录拒绝与「未指定根目录」；日志相关 14 项覆盖级别/筛选/单行化/500 行上限/导出格式与写文件/轮询目标；目录选择 4 项覆盖目录校验、非 ASCII 目录名与 `PICK:` 协议解析，ignored 集成测试覆盖预热 helper 的启动、真实弹窗与关闭。最新复验见 `docs/testing.md`。
 
-release 体积基线（GNU x64，2026-11-21，含 112,640 B 图标资源与 GUI 改动；ADR 0010/0011/0012/0013）：`target/release/tftpd-r.exe` **1,357,824 B（1.29 MiB）**、`target/release/tftpd-r-gui.exe` **8,909,312 B（8.50 MiB）**。最近一次增量 release 构建 55.42 s；首次完整 size-profile 构建约 116.4 s。`v0.2.1` 的 MSVC x64 归档为 daemon 1,193,984 B、GUI 8,513,024 B；GNU 与 MSVC 体积不可直接比较。换工具链/平台必须重测，这不是对其他平台的承诺。
+release 体积基线（GNU x64，2026-11-21，含 112,640 B 图标资源与 GUI 改动；ADR 0010/0011/0012/0013/0014）：`target/release/tftpd-r.exe` **1,357,824 B（1.29 MiB）**、`target/release/tftpd-r-gui.exe` **8,931,328 B（8.52 MiB）**。最近一次增量 release 构建 49.08 s（预热 helper，另一轮为 53.74 s）；首次完整 size-profile 构建约 116.4 s。`v0.2.1` 的 MSVC x64 归档为 daemon 1,193,984 B、GUI 8,513,024 B；GNU 与 MSVC 体积不可直接比较。换工具链/平台必须重测，这不是对其他平台的承诺。
 
 其他有用命令：
 
@@ -202,6 +202,7 @@ cargo run -p tftpd-r-gui-slint -- --smoke-test
 - 把 `last-root.txt` 写入失败、启动时失效条目或 `config.toml` 覆盖记忆值做成静默；只把「选中目录后还要保存设置」写在日志里而不在设置表单内提示（日志被模态框遮挡）。
 - 因 per-user 配置目录不可写就放弃根目录记忆/最近历史/首次启动标记（必须先尝试 exe 旁、再尝试工作目录的便携 `.tftpd-r`）；不得把便携状态写到未经验证的可疑位置或不经日志说明。
 - 把日志级别筛选做成删除条目或影响导出；自动写日志文件/轮转；把「打开目录选择器/保存对话框」写入日志；允许带换行的日志消息破坏行高或导出格式；在日志导出中使用未经验证的 helper 输出路径。
+- 用 `[Console]::Out` 输出目录路径（OEM 代码页会破坏非 ASCII 名称；必须用 UTF-8 `StreamWriter`）；或忘记在面板退出时 kill 预热的 PowerShell helper（包括仍打开的对话框）。
 - 把 `slint_build` 的 `embed_resources` 改成 `EmbedResourcesKind::EmbedForSoftwareRenderer`（该模式会预烘焙字形，使中文文案/运行时日志空白）；窗口图标走 `include_bytes!` + `Window.icon`（见 `src/main.rs` 的 `app_icon()`），不要为此开启 `image-default-formats` 或改用该嵌入模式。
 - 未经 ADR 与安全审查新增 `unsafe`、上传、IPC、服务注册或公网默认监听。
 - 提交 `.res`/`.o` 等图标生成物、手改 build-support 输出，或在非 Windows 目标强行调用 `windres`；GNU 构建失败时不得静默跳过图标。
