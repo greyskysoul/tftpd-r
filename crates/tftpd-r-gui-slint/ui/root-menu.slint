@@ -12,6 +12,7 @@ export component RootMenu inherits Rectangle {
 
     callback dismissed();
     callback selected(string);
+    callback browse-requested();
     callback clear-requested();
 
     width: 100%;
@@ -64,6 +65,12 @@ export component RootMenu inherits Rectangle {
                 }
                 Rectangle { horizontal-stretch: 1; background: transparent; }
                 SmallButton {
+                    label: "选择…";
+                    icon-data: Icons.folder-open;
+                    button-width: 88px;
+                    clicked => { root.browse-requested(); }
+                }
+                SmallButton {
                     label: "清空";
                     icon-data: Icons.delete-sweep;
                     tint: Theme.text-muted;
@@ -91,7 +98,7 @@ export component RootMenu inherits Rectangle {
                 VerticalLayout {
                     spacing: 2px;
                     if root.items.length == 0 : Text {
-                        text: "暂无最近使用的目录。在设置中填写根目录并启动一次服务后，它会出现在这里。";
+                        text: "暂无最近使用的目录。点击“选择…”可直接选择一个根目录并应用。";
                         color: Theme.text-faint;
                         font-size: 12px;
                         wrap: word-wrap;

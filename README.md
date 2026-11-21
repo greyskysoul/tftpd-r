@@ -52,11 +52,13 @@ Implemented:
   window controls; toolbar with a prominent service-status chip plus
   start/restart, stop, settings and about; status bar with bind address and a
   clickable recently-used root selector; activity log and active transfers;
-  settings validation. The header is one flat `#37474f` block carrying the
-  product mark; the same artwork (`crates/tftpd-r-gui-slint/ui/icons/app-icon.svg`,
-  Material `dns` glyph) is the window and task-bar icon and is embedded in both
-  Windows executables as their PE icon. Layout and icons are in
-  `crates/tftpd-r-gui-slint/ui/`.
+  settings validation. The panel starts with no root directory until one is
+  chosen (the status bar says 未指定根目录 and the settings field is empty) and
+  restores the root of the previous start on the next launch. The header is one
+  flat `#37474f` block carrying the product mark; the same artwork
+  (`crates/tftpd-r-gui-slint/ui/icons/app-icon.svg`, Material `dns` glyph) is the
+  window and task-bar icon and is embedded in both Windows executables as their
+  PE icon. Layout and icons are in `crates/tftpd-r-gui-slint/ui/`.
 
 Not implemented in this release (deliberate, tracked in `docs/adr/`):
 
@@ -78,6 +80,11 @@ history-clear and idle auto-restart behaviour is in
 [docs/adr/0009](docs/adr/0009-gui-first-run-and-auto-restart.md). They are **not**
 part of 0.1.0. Configuration stays TOML; an INI format with a fixed location was
 considered and dropped.
+
+The GUI root-selection rules (unset state, remembered last root, recent-menu
+选择…) are recorded in [ADR 0012](docs/adr/0012-gui-root-selection-and-memory.md),
+and the activity-log timestamps, display filter and explicit text export in
+[ADR 0013](docs/adr/0013-gui-activity-log.md).
 
 ## Requirements
 
@@ -102,7 +109,7 @@ cargo build --workspace --release  # release binaries in target\release
 
 Release builds use a size-first profile (`opt-level = "z"`, fat LTO,
 `panic = "abort"` and symbol stripping). On the GNU x64 verification build this
-gives about 1.29 MiB for the daemon and 8.44 MiB for the GUI, including the
+gives about 1.29 MiB for the daemon and 8.50 MiB for the GUI, including the
 ~110 KiB Windows icon resource. `panic = "abort"` is a deliberate fail-fast
 choice: a panic in a spawned task terminates the process instead of being
 contained by Tokio. Debug and test builds keep the default unwind strategy. See
@@ -164,13 +171,20 @@ path. Traversal such as `/../secret` is still rejected.
 cargo run -p tftpd-r-gui-slint
 ```
 
-The GUI loads `config.toml` from the current directory when present. On the first
-start without a usable configuration it opens the settings dialog automatically
-(once per user profile) so the root directory and bind addresses can be filled
-in; the form then preselects "全部网络 (0.0.0.0)". The daemon and
-`ServerConfig::default()` keep their conservative loopback default. The panel
-does not rewrite `config.toml`; values that must survive a restart belong in
-that file. The panel is in Chinese and is organized as follows:
+The GUI loads `config.toml` from the current directory when present and never
+rewrites it. On the first start without a usable configuration it opens the
+settings dialog automatically (once per user profile) so the root directory and
+bind addresses can be filled in; the form preselects "全部网络 (0.0.0.0)". The
+daemon and `ServerConfig::default()` keep their conservative loopback default.
+
+The panel has **no default root directory**. Until one is chosen, the status bar
+says `未指定根目录` and the settings field is empty; 启动/保存 asks for a
+directory instead of trying a placeholder such as `tftp-root`. The root of the
+last successful start (or the last root saved in the dialog) is remembered in
+`%APPDATA%\TftpdR\last-root.txt` (XDG config directory elsewhere) and restored
+on the next launch when no valid `config.toml` provides one. A valid
+`config.toml` always wins, so the file remains the authoritative way to pin the
+root for a deployment. The panel is in Chinese and is organized as follows:
 
 - **Window**: frameless, with a custom title bar on the same dark background as
   the toolbar. The title bar holds the app name, a drag area
@@ -187,19 +201,25 @@ that file. The panel is in Chinese and is organized as follows:
   table (file, client, progress, size, state).
 - **Status bar**: a read-only hint, or the last error when there is one, on the
   left; the bind address(es) and the current root directory (last path
-  component) on the right. Click the root name to choose another directory from
-  the recently used list; the drop-down has a 清空 button that forgets the
-  history (the configured/running root is not affected).
+  component, or `未指定根目录`) on the right. Click the root name to choose
+  another directory from the recently used list; the drop-down has a 选择…
+  button that opens the native folder dialog and applies the chosen directory
+  immediately (restarting an idle running server), and a 清空 button that forgets
+  the history (the configured/running root is not affected).
 - **Settings dialog**: validated with the same `ServerConfig::validate` rules as
   the daemon. A port field plus a multi-select address picker (always offering
   "全部网络 (0.0.0.0)" and "本地回环 (127.0.0.1)" and the addresses discovered on
   this machine), a directory picker button for the root, and the transfer
-  limits. Every selected address shares the single port field. The wildcard is
+  limits. The root field is empty when no directory has been selected and must
+  not be left empty when saving. Choosing a directory with 浏览… only fills the
+  field; the form then shows an inline reminder and the selection is applied and
+  remembered by 保存设置. (The recent-root menu's 选择… applies immediately
+  instead.) Every selected address shares the single port field. The wildcard is
   exclusive: selecting "全部网络" clears the specific addresses, selecting a
   specific address clears the wildcard, and the wildcard cannot be unchecked
   (unchecking the last specific address selects 全部网络 again), so at least one
-  bind address is always selected. **About** shows the version, feature summary
-  and third-party icon attribution.
+  bind address is always selected. **About** shows the
+  version, feature summary and third-party icon attribution.
 - **Automatic restart**: saving settings, or switching the root while the server
   is running, restarts it automatically when no transfer is active. With active
   transfers the new values are stored and a warning explains that a manual
@@ -207,14 +227,36 @@ that file. The panel is in Chinese and is organized as follows:
   configuration change.
 - **Activity log**: every transfer logs a start line and a completion or failure
   line (file, peer, size and duration), even when the start event was already
-  evicted from the bounded event ring.
+  evicted from the bounded event ring. Lines carry the local wall-clock time and
+  are single-line. The header filters the table by exact level
+  (全部 / INFO / WARN / ERROR); the filter only hides rows, so 全部 restores
+  them and the export stays complete. 导出 opens a native save dialog and writes
+  all retained entries (up to 500, oldest first) with the version, export time
+  and row count. Opening a picker is not logged; exported files contain local
+  paths and peer addresses and are only created by this explicit action.
 
 Recently used roots are kept (most recent first, at most 8) in
 `%APPDATA%\TftpdR\recent-dirs.txt` on Windows and
 `$XDG_CONFIG_HOME/tftpd-r/recent-dirs.txt` (or `~/.config/tftpd-r/`) elsewhere.
-The one-time first-run flag is stored next to it in `ui-state.txt`. Both files
-only store local UI state; write failures are ignored so the panel still works
-in read-only profiles.
+The root of the last successful start is stored next to it in `last-root.txt`,
+and the one-time first-run flag in `ui-state.txt`. If the per-user directory
+cannot be created (restricted profile or a low-integrity/sandboxed launch), the
+panel uses `.tftpd-r` beside `tftpd-r-gui.exe`, then `.tftpd-r` in the working
+directory, and logs a WARN naming the location. This is a Windows integrity-level
+restriction, not an installation or ACL problem: a low-integrity process cannot
+write the medium-integrity profile directory even though the account owns it.
+Code signing is unrelated: it affects SmartScreen reputation and
+WDAC/AppLocker allowlisting, not the right to write `%APPDATA%`. The state
+location is chosen **per process, not per executable path**: the same binary
+writes `%APPDATA%\TftpdR` when started from a normal Medium-integrity desktop
+and uses `.tftpd-r` when started from a low-integrity/sandboxed terminal.
+Moving the executable to the desktop does not change permissions by itself;
+launching it from Explorer does. The two locations are independent, so a root
+remembered in one is not visible in the other.
+Clearing the recent list does not forget `last-root.txt`. These files only store
+local UI state; the panel still works in a read-only profile, but a failed
+`last-root.txt` write is now reported as WARN (and a stored root that no longer
+exists is reported on the next launch) instead of being silently forgotten.
 
 Closing the window stops the embedded server and waits for active transfers,
 bounded by `shutdown_grace_secs`.
@@ -238,7 +280,7 @@ the daemon (`print-default-config` prints exactly that file). Fields:
 | --- | --- | --- |
 | `port` | `69` | UDP port shared by every listen address. On Linux port 69 needs root (`CAP_NET_BIND_SERVICE`); Windows normally allows it for a normal user unless the port is reserved. A process that may not bind it gets an actionable failure and must choose another port (for example `6969`); nothing changes automatically. |
 | `bind_addresses` | `["127.0.0.1"]` | One or more interface addresses (at most 16). `0.0.0.0`/`::` listen on every interface of that family; other addresses of the same family are then redundant and ignored. Multicast/broadcast are rejected. Keep loopback unless intentionally serving a LAN. |
-| `root_dir` | `tftp-root` | Must exist and be a directory. |
+| `root_dir` | `tftp-root` | Must exist and be a directory. This is the TOML/daemon default and the value used by `config.example.toml`; the GUI panel itself starts with no root selected until one is chosen. |
 | `allow_upload` | `false` | Must stay `false` in this release; `true` is a validation error. |
 | `overwrite` | `false` | Requires uploads; rejected in this release. |
 | `max_file_bytes` | 64 MiB | Larger files are refused. |

@@ -41,7 +41,7 @@ export component AppWindow inherits Window {
     in-out property <bool> primary-is-restart: false;
     in-out property <bool> stop-enabled: false;
     in-out property <string> bind-text: "127.0.0.1:6969";
-    in-out property <string> root-text: "tftp-root";
+    in-out property <string> root-text: "未指定根目录";
     in-out property <string> throughput-text: "—";
     in-out property <string> active-text: "0 个进行中";
 
@@ -57,15 +57,20 @@ export component AppWindow inherits Window {
     in-out property <[RecentDir]> recent-dirs: [];
     in-out property <[TransferRow]> transfers: [];
     in-out property <[LogRow]> logs: [];
+    // Activity-log display filter ("ALL"/"INFO"/"WARN"/"ERROR") and the number
+    // of retained entries before filtering (used for the export button state).
+    in-out property <string> log-filter: "ALL";
+    in-out property <int> log-total-count: 0;
 
     in-out property <string> settings-port: "69";
     in-out property <[AddressOption]> settings-address-options: [];
     in-out property <string> settings-bind-summary: "";
-    in-out property <string> settings-root: "tftp-root";
+    in-out property <string> settings-root: "";
     in-out property <string> settings-block-size: "512";
     in-out property <string> settings-timeout: "3";
     in-out property <string> settings-max-sessions: "16";
     in-out property <string> settings-error: "";
+    in-out property <string> settings-hint: "";
 
     callback primary-requested();
     callback stop-requested();
@@ -73,7 +78,10 @@ export component AppWindow inherits Window {
     callback cancel-settings();
     callback address-toggled(string);
     callback browse-root();
+    callback browse-root-menu();
     callback clear-logs();
+    callback export-logs();
+    callback log-filter-changed(string);
     callback recent-selected(string);
     callback clear-recent();
     callback minimize-requested();
@@ -116,7 +124,14 @@ export component AppWindow inherits Window {
             LogsPanel {
                 vertical-stretch: 4;
                 rows: root.logs;
+                total-count: root.log-total-count;
+                filter: root.log-filter;
                 clear-requested => { root.clear-logs(); }
+                export-requested => { root.export-logs(); }
+                filter-changed(level) => {
+                    root.log-filter = level;
+                    root.log-filter-changed(level);
+                }
             }
 
             TransfersPanel {
@@ -142,6 +157,10 @@ export component AppWindow inherits Window {
             root.recent-menu-open = false;
             root.recent-selected(path);
         }
+        browse-requested => {
+            root.recent-menu-open = false;
+            root.browse-root-menu();
+        }
         clear-requested => { root.clear-recent(); }
     }
 
@@ -155,6 +174,7 @@ export component AppWindow inherits Window {
         max-sessions <=> root.settings-max-sessions;
         picker-open <=> root.settings-picker-open;
         error-text: root.settings-error;
+        hint-text: root.settings-hint;
         apply-requested => { root.apply-settings(); }
         cancel-requested => { root.cancel-settings(); }
         address-toggled(address) => { root.address-toggled(address); }

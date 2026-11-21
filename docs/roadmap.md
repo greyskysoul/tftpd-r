@@ -14,9 +14,25 @@ Configuration, protocol, defaults and all other runtime behaviour are unchanged.
 `0.2.0` ships TOML configuration (`port` + `bind_addresses`, defaulting to
 `127.0.0.1:69`), the read-only RRQ server, a standalone daemon, and the embedded
 Slint panel. The 0.2.0 CI/release workflows completed for Windows/Linux x64 and
-native arm64 builds. The latest recorded local verification is 148 passing tests
+native arm64 builds. The latest recorded local verification is 175 passing tests
 on Windows 11 with Rust 1.100.0 / GNU; see [testing.md](testing.md) for the exact
 commands, CI evidence, manual checks, and gaps.
+
+Unreleased on top of `0.2.1`: the panel no longer shows a dummy `tftp-root` root
+(its status bar says `未指定根目录` and the settings field stays empty until a
+directory is selected) and it restores the root of the previous start from
+`last-root.txt` when no valid `config.toml` supplies one. The recent-root menu
+also has a 选择… button that applies a directory immediately and restarts an
+idle server, and the activity log now uses local wall-clock times, has an
+exact-level display filter and can be exported to a user-chosen text file.
+Picking a directory in the settings form now shows an inline "点击保存设置后生效"
+hint, and losing/ignoring the remembered root (write failure, stale entry,
+`config.toml` precedence) is logged instead of silently dropped. When the
+per-user configuration directory is not writable (restricted or low-integrity
+launch), the panel keeps its state in `.tftpd-r` beside the executable or in the
+working directory and logs the fallback.
+ADRs 0012/0013 record the decisions; the configuration format, daemon and
+protocol are unchanged.
 
 The configuration format remains **TOML**. An INI configuration at a fixed path
 was considered and dropped; do not reintroduce it. The GUI loads `config.toml`

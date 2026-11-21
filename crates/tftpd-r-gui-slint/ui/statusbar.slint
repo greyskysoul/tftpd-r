@@ -6,7 +6,7 @@ import { Theme } from "theme.slint";
 
 export component StatusBar inherits Rectangle {
     in property <string> bind-text: "—";
-    in property <string> root-text: "—";
+    in property <string> root-text: "未指定根目录";
     in property <string> detail-text: "";
 
     callback root-clicked();

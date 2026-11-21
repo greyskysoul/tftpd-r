@@ -22,13 +22,16 @@ export component SettingsDialog inherits Rectangle {
     in-out property <string> port: "69";
     in-out property <[AddressOption]> address-options: [];
     in-out property <string> bind-summary: "";
-    in-out property <string> root-dir: "tftp-root";
+    in-out property <string> root-dir: "";
     in-out property <string> block-size: "512";
     in-out property <string> timeout-secs: "3";
     in-out property <string> max-sessions: "16";
     in property <string> error-text: "";
+    in property <string> hint-text: "";
     in-out property <bool> picker-open: false;
-    property <length> card-height: root.error-text == "" ? 492px : 544px;
+    property <length> card-height: 492px
+        + (root.error-text == "" ? 0px : 52px)
+        + (root.hint-text == "" ? 0px : 26px);
 
     callback apply-requested();
     callback cancel-requested();
@@ -162,11 +165,22 @@ export component SettingsDialog inherits Rectangle {
                     cross-axis-alignment: center;
                     spacing: 10px;
                     Text { text: "根目录"; width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
-                    TextField { text <=> root.root-dir; placeholder: "tftp-root"; horizontal-stretch: 1; }
+                    TextField { text <=> root.root-dir; placeholder: "请选择根目录"; horizontal-stretch: 1; }
                     SmallButton {
                         label: "浏览…";
                         button-width: 70px;
                         clicked => { root.browse-requested(); }
+                    }
+                }
+
+                if root.hint-text != "" : HorizontalLayout {
+                    Rectangle { width: 130px; background: transparent; }
+                    Text {
+                        text: root.hint-text;
+                        color: Theme.text-muted;
+                        font-size: 10px;
+                        horizontal-stretch: 1;
+                        wrap: word-wrap;
                     }
                 }
 

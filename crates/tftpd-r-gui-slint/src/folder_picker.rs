@@ -14,7 +14,7 @@ use std::sync::mpsc::{self, Receiver};
 
 /// Windows `CREATE_NO_WINDOW`: the helper must not flash a console window.
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+pub(crate) const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Start the platform picker on a background thread.
 ///
@@ -51,27 +51,33 @@ fn platform_pick(initial: Option<&Path>) -> Option<std::process::Output> {
 
     // `SelectedPath` is read from an environment variable: interpolating the
     // path into the script would be an injection risk.
+    //
+    // The dialog is shown with a tiny, invisible, top-most owner form. Without
+    // an owner the helper process's dialog can be created behind the panel (or
+    // behind whatever window currently has the foreground); the top-most owner
+    // keeps it visible and activated.
     let script = concat!(
         "Add-Type -AssemblyName System.Windows.Forms; ",
+        "Add-Type -AssemblyName System.Drawing; ",
         "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; ",
         "$dialog.Description = '选择 TFTP 根目录'; ",
         "$dialog.ShowNewFolderButton = $true; ",
         "$initial = $env:TFTPD_R_INITIAL_DIR; ",
         "if ($initial -and (Test-Path -LiteralPath $initial)) { $dialog.SelectedPath = $initial }; ",
-        "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) ",
+        "$owner = New-Object System.Windows.Forms.Form; ",
+        "$owner.ShowInTaskbar = $false; ",
+        "$owner.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None; ",
+        "$owner.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen; ",
+        "$owner.Size = New-Object System.Drawing.Size(1, 1); ",
+        "$owner.Opacity = 0; ",
+        "$owner.TopMost = $true; ",
+        "$owner.Show(); ",
+        "$result = $dialog.ShowDialog($owner); ",
+        "$owner.Close(); ",
+        "if ($result -eq [System.Windows.Forms.DialogResult]::OK) ",
         "{ [Console]::Out.WriteLine($dialog.SelectedPath) }"
     );
-    let system_root = std::env::var_os("SystemRoot").map(PathBuf::from);
-    let program = system_root
-        .map(|root| {
-            root.join("System32")
-                .join("WindowsPowerShell")
-                .join("v1.0")
-                .join("powershell.exe")
-        })
-        .filter(|path| path.is_file())
-        .unwrap_or_else(|| PathBuf::from("powershell.exe"));
-    let mut command = std::process::Command::new(program);
+    let mut command = std::process::Command::new(powershell_program());
     command
         .args(["-NoLogo", "-NoProfile", "-STA", "-Command", script])
         .env(
@@ -80,6 +86,22 @@ fn platform_pick(initial: Option<&Path>) -> Option<std::process::Output> {
         )
         .creation_flags(CREATE_NO_WINDOW);
     command.output().ok()
+}
+
+/// Absolute path of the built-in Windows PowerShell, falling back to a PATH
+/// lookup when `SystemRoot` is unavailable.
+#[cfg(windows)]
+pub(crate) fn powershell_program() -> PathBuf {
+    std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .map(|root| {
+            root.join("System32")
+                .join("WindowsPowerShell")
+                .join("v1.0")
+                .join("powershell.exe")
+        })
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from("powershell.exe"))
 }
 
 #[cfg(not(windows))]

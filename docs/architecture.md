@@ -166,7 +166,10 @@ The GUI crate stays deliberately small:
 - The service status is a dedicated chip at the far left of the toolbar; the
   status bar keeps the read-only hint or the last error, the bound address(es)
   and the clickable root selector (last path component, full path in the
-  settings dialog and recent-directory menu).
+  settings dialog and recent-directory menu). A panel without a selected root
+  shows `未指定根目录`; there is no placeholder path. The recent-root drop-down
+  also offers 选择…, which opens the native folder dialog and applies the chosen
+  directory immediately.
 - The settings dialog edits `port`, the multi-select bind address list, the
   root, the block size, the timeout and the maximum session count. The address
   picker always offers `0.0.0.0` ("全部网络") and `127.0.0.1` ("本地回环"), merges
@@ -175,10 +178,26 @@ The GUI crate stays deliberately small:
   clears the other addresses, selecting another address clears it, and it cannot
   be unchecked (unchecking the last specific address selects it again), so the
   bind list is never empty. The root field has a 浏览… button backed by a native
-  directory dialog. When no valid `config.toml` exists, the panel preselects
-  `0.0.0.0`; the core and daemon defaults stay loopback. On the first start of a
-  profile without a valid configuration the dialog opens automatically, once
-  (see `src/user_state.rs`).
+  directory dialog. Picking a directory only edits the form (取消 must be able to
+  restore the active value), so the form shows an inline "点击“保存设置”后生效"
+  reminder; 保存设置 applies and remembers it. When no valid `config.toml` exists,
+  the panel preselects `0.0.0.0`; the core and daemon defaults stay loopback. On
+  the first start of a profile without a valid configuration the dialog opens
+  automatically, once (see `src/user_state.rs`).
+- The GUI uses an **empty root path** as its "no root selected" state (a
+  GUI-only convention; `ServerConfig::default()` and the daemon keep
+  `tftp-root`). The status bar then shows `未指定根目录` and the settings field is
+  empty; saving or starting validates the field before `ServerConfig::validate`,
+  opens the dialog and reports `请先选择根目录。`, so an empty path is never passed
+  to the server. On startup the root is chosen in this order: a valid
+  `config.toml` (`root_dir`), otherwise the remembered root of the previous
+  start (`last-root.txt`, only when it still is a directory), otherwise unset.
+  The remembered root is written on a successful start and on an explicit save
+  or recent-root selection; it is not part of the recent history, so 清空 does
+  not forget it. A failed write keeps the value for the current session but logs
+  a WARN (the next launch will not restore it); a stored entry that is no longer
+  a directory is reported as a WARN on the next launch, and a valid
+  `config.toml` that overrides it is reported too.
 - Saving the dialog, or selecting another recent root, compares the resulting
   `ServerConfig` with the configuration of the running server. When the server
   is running (`Starting`/`Running`) and no transfer is active, the change is
@@ -193,6 +212,19 @@ The GUI crate stays deliberately small:
   `slint::Window` methods (`set_minimized`, `set_maximized`) on the UI thread;
   close requests quit the event loop so the normal window-close shutdown path
   runs.
+- `src/logging.rs` owns the bounded in-memory activity log: at most 500 entries
+  (newest first), local wall-clock timestamps, `Info`/`Warn`/`Error` levels, an
+  exact-level display filter that never drops entries, single-line message
+  normalisation and the plain-text export format. `src/log_export.rs` runs the
+  native save dialog in a helper process on a background thread; the UI timer
+  writes the snapshot and reports success or an actionable failure. The log
+  table is rebuilt only when entries or the filter change, so the scroll
+  position survives the 200 ms refresh. Opening a folder/save picker is not
+  logged; only the chosen directory, export result and real errors are.
+- `src/folder_picker.rs` and `src/log_export.rs` share the fixed PowerShell
+  discovery for the Windows dialogs; both validate that the helper's output is
+  usable (an existing directory, or a non-empty save path) before the UI applies
+  it.
 - `src/netif.rs` discovers interface addresses on a background thread; the UI
   timer merges the result into the picker. It asks the platform runtime for the
   list (Windows PowerShell + .NET `NetworkInterface`, `hostname -I` on Unix) and
@@ -206,14 +238,24 @@ The GUI crate stays deliberately small:
   configured/running root is not history and is unaffected. It is local UI
   state, not part of `ServerConfig`, and write failures are ignored so a
   read-only profile still runs the panel.
-- `src/user_state.rs` locates the per-user state directory and stores the
-  one-time setup flag (`ui-state.txt`). The recent-root file uses the same
-  directory helper. Both files are advisory: a missing or unwritable profile
-  only means the panel asks for setup again / keeps no history.
-- Selecting a recent root while the server runs either restarts it
-  automatically (no active transfer) or updates the configuration for the next
-  manual restart; the status bar keeps showing the root of the running server.
-  The same rule applies to saving the settings dialog.
+- `src/user_state.rs` selects the state directory and stores the one-time setup
+  flag (`ui-state.txt`) and the remembered root (`last-root.txt`, one canonical
+  path written on a successful start or an explicit selection). The recent-root
+  file uses the same directory helper. The per-user configuration directory is
+  preferred; if it cannot be created (restricted profile or a
+  low-integrity/sandboxed launch), a portable `.tftpd-r` directory beside the
+  executable, then in the working directory, is used instead and the panel logs
+  a WARN. All three files are advisory: a missing or unwritable profile only
+  means the panel asks for setup again / keeps no history / forgets the last
+  root. The `last-root.txt` path is the exception to "write failures are
+  ignored": `LastRoot::record` returns a `Result` and the panel logs a WARN,
+  because silently losing the remembered root is indistinguishable from a
+  broken setting.
+- Selecting a recent root, or choosing 选择… in the same menu, while the server
+  runs either restarts it automatically (no active transfer) or updates the
+  configuration for the next manual restart; the status bar keeps showing the
+  root of the running server. The same rule applies to saving the settings
+  dialog.
 - The GUI is a windowed-subsystem binary on Windows (`windows_subsystem =
   "windows"`), so starting the panel does not allocate a console window.
 

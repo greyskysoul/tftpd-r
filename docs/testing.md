@@ -30,8 +30,8 @@ with network access; subsequent builds/tests ran with `--offline`.
 | --- | --- |
 | `cargo fmt --all -- --check` | Pass (exit 0) |
 | `cargo clippy --workspace --all-targets --offline -- -D warnings` | Pass (exit 0, no warnings) |
-| `cargo test --workspace --offline` | **148 passed, 0 failed** |
-| `cargo build --workspace --release --locked --offline` | Pass (exit 0, 54.50 s, 2026-11-21, `v0.2.1` with the embedded Windows icon resource). The first full size-profile build was 116.4 s. |
+| `cargo test --workspace --offline` | **175 passed, 0 failed** |
+| `cargo build --workspace --release --locked --offline` | Pass (exit 0, 55.42 s, 2026-11-21, with the embedded Windows icon resource, GUI root/log/state changes and the portable state fallback). The first full size-profile build was 116.4 s. |
 
 The workspace was renamed from `rust-tftpd`/`tftp-*` to TftpdR/`tftpd-r-*` on
 2026-11-20. The original `0.2.0` verification ran on 2026-11-20 (offline, GNU toolchain)
@@ -42,11 +42,14 @@ of the all-packet roundtrip test; generic and legacy unknown TOML key rejection
 share one config test; and the tautological comparison of two identical
 `include_str!` sources was replaced by assertions on the parsed default template.
 That left 145 test functions. The executable-icon work then added 3
-`tftpd-r-build-support` tests, so the current suite has **148 test functions**
-(3 build-support, 61 core unit, 29 RRQ integration, 9 daemon unit, 5 CLI
-integration, 40 GUI, 1 doctest). GUI coverage includes
-`log_model_stays_bounded_and_keeps_newest_entries_first`, a deterministic
-501-entry check for the 500-row newest-first cap. The current four
+`tftpd-r-build-support` tests. The GUI root-memory and activity-log changes added
+25 GUI tests, and the portable state-directory fallback added 2 more, so the
+current suite has **175 test functions** (3 build-support, 61 core unit, 29 RRQ
+integration, 9 daemon unit, 5 CLI integration, 67 GUI, 1 doctest). GUI coverage
+includes `log_model_stays_bounded_and_keeps_newest_entries_first`, a
+deterministic 501-entry check for the 500-row newest-first cap, and the
+state-directory selection tests (`the_first_writable_state_directory_is_used`,
+`a_blocked_state_directory_falls_back_to_the_portable_one`). The current
 workspace-check results are shown in the table above.
 
 The `0.2.0` release artifacts built on the verification machine measured
@@ -55,10 +58,11 @@ The `0.2.0` release artifacts built on the verification machine measured
 profile (ADR 0010) the same tree produced `tftpd-r.exe` **1,245,184 bytes
 (1.19 MiB)** and `tftpd-r-gui.exe` **8,734,208 bytes (8.33 MiB)** — 42.7 % and
 35.0 % smaller. Embedding the Windows icon resource (ADR 0011) adds 112,640
-bytes to each and gives the current measurements **1,357,824 bytes (1.29 MiB)**
-and **8,846,848 bytes (8.44 MiB)**. These figures are informational only; they
-are not an acceptance criterion and not a promise for other
-machines/toolchains.
+bytes to each. The GUI root-memory/log/state work and the later save hint,
+diagnostics and portable fallback bring the current measurements to
+**1,357,824 bytes (1.29 MiB)** for the daemon and **8,909,312 bytes (8.50 MiB)**
+for the GUI. These figures are informational only; they are not an acceptance
+criterion and not a promise for other machines/toolchains.
 
 The suite also runs on `ubuntu-latest` in CI. One core unit test
 (`prefix_confusion_is_rejected_by_component_comparison`) therefore has a
@@ -479,6 +483,73 @@ run.
   interactive MSVC GUI, Explorer's icon cache and shortcut rendering, other
   DPIs, and real/legacy TFTP clients remain unverified.
 
+### GUI root memory, activity log, picker visibility and portable state (2026-11-21, eighth–tenth runs)
+
+This section condenses the verification rounds after the 0.2.1 release. The
+automated commands above (`fmt`, `clippy`, `test`, release build) were executed
+for each round; only the latest numbers are retained in the checks table.
+
+- **Eighth run — unset root and remembered root (159 tests).** With an isolated
+  `APPDATA`, a fresh profile opened the settings dialog with an empty root field
+  and the status bar showed `未指定根目录`; no `tftp-root` appeared anywhere. A
+  seeded `last-root.txt` was restored into the settings form and the log, and a
+  start used that directory (`服务已就绪`). Starting with an empty root opened
+  the dialog, showed `请先选择根目录。`, and did not create `last-root.txt`.
+  Captures were `PrintWindow` images with synthetic window messages, not a real
+  mouse. ADR 0012.
+- **Ninth run — recent-root menu button and activity log (173 tests).** The
+  root drop-down showed `选择…`; clicking it closed the menu and started the
+  PowerShell folder dialog without adding a log row. From the menu, a directory
+  chosen while stopped updated the configuration/status bar and logged that it
+  would take effect on the next start. The `全部/INFO/WARN/ERROR` filters only
+  hid rows (entries retained), the filtered-empty text was
+  `当前筛选级别下没有日志。`, timestamps were local wall-clock, and a multi-line
+  TOML error was collapsed to one line. The native save dialog for 导出 opened
+  but was not completed. A synthetic three-click sequence did not reliably
+  deliver the third click. ADR 0012 revision/ADR 0013.
+- **Picker visibility follow-up.** A user reported that the folder picker no
+  longer appeared. The helper's `FolderBrowserDialog` **was created** (a visible
+  `#32770` window titled `浏览文件夹` existed) but could be placed behind the
+  panel or the current foreground window. The PowerShell helper now shows both
+  `FolderBrowserDialog` and the export `SaveFileDialog` with a 1×1, fully
+  transparent, top-most owner form. The production `pick_folder_async` probe put
+  `浏览文件夹` at the top of the visible Z-order and made it the foreground
+  window; the rebuilt release GUI confirmed the same from 设置 → 浏览…. The
+  already-running instance still used the old binary and had to be restarted.
+- **Tenth run — save reminder, diagnostics and portable fallback (175 tests).**
+  A manual test produced `拒绝访问 (os error 5)` when remembering the root. The
+  profile ACL granted `siris` full control, and a non-sandboxed probe created
+  `%APPDATA%\TftpdR\probe.txt` successfully. The GUI under test, however, ran
+  from this session at **Low mandatory integrity level** (no Explorer process),
+  so it could not create the medium-integrity profile directory. This is an
+  environment restriction, not an ACL defect.
+  - The settings form now shows an inline hint after a pick:
+    `已选择目录，点击“保存设置”后生效。` (the activity log is behind the modal).
+  - `LastRoot::record` returns `Result<bool, LastRootError>`; a failed write
+    keeps the in-memory value and logs a WARN, a changed value logs
+    `已记住根目录：…，下次启动将自动恢复。`, a stale entry logs
+    `上次使用的根目录已不可用，已忽略：…。`, and `config.toml` precedence is
+    stated in the log.
+  - `state_file` selects the first directory that can actually be created and
+    written: the per-user directory, then `.tftpd-r` beside the executable, then
+    `.tftpd-r` in the working directory. The fallback is logged as
+    `用户配置目录不可写；状态文件改用便携目录：…。`
+  - Verification: release GUI with the real (unwritable) `APPDATA` and a
+    prefilled `config.toml`; 设置 → 保存设置 wrote
+    `target\release\.tftpd-r\last-root.txt` and logged the fallback plus
+    `已记住根目录`; after deleting `config.toml`, the next launch logged
+    `已恢复上次使用的根目录：…` and showed `share`. Screenshots:
+    `fallback-1-saved.png`, `fallback-2-relaunch.png`. The test state was removed
+    afterwards so it cannot affect the operator's next launch. The running
+    manual-test instance (PID 19324) was still on the old binary and had to be
+    renamed out of the way before the rebuild; it must be closed and restarted
+    to load the fix.
+  - Not verified: the inline hint layout was compiled but not captured; the
+    native picker selection was reported by the user but not driven
+    end-to-end here; Unix and a read-only executable/working directory were not
+    tested; portable state is not migrated when the per-user directory becomes
+    writable again.
+
 ## Not verified (and therefore not claimed)
 - **External TFTP client interoperability** (tftp-hpa, Tftpd64, PXE firmware,
   U-Boot, etc.). Only the in-repo test client and the raw Python client were
@@ -495,10 +566,17 @@ run.
   low ports), so the "permission denied" hint was exercised only by unit tests,
   not by a real failed bind; the Linux root/`CAP_NET_BIND_SERVICE` path is
   untested.
-- **GUI helper features:** the native folder dialog was not interacted with, and
+- **GUI helper features:** the native folder dialog was not completed by an
+  automated check (the user reported that selecting works after the topmost-owner
+  fix, but the harness cannot drive the helper's piped stdout end-to-end), and
   address discovery was exercised only through the .NET API on this machine
   (not on Linux, not with VPN adapters appearing/disappearing, and not through
-  the `hostname -I` fallback).
+  the `hostname -I` fallback). The save/remember/restore path was verified by
+  saving a prefilled settings form and relaunching, including the portable
+  `.tftpd-r` fallback with a real unwritable `APPDATA`; the inline "not saved
+  yet" hint was compiled but not visually captured. The native save dialog for
+  log export opened but was not completed, so a file produced through the GUI
+  remains unverified; its formatting and write path are unit-tested.
 - **Release artifacts:** sizes and checksums are recorded for the GNU x64 local
   build and for the downloaded x64 MSVC `v0.2.1` archive; they are not a
   guarantee for other machines or toolchains. The x86_64 Linux archive and both

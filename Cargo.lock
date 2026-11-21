@@ -4193,6 +4193,7 @@ dependencies = [
 name = "tftpd-r-gui-slint"
 version = "0.2.1"
 dependencies = [
+ "chrono",
  "slint",
  "slint-build",
  "tempfile",

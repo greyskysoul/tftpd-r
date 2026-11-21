@@ -157,15 +157,26 @@ is network ACL/firewall or loopback-only binding, not the protocol implementatio
 | Event ring | `event_buffer` (default 1024; oldest dropped, counted) |
 | GUI log model | 500 rows |
 | GUI recent roots | 8 canonicalised paths in a per-user local state file |
+| GUI remembered root | 1 canonicalised path in a per-user local state file |
 | GUI first-run flag | one boolean in a per-user local state file |
 | Shutdown drain | `shutdown_grace_secs` (default 5) |
 
-The GUI writes two small local state files under the current user's profile:
-`recent-dirs.txt` (up to eight absolute directory paths) and `ui-state.txt` (one
-`setup-shown` flag). They contain no credentials and are treated as advisory:
-unreadable or unwritable state never prevents the panel from starting. Neither
-file is read by the TFTP server; the recent-root list does not affect the
-sandbox root unless the operator selects one of those directories.
+The GUI writes three small local state files under the current user's profile:
+`recent-dirs.txt` (up to eight absolute directory paths), `last-root.txt` (the
+root of the last successful start or explicit selection) and `ui-state.txt`
+(one `setup-shown` flag). If that profile directory cannot be created, the same
+files go to a portable `.tftpd-r` directory beside the executable, then in the
+working directory; the choice is logged. They contain no credentials and are
+treated as advisory: unreadable or unwritable state never prevents the panel
+from starting. None of these files is read by the TFTP server; the remembered
+and recent paths do not affect the sandbox root unless the operator selects one
+and starts the server. A valid `config.toml` root takes precedence over
+`last-root.txt`. A failed `last-root.txt` write is logged as a WARN (the current
+session keeps the value, the next launch will not restore it), and a stored path
+that no longer exists is reported on the next launch; neither message contains
+more than the local path that the operator already selected. A writable
+executable/working directory already permits control of the binary and
+`config.toml`, so the portable fallback adds no meaningful new trust boundary.
 
 ## Release panic strategy (fail-fast)
 
@@ -197,10 +208,20 @@ The desktop panel has no native interface-enumeration or file-dialog dependency
 - The root directory picker runs `FolderBrowserDialog` through the same
   PowerShell 5.1 binary, or `zenity`/`kdialog` on Unix, also on a background
   thread. The selected path is accepted only if it is an existing directory.
-- Neither helper is started with a shell, with user-controlled arguments or with
-  elevation. The initial directory is passed through `TFTPD_R_INITIAL_DIR` so a
-  path containing quotes cannot become script text. Helpers are started with
-  `CREATE_NO_WINDOW`, and the panel itself is a windowed-subsystem binary.
+- The activity-log export uses a `SaveFileDialog` (same PowerShell binary) or
+  `zenity --save`/`kdialog --getsavefilename`. The chosen path is only a
+  destination for the text the Rust side writes; it is never executed and does
+  not have to exist yet.
+- Both Windows dialogs are shown with a 1×1, fully transparent, top-most owner
+  form. This only affects window activation/Z-order: it keeps the native dialog
+  visible above the panel and other windows. It does not add privileges or
+  change the path validation described above.
+- None of these helpers is started with a shell, with user-controlled arguments
+  or with elevation. The initial directory is passed through
+  `TFTPD_R_INITIAL_DIR`, and the default log file name through
+  `TFTPD_R_LOG_NAME`, so a value containing quotes cannot become script text.
+  Helpers are started with `CREATE_NO_WINDOW`, and the panel itself is a
+  windowed-subsystem binary.
 
 A machine policy that blocks PowerShell or the dialog tools only degrades these
 convenience features; the panel and the server keep working with the two special
@@ -215,6 +236,14 @@ address entries and a manually typed root path.
   failed`). They never contain the local path or the underlying OS error text.
 - The daemon logs file names and error *kinds*; no credentials exist in the
   design, and configuration is not dumped to logs.
+- The GUI activity log is in memory only (500 rows, newest first). Messages are
+  collapsed to one line before storage, so a configuration/OS error with embedded
+  newlines cannot forge additional log rows. Opening a picker is not logged.
+  The panel writes no log file automatically: the 导出 button snapshots the
+  retained entries and writes them only after the operator chooses a path in the
+  native save dialog. That file can contain local root paths and peer addresses,
+  so it is treated as operator-created diagnostic data, not as an automatic audit
+  log.
 - `tracing` writes to stdout; redirect it to a file/service log as appropriate.
 
 ## Explicitly out of scope for this release

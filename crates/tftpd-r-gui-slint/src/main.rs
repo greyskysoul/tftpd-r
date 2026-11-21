@@ -12,18 +12,22 @@ slint::include_modules!();
 
 mod controller;
 mod folder_picker;
+mod log_export;
+mod logging;
 mod netif;
 mod recent;
 mod user_state;
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
+use chrono::Local;
 use slint::{Model, ModelRc, Timer, TimerMode, VecModel};
 use tftpd_r_core::config::display_path;
 use tftpd_r_core::events::{EventBus, EventKind, SessionId, TftpEvent};
@@ -31,10 +35,13 @@ use tftpd_r_core::server::ServerStatus;
 use tftpd_r_core::ServerConfig;
 
 use controller::EmbeddedController;
+use log_export::SaveChoice;
+use logging::{
+    export_file_name, format_export, write_export, LogEntry, LogFilter, LogLevel, MAX_LOG_ROWS,
+};
 use recent::RecentDirs;
-use user_state::SetupState;
+use user_state::{fallback_state_dir, LastRoot, SetupState};
 
-const MAX_LOG_ROWS: usize = 500;
 const UI_TICK: Duration = Duration::from_millis(200);
 
 /// Product icon pixels for the window and task-bar icon, generated from
@@ -76,14 +83,23 @@ struct AddressChoice {
 }
 
 struct UiState {
-    app_started: Instant,
     last_seq: u64,
     last_status_key: i32,
-    logs: Rc<VecModel<LogRow>>,
+    /// Retained activity-log entries, newest first.
+    logs: VecDeque<LogEntry>,
+    /// Which severity the log table shows (display-only filter).
+    log_filter: LogFilter,
+    /// Filtered rows bound to the Slint log table.
+    log_model: Rc<VecModel<LogRow>>,
+    /// The model must be rebuilt after new entries or a filter change.
+    logs_dirty: bool,
     transfers_model: Rc<VecModel<TransferRow>>,
     transfers: HashMap<SessionId, TransferState>,
     recent: RecentDirs,
     recent_model: Rc<VecModel<RecentDir>>,
+    /// Root directory of the last successful start, restored on the next
+    /// launch when no `config.toml` provides one.
+    last_root: LastRoot,
     config: ServerConfig,
     /// Root directory of the server instance that is starting or running.
     running_root: Option<PathBuf>,
@@ -98,24 +114,51 @@ struct UiState {
     discovered: Arc<StdMutex<Option<Vec<IpAddr>>>>,
     discovery_applied: bool,
     /// Pending native folder picker; polled from the UI timer.
-    folder_picker: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
+    folder_picker: Option<PendingFolderPick>,
+    /// Pending log-export save dialog; polled from the UI timer.
+    log_export: Option<PendingLogExport>,
+}
+
+/// Which part of the panel asked for the native folder dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FolderPickTarget {
+    /// The root field of the settings dialog: update the form only.
+    SettingsForm,
+    /// The recent-root menu: apply the directory and restart when idle.
+    Root,
+}
+
+/// A folder dialog running in a helper process.
+struct PendingFolderPick {
+    target: FolderPickTarget,
+    receiver: Receiver<Option<PathBuf>>,
+}
+
+/// A save-file dialog plus the log text snapshot it will write.
+struct PendingLogExport {
+    receiver: Receiver<SaveChoice>,
+    text: String,
 }
 
 impl UiState {
     fn new(
         config: ServerConfig,
         recent: RecentDirs,
+        last_root: LastRoot,
         discovered: Arc<StdMutex<Option<Vec<IpAddr>>>>,
     ) -> Self {
         Self {
-            app_started: Instant::now(),
             last_seq: 0,
             last_status_key: 0,
-            logs: Rc::new(VecModel::default()),
+            logs: VecDeque::new(),
+            log_filter: LogFilter::All,
+            log_model: Rc::new(VecModel::default()),
+            logs_dirty: false,
             transfers_model: Rc::new(VecModel::default()),
             transfers: HashMap::new(),
             recent,
             recent_model: Rc::new(VecModel::default()),
+            last_root,
             config,
             running_root: None,
             running_config: None,
@@ -125,21 +168,29 @@ impl UiState {
             discovered,
             discovery_applied: false,
             folder_picker: None,
+            log_export: None,
         }
     }
 
-    fn push_log(&mut self, level: &str, message: impl Into<String>) {
-        let message: String = message.into();
-        let row = LogRow {
-            time: format_clock(self.app_started.elapsed()).into(),
-            level: level.into(),
-            message: message.into(),
-        };
-        // Newest first: the newest event stays visible without scrolling.
-        self.logs.insert(0, row);
-        while self.logs.row_count() > MAX_LOG_ROWS {
-            self.logs.remove(self.logs.row_count() - 1);
-        }
+    fn push_log(&mut self, level: LogLevel, message: impl Into<String>) {
+        self.logs.push_front(LogEntry::now(level, message));
+        self.logs.truncate(MAX_LOG_ROWS);
+        self.logs_dirty = true;
+    }
+
+    /// Rebuild the filtered Slint rows after new entries or a filter change.
+    fn rebuild_log_model(&mut self) {
+        let rows: Vec<LogRow> = self
+            .logs
+            .iter()
+            .filter(|entry| self.log_filter.allows(entry.level))
+            .map(|entry| LogRow {
+                time: entry.display_time().into(),
+                level: entry.level.as_str().into(),
+                message: entry.message.clone().into(),
+            })
+            .collect();
+        self.log_model.set_vec(rows);
     }
 
     fn refresh_recent_model(&mut self) {
@@ -147,7 +198,11 @@ impl UiState {
             .running_root
             .clone()
             .unwrap_or_else(|| self.config.root_dir.clone());
-        let active_root = std::fs::canonicalize(&active_root).unwrap_or(active_root);
+        let active_root = if root_is_set(&active_root) {
+            std::fs::canonicalize(&active_root).unwrap_or(active_root)
+        } else {
+            active_root
+        };
         let rows: Vec<RecentDir> = self
             .recent
             .paths()
@@ -159,6 +214,31 @@ impl UiState {
             })
             .collect();
         self.recent_model.set_vec(rows);
+    }
+
+    /// Remember the selected root for the next launch.
+    ///
+    /// Only an existing directory is stored, so a later launch can preselect it
+    /// instead of falling back to "未指定根目录". This is local UI state, not
+    /// configuration: `config.toml` still wins when it exists.
+    fn remember_root(&mut self) {
+        if root_is_set(&self.config.root_dir) {
+            let root = self.config.root_dir.clone();
+            match self.last_root.record(&root) {
+                Ok(true) => self.push_log(
+                    LogLevel::Info,
+                    format!(
+                        "已记住根目录：{}，下次启动将自动恢复。",
+                        display_root_path(&root)
+                    ),
+                ),
+                Ok(false) => {}
+                Err(error) => self.push_log(
+                    LogLevel::Warn,
+                    format!("无法记住根目录：{error}；下次启动不会自动恢复。"),
+                ),
+            }
+        }
     }
 
     fn discovered_snapshot(&self) -> Option<Vec<IpAddr>> {
@@ -251,11 +331,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let smoke_test = std::env::args().any(|argument| argument == "--smoke-test");
     let initial = load_initial_config();
-    let initial_config = initial.config();
+    let last_root = LastRoot::load();
+    // Keep the unusable entry and the remembered path for the startup log
+    // before `last_root` moves into the UI state.
+    let stale_root = last_root.discarded().map(ToOwned::to_owned);
+    let remembered_root = last_root.path().map(Path::to_path_buf);
+    let initial_config = initial.config(last_root.path());
+    // Without a `config.toml`, the root comes either from the previous start or
+    // from no selection at all; log which one so the operator can tell.
+    let restored_root = (!initial.is_configured() && root_is_set(&initial_config.root_dir))
+        .then(|| display_root_path(&initial_config.root_dir));
     let mut recent = RecentDirs::load();
     // Make sure the configured root shows up in the drop-down even on first run
-    // or when it differs from the last used directory.
-    recent.record(&initial_config.root_dir);
+    // or when it differs from the last used directory. A panel without a root
+    // directory has nothing to show and must not create a history entry.
+    if root_is_set(&initial_config.root_dir) {
+        recent.record(&initial_config.root_dir);
+    }
 
     // Interface discovery starts a platform helper; it must not block the
     // window creation, so it runs on a background thread and the options are
@@ -267,7 +359,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.set_app_icon(app_icon());
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
 
-    let mut state = UiState::new(initial_config, recent, discovered);
+    let mut state = UiState::new(initial_config, recent, last_root, discovered);
+    app.set_log_filter(state.log_filter.key().into());
     apply_config_to_settings(&app, &mut state);
 
     // First start without a usable `config.toml`: open the settings dialog so
@@ -334,15 +427,54 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => {}
     }
     state.refresh_recent_model();
-    state.push_log("INFO", "TftpdR 面板已启动；默认只读 RRQ，上传已禁用。");
+    state.push_log(
+        LogLevel::Info,
+        format!(
+            "TftpdR {} 面板已启动：只读 RRQ，上传已禁用。",
+            env!("CARGO_PKG_VERSION")
+        ),
+    );
+    if let Some(dir) = fallback_state_dir() {
+        state.push_log(
+            LogLevel::Warn,
+            format!(
+                "用户配置目录不可写；状态文件改用便携目录：{}。",
+                display_path(dir)
+            ),
+        );
+    }
+    if let Some(root) = restored_root {
+        state.push_log(LogLevel::Info, format!("已恢复上次使用的根目录：{root}。"));
+    }
+    if let Some(stale) = stale_root {
+        state.push_log(
+            LogLevel::Warn,
+            format!(
+                "上次使用的根目录已不可用，已忽略：{}。",
+                display_path(Path::new(&stale))
+            ),
+        );
+    }
+    if initial.is_configured() {
+        state.push_log(LogLevel::Info, "已加载 config.toml。");
+        if remembered_root.is_some() {
+            state.push_log(
+                LogLevel::Info,
+                "config.toml 已提供根目录，因此未使用上次使用记录。",
+            );
+        }
+    }
     if let Some(error) = initial.error() {
         state.push_log(
-            "WARN",
-            format!("config.toml 不可用（{error}）；已使用默认值。"),
+            LogLevel::Warn,
+            format!("config.toml 不可用：{error}；已使用面板默认值。"),
         );
     }
     if show_setup {
-        state.push_log("INFO", "首次启动：请确认根目录和绑定地址，然后保存设置。");
+        state.push_log(
+            LogLevel::Info,
+            "首次启动：请选择根目录和绑定地址，然后保存设置。",
+        );
     }
     let state = Rc::new(RefCell::new(state));
     let controller = Rc::new(RefCell::new(EmbeddedController::new()?));
@@ -366,13 +498,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             drain_events(&events, &mut state);
             if let Some(error) = restart_error {
                 state.failed_message = Some(error.clone());
-                state.push_log("ERROR", format!("重启失败：{error}"));
+                state.push_log(LogLevel::Error, format!("自动重启失败：{error}"));
             }
             if state.apply_discovered() {
                 apply_address_options(&app, &state);
             }
-            if let Some(picked) = poll_folder_picker(&mut state) {
-                handle_folder_pick(&app, &mut state, picked);
+            if let Some((target, picked)) = poll_folder_picker(&mut state) {
+                match target {
+                    FolderPickTarget::SettingsForm => handle_folder_pick(&app, &mut state, picked),
+                    FolderPickTarget::Root => {
+                        handle_root_pick(&app, &controller, &mut state, picked)
+                    }
+                }
+            }
+            if let Some((choice, text)) = poll_log_export(&mut state) {
+                finish_log_export(&app, &mut state, choice, text);
             }
             sync_running_root(&mut state, &status);
             log_status_transition(&mut state, &status);
@@ -425,10 +565,21 @@ impl InitialConfig {
     /// LAN, and the server still only starts after the operator confirms the
     /// dialog and presses 启动. `ServerConfig::default()` and the daemon keep
     /// the conservative loopback default.
-    fn config(&self) -> ServerConfig {
+    ///
+    /// A root loaded from `config.toml` always wins. Without one, the directory
+    /// of the previous start (`remembered`) is restored when it still exists;
+    /// otherwise the root stays unset and the panel shows "未指定根目录"
+    /// instead of pretending that a `tftp-root` directory exists.
+    fn config(&self, remembered: Option<&Path>) -> ServerConfig {
         match self {
             Self::Loaded(config) => config.clone(),
-            Self::Missing | Self::Invalid(_) => gui_default_config(),
+            Self::Missing | Self::Invalid(_) => {
+                let mut config = gui_default_config();
+                if let Some(root) = remembered.filter(|path| path.is_dir()) {
+                    config.root_dir = root.to_path_buf();
+                }
+                config
+            }
         }
     }
 
@@ -447,10 +598,15 @@ impl InitialConfig {
 }
 
 /// Defaults of the panel's first-run form: safe server defaults plus the
-/// wildcard bind address. Core and daemon defaults are not touched.
+/// wildcard bind address and **no root directory**. Core and daemon defaults
+/// are not touched (`ServerConfig::default()` keeps its `tftp-root` path).
 fn gui_default_config() -> ServerConfig {
     ServerConfig {
         bind_addresses: vec![IpAddr::V4(Ipv4Addr::UNSPECIFIED)],
+        // The empty path is the GUI-only marker for "no root selected yet". It
+        // is never passed to the server: `read_config` rejects it before a
+        // start and asks the operator to choose a directory.
+        root_dir: PathBuf::new(),
         ..ServerConfig::default()
     }
 }
@@ -502,15 +658,26 @@ fn toggle_address_choice(options: &mut [AddressChoice], address: IpAddr) {
     }
 }
 
-fn poll_folder_picker(state: &mut UiState) -> Option<Option<PathBuf>> {
-    let receiver = state.folder_picker.as_ref()?;
-    let result = match receiver.try_recv() {
-        Ok(result) => Some(result),
-        Err(std::sync::mpsc::TryRecvError::Empty) => return None,
-        Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(None),
+fn poll_folder_picker(state: &mut UiState) -> Option<(FolderPickTarget, Option<PathBuf>)> {
+    let pending = state.folder_picker.as_ref()?;
+    let result = match pending.receiver.try_recv() {
+        Ok(result) => result,
+        Err(TryRecvError::Empty) => return None,
+        Err(TryRecvError::Disconnected) => None,
     };
+    let target = pending.target;
     state.folder_picker = None;
-    result
+    Some((target, result))
+}
+
+fn poll_log_export(state: &mut UiState) -> Option<(SaveChoice, String)> {
+    let choice = match state.log_export.as_ref()?.receiver.try_recv() {
+        Ok(choice) => choice,
+        Err(TryRecvError::Empty) => return None,
+        Err(TryRecvError::Disconnected) => SaveChoice::Unavailable,
+    };
+    let text = state.log_export.take()?.text;
+    Some((choice, text))
 }
 
 fn handle_folder_pick(app: &AppWindow, state: &mut UiState, picked: Option<PathBuf>) {
@@ -522,18 +689,115 @@ fn handle_folder_pick(app: &AppWindow, state: &mut UiState, picked: Option<PathB
             // the value that is currently in effect.
             let _ = state.recent.record(&path);
             app.set_settings_root(display.clone().into());
+            // The log is behind the modal dialog, so repeat the "not saved yet"
+            // hint in the form itself. Picking a directory only edits the form;
+            // 保存设置 (or the recent-root menu's 选择…) applies it.
+            app.set_settings_hint("已选择目录，点击“保存设置”后生效。".into());
             state.push_log(
-                "INFO",
-                format!("根目录已选择为 {display}；点击“保存设置”后生效。"),
+                LogLevel::Info,
+                format!("已选择根目录：{display}。点击“保存设置”后生效。"),
             );
         }
         Some(path) => {
             state.push_log(
-                "ERROR",
-                format!("所选路径不是目录：{}", display_path(&path)),
+                LogLevel::Error,
+                format!("所选路径不是目录：{}。", display_path(&path)),
             );
         }
         None => {}
+    }
+    refresh_models(app, state);
+}
+
+/// Apply a root directory picked from the recent-root menu.
+///
+/// This is the same operation as choosing an entry in the list: the running
+/// server is restarted when no transfer is active, otherwise the new root is
+/// only stored until the operator restarts manually.
+fn handle_root_pick(
+    app: &AppWindow,
+    controller: &Rc<RefCell<EmbeddedController>>,
+    state: &mut UiState,
+    picked: Option<PathBuf>,
+) {
+    match picked {
+        Some(path) if path.is_dir() => switch_root(app, controller, state, path),
+        Some(path) => {
+            state.push_log(
+                LogLevel::Error,
+                format!("无法切换根目录：{} 不存在或不是目录。", display_path(&path)),
+            );
+            refresh_models(app, state);
+        }
+        None => {}
+    }
+}
+
+/// Store `path` as the configured root, in the recent list and in the
+/// remembered-root file. Returns the display form used by the UI and log.
+fn store_root(state: &mut UiState, path: PathBuf) -> String {
+    state.config.root_dir = path.clone();
+    let _ = state.recent.record(&path);
+    state.remember_root();
+    display_root_path(&path)
+}
+
+/// Store `path` as the configured root, remember it and apply it to a running
+/// idle server. Shared by the recent-root list and its 选择… button.
+fn switch_root(
+    app: &AppWindow,
+    controller: &Rc<RefCell<EmbeddedController>>,
+    state: &mut UiState,
+    path: PathBuf,
+) {
+    let root_text = store_root(state, path);
+    app.set_settings_root(root_text.clone().into());
+    let config = state.config.clone();
+    match auto_restart_if_idle(controller, state, &config) {
+        RestartDisposition::Restarted => state.push_log(
+            LogLevel::Info,
+            format!("根目录已切换为 {root_text}；当前无进行中的传输，正在自动重启服务。"),
+        ),
+        RestartDisposition::Deferred { transfers } => state.push_log(
+            LogLevel::Warn,
+            format!(
+                "根目录已切换为 {root_text}；有 {transfers} 个进行中的传输，未自动重启，稍后请手动重启。"
+            ),
+        ),
+        RestartDisposition::Failed => state.push_log(
+            LogLevel::Error,
+            format!("根目录已切换为 {root_text}；自动重启失败，请手动重启。"),
+        ),
+        RestartDisposition::Unchanged => {
+            state.push_log(LogLevel::Info, format!("根目录已经是 {root_text}，无需重启。"));
+        }
+        RestartDisposition::NotRunning => {
+            state.push_log(
+                LogLevel::Info,
+                format!("根目录已设置为 {root_text}；将在下次启动时生效。"),
+            );
+        }
+    }
+    refresh_models(app, state);
+    let status = controller.borrow_mut().poll_status();
+    apply_status(app, &status, state);
+}
+
+/// Write an explicitly requested log export and report the result.
+fn finish_log_export(app: &AppWindow, state: &mut UiState, choice: SaveChoice, text: String) {
+    match choice {
+        SaveChoice::Path(path) => match write_export(&path, text.as_str()) {
+            Ok(()) => state.push_log(
+                LogLevel::Info,
+                format!("运行日志已导出：{}。", display_path(&path)),
+            ),
+            Err(error) => state.push_log(LogLevel::Error, format!("导出运行日志失败：{error}。")),
+        },
+        SaveChoice::Cancelled => {}
+        SaveChoice::Unavailable => state.push_log(
+            LogLevel::Error,
+            "导出运行日志失败：未找到可用的保存对话框（需要 PowerShell、zenity 或 kdialog）。",
+        ),
     }
     refresh_models(app, state);
 }
@@ -557,7 +821,10 @@ fn install_callbacks(
                 Ok(config) => config,
                 Err(message) => {
                     app.set_settings_error(message.clone().into());
-                    state.push_log("ERROR", format!("设置无效：{message}"));
+                    state.push_log(LogLevel::Error, format!("设置无效：{message}"));
+                    // The problematic value lives in the dialog; open it so the
+                    // operator can fix it (for example pick a root directory).
+                    app.set_settings_open(true);
                     refresh_models(&app, &mut state);
                     return;
                 }
@@ -576,6 +843,7 @@ fn install_callbacks(
                     state.failed_message = None;
                     state.running_root = Some(state.config.root_dir.clone());
                     state.running_config = Some(config);
+                    state.remember_root();
                     if running {
                         // The restart will pass through Stopping before the new
                         // server is ready; force the transition log for that.
@@ -587,16 +855,17 @@ fn install_callbacks(
                     let bind = state.config.bind_summary();
                     let root = display_root_path(&state.config.root_dir);
                     state.push_log(
-                        "INFO",
-                        format!("正在{verb}服务：监听 {bind}，根目录 {root}。"),
+                        LogLevel::Info,
+                        format!("正在{verb}服务：监听 {bind}，根目录：{root}。"),
                     );
                     app.set_settings_error("".into());
+                    app.set_settings_hint("".into());
                 }
                 Err(error) => {
                     let message = error.to_string();
                     state.failed_message = Some(message.clone());
                     state.push_log(
-                        "ERROR",
+                        LogLevel::Error,
                         format!(
                             "无法{}服务：{message}",
                             if running { "重启" } else { "启动" }
@@ -620,7 +889,7 @@ fn install_callbacks(
             };
             let mut state = state.borrow_mut();
             if controller.borrow_mut().stop() {
-                state.push_log("INFO", "正在停止服务；活动传输会按宽限期取消。");
+                state.push_log(LogLevel::Info, "正在停止服务；活动传输会按宽限期取消。");
             }
             refresh_models(&app, &mut state);
             let status = controller.borrow_mut().poll_status();
@@ -640,36 +909,38 @@ fn install_callbacks(
             match read_config(&app, &state.config) {
                 Ok(config) => {
                     state.config = config.clone();
+                    state.remember_root();
                     let root = state.config.root_dir.clone();
                     let _ = state.recent.record(&root);
                     match auto_restart_if_idle(&controller, &mut state, &config) {
                         RestartDisposition::Restarted => state.push_log(
-                            "INFO",
-                            "设置已保存；当前无进行中的传输，正在自动重启服务。",
+                            LogLevel::Info,
+                            "设置已保存：当前无进行中的传输，正在自动重启服务。",
                         ),
                         RestartDisposition::Deferred { transfers } => state.push_log(
-                            "WARN",
+                            LogLevel::Warn,
                             format!(
-                                "设置已保存；有 {transfers} 个进行中的传输，未自动重启，稍后请手动重启。"
+                                "设置已保存：有 {transfers} 个进行中的传输，未自动重启，稍后请手动重启。"
                             ),
                         ),
                         RestartDisposition::Failed => state.push_log(
-                            "ERROR",
+                            LogLevel::Error,
                             "设置已保存，但自动重启失败；请手动重启。",
                         ),
                         RestartDisposition::NotRunning => {
-                            state.push_log("INFO", "设置已保存；将在下次启动时生效。");
+                            state.push_log(LogLevel::Info, "设置已保存；将在下次启动时生效。");
                         }
                         RestartDisposition::Unchanged => {
-                            state.push_log("INFO", "设置未发生变化。");
+                            state.push_log(LogLevel::Info, "设置未发生变化。");
                         }
                     }
                     app.set_settings_error("".into());
+                    app.set_settings_hint("".into());
                     app.set_settings_open(false);
                 }
                 Err(message) => {
                     app.set_settings_error(message.clone().into());
-                    state.push_log("ERROR", format!("设置无效：{message}"));
+                    state.push_log(LogLevel::Error, format!("设置无效：{message}"));
                 }
             }
             refresh_models(&app, &mut state);
@@ -688,6 +959,7 @@ fn install_callbacks(
             let mut state = state.borrow_mut();
             apply_config_to_settings(&app, &mut state);
             app.set_settings_error("".into());
+            app.set_settings_hint("".into());
             app.set_settings_open(false);
         });
     }
@@ -710,8 +982,9 @@ fn install_callbacks(
             apply_address_options(&app, &state);
         });
     }
-    // Native folder picker for the root directory. The dialog runs in a helper
-    // process on a background thread; the result arrives through the timer.
+    // Native folder picker for the settings root field. The dialog runs in a
+    // helper process on a background thread; the result arrives through the
+    // timer. Opening a picker is internal UI activity and is not logged.
     {
         let weak = app.as_weak();
         let state = state.clone();
@@ -721,21 +994,81 @@ fn install_callbacks(
             };
             let mut state = state.borrow_mut();
             if state.folder_picker.is_some() {
-                state.push_log("INFO", "目录选择器已打开。");
                 return;
             }
             let typed = PathBuf::from(app.get_settings_root().trim());
             let initial = if typed.is_dir() {
                 Some(typed)
-            } else {
+            } else if root_is_set(&state.config.root_dir) && state.config.root_dir.is_dir() {
                 Some(state.config.root_dir.clone())
+            } else {
+                None
             };
-            state.folder_picker = Some(folder_picker::pick_folder_async(initial));
-            state.push_log("INFO", "已打开系统目录选择器…");
-            refresh_models(&app, &mut state);
+            state.folder_picker = Some(PendingFolderPick {
+                target: FolderPickTarget::SettingsForm,
+                receiver: folder_picker::pick_folder_async(initial),
+            });
         });
     }
-    // Clear the log view (the event ring is unaffected).
+    // Native folder picker opened from the recent-root menu. Unlike the form
+    // field above, the chosen directory is applied immediately (and restarts an
+    // idle running server) without passing through 保存设置.
+    {
+        let state = state.clone();
+        app.on_browse_root_menu(move || {
+            let mut state = state.borrow_mut();
+            if state.folder_picker.is_some() {
+                return;
+            }
+            let initial = if root_is_set(&state.config.root_dir) && state.config.root_dir.is_dir() {
+                Some(state.config.root_dir.clone())
+            } else {
+                None
+            };
+            state.folder_picker = Some(PendingFolderPick {
+                target: FolderPickTarget::Root,
+                receiver: folder_picker::pick_folder_async(initial),
+            });
+        });
+    }
+    // Filter the log table. The retained entries (and the export) are not
+    // changed; the choice only controls what is displayed.
+    {
+        let weak = app.as_weak();
+        let state = state.clone();
+        app.on_log_filter_changed(move |filter| {
+            let Some(app) = weak.upgrade() else {
+                return;
+            };
+            let mut state = state.borrow_mut();
+            let next = LogFilter::from_key(filter.as_str());
+            if next != state.log_filter {
+                state.log_filter = next;
+                state.logs_dirty = true;
+                refresh_models(&app, &mut state);
+            }
+            app.set_log_filter(state.log_filter.key().into());
+        });
+    }
+    // Export the retained log through a native save dialog. The snapshot is
+    // taken when the button is pressed; the result is polled by the UI timer.
+    {
+        let state = state.clone();
+        app.on_export_logs(move || {
+            let mut state = state.borrow_mut();
+            if state.log_export.is_some() {
+                return;
+            }
+            let now = Local::now().fixed_offset();
+            let text = format_export(&state.logs, env!("CARGO_PKG_VERSION"), now);
+            state.log_export = Some(PendingLogExport {
+                receiver: log_export::save_log_async(export_file_name(now)),
+                text,
+            });
+        });
+    }
+    // Clear the log view. Clearing is silent (a "cleared" row would reappear in
+    // the just-emptied panel); the filter choice is kept.
     {
         let weak = app.as_weak();
         let state = state.clone();
@@ -743,9 +1076,10 @@ fn install_callbacks(
             let Some(app) = weak.upgrade() else {
                 return;
             };
-            let state = state.borrow();
-            state.logs.set_vec(Vec::new());
-            app.set_logs(ModelRc::from(state.logs.clone()));
+            let mut state = state.borrow_mut();
+            state.logs.clear();
+            state.logs_dirty = true;
+            refresh_models(&app, &mut state);
         });
     }
     // Pick a different root directory from the recent list.
@@ -761,42 +1095,13 @@ fn install_callbacks(
             let path = PathBuf::from(path_text.as_str());
             if !path.is_dir() {
                 state.push_log(
-                    "ERROR",
+                    LogLevel::Error,
                     format!("无法切换根目录：{} 不存在或不是目录。", display_path(&path)),
                 );
                 refresh_models(&app, &mut state);
                 return;
             }
-            state.config.root_dir = path.clone();
-            let _ = state.recent.record(&path);
-            let root_text = display_root_path(&path);
-            app.set_settings_root(root_text.clone().into());
-            let config = state.config.clone();
-            match auto_restart_if_idle(&controller, &mut state, &config) {
-                RestartDisposition::Restarted => state.push_log(
-                    "INFO",
-                    format!("根目录已切换为 {root_text}；当前无进行中的传输，正在自动重启服务。"),
-                ),
-                RestartDisposition::Deferred { transfers } => state.push_log(
-                    "WARN",
-                    format!(
-                        "根目录已切换为 {root_text}；有 {transfers} 个进行中的传输，未自动重启，稍后请手动重启。"
-                    ),
-                ),
-                RestartDisposition::Failed => state.push_log(
-                    "ERROR",
-                    format!("根目录已切换为 {root_text}；自动重启失败，请手动重启。"),
-                ),
-                RestartDisposition::Unchanged => {
-                    state.push_log("INFO", format!("根目录已经是 {root_text}。"));
-                }
-                RestartDisposition::NotRunning => {
-                    state.push_log("INFO", format!("根目录已设置为 {root_text}。"));
-                }
-            }
-            refresh_models(&app, &mut state);
-            let status = controller.borrow_mut().poll_status();
-            apply_status(&app, &status, &state);
+            switch_root(&app, &controller, &mut state, path);
         });
     }
 
@@ -811,7 +1116,7 @@ fn install_callbacks(
             };
             let mut state = state.borrow_mut();
             state.recent.clear();
-            state.push_log("INFO", "最近使用的根目录已清空。");
+            state.push_log(LogLevel::Info, "最近使用的根目录已清空。");
             refresh_models(&app, &mut state);
         });
     }
@@ -866,17 +1171,14 @@ fn read_config(app: &AppWindow, fallback: &ServerConfig) -> Result<ServerConfig,
     if bind_addresses.is_empty() {
         return Err("请至少选择一个绑定地址。".to_string());
     }
-    let root_text = app.get_settings_root().trim().to_string();
-    if root_text.is_empty() {
-        return Err("根目录不能为空。".to_string());
-    }
+    let root_dir = root_from_text(&app.get_settings_root())?;
     let block_size: u16 = parse_setting(&app.get_settings_block_size(), "最大块大小")?;
     let timeout_secs: u64 = parse_setting(&app.get_settings_timeout(), "超时")?;
     let max_sessions: usize = parse_setting(&app.get_settings_max_sessions(), "最大并发会话")?;
     let config = ServerConfig {
         port,
         bind_addresses,
-        root_dir: PathBuf::from(root_text),
+        root_dir,
         block_size,
         timeout_secs,
         max_sessions,
@@ -888,6 +1190,19 @@ fn read_config(app: &AppWindow, fallback: &ServerConfig) -> Result<ServerConfig,
     Ok(config)
 }
 
+/// Root directory from the settings field.
+///
+/// An empty field means the operator has not selected a root directory at all;
+/// starting the server must ask for one instead of trying to resolve an empty
+/// path (or a dummy placeholder directory).
+fn root_from_text(text: &str) -> Result<PathBuf, String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err("请先选择根目录。".to_string());
+    }
+    Ok(PathBuf::from(text))
+}
+
 fn parse_setting<T: std::str::FromStr>(text: &str, label: &str) -> Result<T, String> {
     let text = text.trim();
     text.parse::<T>()
@@ -897,7 +1212,8 @@ fn parse_setting<T: std::str::FromStr>(text: &str, label: &str) -> Result<T, Str
 fn apply_config_to_settings(app: &AppWindow, state: &mut UiState) {
     let config = state.config.clone();
     app.set_settings_port(config.port.to_string().into());
-    app.set_settings_root(config.display_root().into());
+    // No root selected means an empty field, never the core default path.
+    app.set_settings_root(display_root_or_empty(&config.root_dir).into());
     app.set_settings_block_size(config.block_size.to_string().into());
     app.set_settings_timeout(config.timeout_secs.to_string().into());
     app.set_settings_max_sessions(config.max_sessions.to_string().into());
@@ -960,16 +1276,17 @@ fn apply_status(app: &AppWindow, status: &ServerStatus, state: &UiState) {
         _ => state.config.bind_summary(),
     };
     // The status bar only shows the last directory name; the full path stays in
-    // the settings dialog, the log and the recent-directory menu.
+    // the settings dialog, the log and the recent-directory menu. A panel
+    // without a root directory says so instead of showing a placeholder path.
     let root = match status {
         ServerStatus::Starting | ServerStatus::Running { .. } | ServerStatus::Stopping => {
             let path = state
                 .running_root
                 .as_deref()
                 .unwrap_or(&state.config.root_dir);
-            root_display_name(path)
+            root_status_text(path)
         }
-        _ => root_display_name(&state.config.root_dir),
+        _ => root_status_text(&state.config.root_dir),
     };
     app.set_status_text(text.into());
     app.set_status_kind(kind);
@@ -979,6 +1296,33 @@ fn apply_status(app: &AppWindow, status: &ServerStatus, state: &UiState) {
     app.set_stop_enabled(stop_enabled);
     app.set_bind_text(bind.into());
     app.set_root_text(root.into());
+}
+
+/// Whether a root directory has been selected.
+///
+/// The GUI uses an empty path as its "not selected" marker; the server core
+/// never sees it because starting requires a selected directory.
+fn root_is_set(path: &Path) -> bool {
+    !path.as_os_str().is_empty()
+}
+
+/// Text for the settings root field: empty when no directory is selected.
+fn display_root_or_empty(path: &Path) -> String {
+    if root_is_set(path) {
+        display_root_path(path)
+    } else {
+        String::new()
+    }
+}
+
+/// Text for the compact status bar: the leaf directory name, or an explicit
+/// "未指定根目录" instead of a dummy path when nothing is selected.
+fn root_status_text(path: &Path) -> String {
+    if root_is_set(path) {
+        root_display_name(path)
+    } else {
+        "未指定根目录".to_string()
+    }
 }
 
 /// Display a root directory as the absolute, canonical path when it exists.
@@ -1073,7 +1417,7 @@ fn auto_restart_if_idle(
             RestartDisposition::Restarted
         }
         Err(error) => {
-            state.push_log("ERROR", format!("自动重启失败：{error}"));
+            state.push_log(LogLevel::Error, format!("自动重启失败：{error}。"));
             RestartDisposition::Failed
         }
     }
@@ -1099,20 +1443,20 @@ fn log_status_transition(state: &mut UiState, status: &ServerStatus) {
                 .unwrap_or(&state.config.root_dir);
             let root = display_root_path(root);
             state.push_log(
-                "INFO",
+                LogLevel::Info,
                 format!(
-                    "服务已就绪：监听 {}，根目录 {root}。",
+                    "服务已就绪：监听 {}，根目录：{root}。",
                     summarize_addrs(local_addrs)
                 ),
             );
         }
         ServerStatus::Stopped => {
             if state.last_status_key != 0 {
-                state.push_log("INFO", "服务已停止。");
+                state.push_log(LogLevel::Info, "服务已停止。");
             }
         }
         ServerStatus::Failed { message } => {
-            state.push_log("ERROR", format!("服务异常：{message}"));
+            state.push_log(LogLevel::Error, format!("服务异常：{message}。"));
         }
         ServerStatus::Starting | ServerStatus::Stopping => {}
     }
@@ -1146,8 +1490,8 @@ fn handle_event(state: &mut UiState, event: TftpEvent) {
                 .total
                 .map_or_else(|| "大小未知".to_string(), format_bytes);
             state.push_log(
-                "INFO",
-                format!("开始传输：{}（{size}），来自 {}", event.file, event.peer),
+                LogLevel::Info,
+                format!("开始传输：{}（{size}），来自 {}。", event.file, event.peer),
             );
         }
         EventKind::Progress => {
@@ -1168,7 +1512,7 @@ fn handle_event(state: &mut UiState, event: TftpEvent) {
                 format!("，耗时 {:.1} 秒", elapsed.as_secs_f32())
             });
             state.push_log(
-                "INFO",
+                LogLevel::Info,
                 format!(
                     "传输完成：{file}（{}{duration}）。",
                     format_bytes(event.bytes)
@@ -1178,10 +1522,13 @@ fn handle_event(state: &mut UiState, event: TftpEvent) {
         EventKind::Failed { reason } => {
             let transfer = state.transfers.remove(&event.session_id);
             let file = transfer.map_or_else(|| event.file.clone(), |transfer| transfer.file);
-            state.push_log("WARN", format!("传输失败：{file}（{reason}）。"));
+            state.push_log(LogLevel::Warn, format!("传输失败：{file}（{reason}）。"));
         }
         EventKind::Rejected { reason } => {
-            state.push_log("WARN", format!("请求被拒绝：{}（{reason}）", event.file));
+            state.push_log(
+                LogLevel::Warn,
+                format!("请求被拒绝：{}（{reason}）。", event.file),
+            );
         }
     }
 }
@@ -1240,7 +1587,12 @@ fn refresh_models(app: &AppWindow, state: &mut UiState) {
 
     state.refresh_recent_model();
     app.set_transfers(ModelRc::from(state.transfers_model.clone()));
-    app.set_logs(ModelRc::from(state.logs.clone()));
+    if state.logs_dirty {
+        state.rebuild_log_model();
+        app.set_logs(ModelRc::from(state.log_model.clone()));
+        state.logs_dirty = false;
+    }
+    app.set_log_total_count(i32::try_from(state.logs.len()).unwrap_or(i32::MAX));
     app.set_recent_dirs(ModelRc::from(state.recent_model.clone()));
     app.set_active_text(format!("{} 个进行中", state.transfers.len()).into());
     app.set_throughput_text(throughput.into());
@@ -1260,16 +1612,6 @@ fn same_path(left: &Path, right: &Path) -> bool {
     } else {
         left == right
     }
-}
-
-fn format_clock(elapsed: Duration) -> String {
-    let total = elapsed.as_secs();
-    format!(
-        "{:02}:{:02}:{:02}",
-        total / 3600,
-        (total % 3600) / 60,
-        total % 60
-    )
 }
 
 fn format_bytes(bytes: u64) -> String {
@@ -1313,6 +1655,12 @@ mod tests {
         assert_eq!(config.port, 69);
         assert!(!config.allow_upload);
         assert!(!config.overwrite);
+        // The panel has no root directory before the operator selects one. The
+        // core/daemon default (`tftp-root`) must stay untouched.
+        assert_eq!(config.root_dir, PathBuf::new());
+        assert_eq!(root_status_text(&config.root_dir), "未指定根目录");
+        assert_eq!(display_root_or_empty(&config.root_dir), "");
+        assert_eq!(ServerConfig::default().root_dir, PathBuf::from("tftp-root"));
     }
 
     #[test]
@@ -1320,12 +1668,68 @@ mod tests {
         let missing = InitialConfig::Missing;
         assert!(!missing.is_configured());
         assert!(missing.error().is_none());
-        assert_eq!(missing.config().bind_addresses, vec![ip("0.0.0.0")]);
+        assert_eq!(missing.config(None).bind_addresses, vec![ip("0.0.0.0")]);
+        assert_eq!(missing.config(None).root_dir, PathBuf::new());
 
         let invalid = InitialConfig::Invalid("bad toml".to_string());
         assert!(!invalid.is_configured());
         assert_eq!(invalid.error(), Some("bad toml"));
-        assert_eq!(invalid.config().bind_addresses, vec![ip("0.0.0.0")]);
+        assert_eq!(invalid.config(None).bind_addresses, vec![ip("0.0.0.0")]);
+        assert_eq!(invalid.config(None).root_dir, PathBuf::new());
+    }
+
+    #[test]
+    fn a_remembered_root_is_restored_when_no_config_file_exists() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let share = dir.path().join("share");
+        std::fs::create_dir(&share).expect("share dir");
+        // `LastRoot` stores the canonical path, which on Windows carries the
+        // verbatim prefix; the panel keeps it and displays it without the prefix.
+        let remembered = std::fs::canonicalize(&share).expect("canonical");
+        let restored = InitialConfig::Missing.config(Some(&remembered));
+        assert_eq!(restored.root_dir, remembered);
+        // The restored root still shows its leaf name in the status bar.
+        assert_eq!(root_status_text(&restored.root_dir), "share");
+    }
+
+    #[test]
+    fn a_remembered_root_that_no_longer_exists_is_ignored() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let gone = dir.path().join("gone");
+        assert_eq!(
+            InitialConfig::Missing.config(Some(&gone)).root_dir,
+            PathBuf::new()
+        );
+        let file = dir.path().join("file.txt");
+        std::fs::write(&file, b"x").expect("write file");
+        assert_eq!(
+            InitialConfig::Missing.config(Some(&file)).root_dir,
+            PathBuf::new()
+        );
+    }
+
+    #[test]
+    fn a_loaded_config_root_wins_over_the_remembered_root() {
+        let configured = tempfile::tempdir().expect("configured dir");
+        let remembered = tempfile::tempdir().expect("remembered dir");
+        let config = ServerConfig {
+            root_dir: configured.path().to_path_buf(),
+            ..ServerConfig::default()
+        };
+        let loaded = InitialConfig::Loaded(config.clone());
+        assert_eq!(loaded.config(Some(remembered.path())), config);
+    }
+
+    #[test]
+    fn an_empty_root_field_is_rejected_with_an_actionable_message() {
+        assert_eq!(
+            root_from_text("  \r\n"),
+            Err("请先选择根目录。".to_string())
+        );
+        assert_eq!(
+            root_from_text("  C:/srv/tftp  "),
+            Ok(PathBuf::from("C:/srv/tftp"))
+        );
     }
 
     #[test]
@@ -1337,7 +1741,7 @@ mod tests {
         let loaded = InitialConfig::Loaded(config.clone());
         assert!(loaded.is_configured());
         assert!(loaded.error().is_none());
-        assert_eq!(loaded.config(), config);
+        assert_eq!(loaded.config(None), config);
     }
 
     #[test]
@@ -1407,6 +1811,7 @@ mod tests {
         let mut state = UiState::new(
             config.clone(),
             RecentDirs::empty_for_tests(),
+            LastRoot::empty_for_tests(),
             Arc::new(StdMutex::new(Some(Vec::new()))),
         );
         let controller = Rc::new(RefCell::new(EmbeddedController::new().expect("controller")));
@@ -1539,6 +1944,90 @@ mod tests {
     fn status_bar_root_shows_the_leaf_directory_name() {
         assert_eq!(root_display_name(Path::new("tftp-root")), "tftp-root");
         assert_eq!(root_display_name(Path::new("C:/srv/tftp")), "tftp");
+        assert_eq!(root_status_text(Path::new("C:/srv/tftp")), "tftp");
+        assert_eq!(root_status_text(Path::new("")), "未指定根目录");
+    }
+
+    #[test]
+    fn remembering_the_root_keeps_the_last_selected_directory() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let config = ServerConfig {
+            root_dir: dir.path().to_path_buf(),
+            ..ServerConfig::default()
+        };
+        let mut state = UiState::new(
+            config,
+            RecentDirs::empty_for_tests(),
+            LastRoot::empty_for_tests(),
+            Arc::new(StdMutex::new(Some(Vec::new()))),
+        );
+        state.remember_root();
+        let expected = std::fs::canonicalize(dir.path()).expect("canonical");
+        assert_eq!(state.last_root.path(), Some(expected.as_path()));
+
+        // An unset root must not overwrite the remembered directory.
+        state.config.root_dir = PathBuf::new();
+        state.remember_root();
+        assert_eq!(state.last_root.path(), Some(expected.as_path()));
+    }
+
+    #[test]
+    fn storing_a_root_updates_config_recent_history_and_memory() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let share = dir.path().join("share-b");
+        std::fs::create_dir(&share).expect("share dir");
+        let canonical = std::fs::canonicalize(&share).expect("canonical");
+
+        let mut state = UiState::new(
+            gui_default_config(),
+            RecentDirs::empty_for_tests(),
+            LastRoot::empty_for_tests(),
+            Arc::new(StdMutex::new(Some(Vec::new()))),
+        );
+        let display = store_root(&mut state, share.clone());
+        assert_eq!(state.config.root_dir, share);
+        assert_eq!(display, display_path(&canonical));
+        assert_eq!(state.recent.paths(), &[canonical.clone()][..]);
+        assert_eq!(state.last_root.path(), Some(canonical.as_path()));
+    }
+
+    #[test]
+    fn pending_dialogs_are_polled_with_their_target_and_snapshot() {
+        let mut state = UiState::new(
+            gui_default_config(),
+            RecentDirs::empty_for_tests(),
+            LastRoot::empty_for_tests(),
+            Arc::new(StdMutex::new(Some(Vec::new()))),
+        );
+        let (sender, receiver) = std::sync::mpsc::channel();
+        state.folder_picker = Some(PendingFolderPick {
+            target: FolderPickTarget::Root,
+            receiver,
+        });
+        assert!(poll_folder_picker(&mut state).is_none());
+        sender
+            .send(Some(PathBuf::from("C:/share")))
+            .expect("send pick");
+        let (target, picked) = poll_folder_picker(&mut state).expect("picker result");
+        assert_eq!(target, FolderPickTarget::Root);
+        assert_eq!(picked, Some(PathBuf::from("C:/share")));
+        assert!(state.folder_picker.is_none());
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        state.log_export = Some(PendingLogExport {
+            receiver,
+            text: "snapshot".to_string(),
+        });
+        assert!(poll_log_export(&mut state).is_none());
+        let path = PathBuf::from("C:/logs/tftpd-r-log.txt");
+        sender
+            .send(SaveChoice::Path(path.clone()))
+            .expect("send export");
+        assert_eq!(
+            poll_log_export(&mut state),
+            Some((SaveChoice::Path(path), "snapshot".to_string()))
+        );
+        assert!(state.log_export.is_none());
     }
 
     #[test]
@@ -1546,26 +2035,78 @@ mod tests {
         let mut state = UiState::new(
             gui_default_config(),
             RecentDirs::empty_for_tests(),
+            LastRoot::empty_for_tests(),
             Arc::new(StdMutex::new(Some(Vec::new()))),
         );
 
         for index in 0..=MAX_LOG_ROWS {
-            state.push_log("INFO", format!("entry-{index}"));
+            state.push_log(LogLevel::Info, format!("entry-{index}"));
         }
 
-        assert_eq!(state.logs.row_count(), MAX_LOG_ROWS);
-        assert_eq!(
-            state.logs.row_data(0).expect("newest row").message.as_str(),
-            format!("entry-{MAX_LOG_ROWS}")
-        );
+        assert_eq!(state.logs.len(), MAX_LOG_ROWS);
+        state.rebuild_log_model();
+        assert_eq!(state.log_model.row_count(), MAX_LOG_ROWS);
+        let newest = state.log_model.row_data(0).expect("newest row");
+        assert_eq!(newest.message.as_str(), format!("entry-{MAX_LOG_ROWS}"));
+        assert_eq!(newest.level.as_str(), "INFO");
+        assert_eq!(newest.time.len(), 8, "HH:MM:SS wall-clock label");
         assert_eq!(
             state
-                .logs
+                .log_model
                 .row_data(MAX_LOG_ROWS - 1)
                 .expect("oldest retained row")
                 .message
                 .as_str(),
             "entry-1"
+        );
+    }
+
+    #[test]
+    fn log_filter_only_hides_rows_and_never_drops_entries() {
+        let mut state = UiState::new(
+            gui_default_config(),
+            RecentDirs::empty_for_tests(),
+            LastRoot::empty_for_tests(),
+            Arc::new(StdMutex::new(Some(Vec::new()))),
+        );
+        state.push_log(LogLevel::Info, "info");
+        state.push_log(LogLevel::Warn, "warn");
+        state.push_log(LogLevel::Error, "error");
+        assert_eq!(state.logs.len(), 3);
+
+        state.log_filter = LogFilter::Warn;
+        state.rebuild_log_model();
+        assert_eq!(state.log_model.row_count(), 1);
+        let row = state.log_model.row_data(0).expect("filtered row");
+        assert_eq!(row.level.as_str(), "WARN");
+        assert_eq!(row.message.as_str(), "warn");
+        assert_eq!(state.logs.len(), 3, "the filter must not drop entries");
+
+        state.log_filter = LogFilter::Error;
+        state.rebuild_log_model();
+        assert_eq!(state.log_model.row_count(), 1);
+        assert_eq!(
+            state
+                .log_model
+                .row_data(0)
+                .expect("error row")
+                .message
+                .as_str(),
+            "error"
+        );
+
+        state.log_filter = LogFilter::All;
+        state.rebuild_log_model();
+        assert_eq!(state.log_model.row_count(), 3);
+        assert_eq!(
+            state
+                .log_model
+                .row_data(0)
+                .expect("newest row")
+                .message
+                .as_str(),
+            "error",
+            "rows stay newest-first"
         );
     }
 

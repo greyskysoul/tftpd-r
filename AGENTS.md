@@ -1,144 +1,121 @@
 # AGENTS.md — 后续开发指南
 
-> 面向后续 AI 编码代理与维护者。开始任何修改前，先阅读本文件、[README.md](README.md)、[docs/architecture.md](docs/architecture.md)、[docs/security.md](docs/security.md)、[docs/testing.md](docs/testing.md) 和 [docs/adr/](docs/adr/)。
+> 面向后续 AI 编码代理与维护者。开始修改前，先阅读本文件、[README.md](README.md)、[docs/architecture.md](docs/architecture.md)、[docs/security.md](docs/security.md)、[docs/testing.md](docs/testing.md) 和 [docs/adr/](docs/adr/)。
 >
-> **重要：** 仓库根目录的《Rust + Slint 无 WebView 依赖解耦式 TFTP 服务端架构设计方案.md》是**本地规划资料**，不是版本库内容。它被 `.git/info/exclude` 忽略，**禁止以任何方式提交进 git**（包括 `git add -f`、复制到 docs、或把其内容粘贴进其他受跟踪文件）。需要更新计划时，直接编辑该本地文件，不要提交。
+> **重要：** 仓库根目录的《Rust + Slint 无 WebView 依赖解耦式 TFTP 服务端架构设计方案.md》是**本地规划资料**，不是版本库内容。它被 `.git/info/exclude` 忽略，**禁止以任何方式提交进 git**（包括 `git add -f`、复制到 docs、或把内容粘贴进其他受跟踪文件）。需要更新计划时直接编辑该本地文件，不要提交。
 
 ## 1. 项目定位与当前状态
 
-纯 Rust 的**只读** TFTP（RFC 1350）服务端，Cargo Workspace 分为协议核心、无头 daemon 和 Slint GUI（另有一个仅构建期使用的 `tftpd-r-build-support`，不链接进产物）。GUI 采用 winit + 软件渲染器；协议核心不依赖 GUI、daemon 或 IPC。
-
-当前状态（2026-11-21，依据已记录验证）：
+纯 Rust 的**只读** TFTP（RFC 1350）服务端，Cargo Workspace 分为协议核心、无头 daemon 和 Slint GUI（另有仅构建期使用的 `tftpd-r-build-support`，不链接进产物）。GUI 使用 winit + 软件渲染器；协议核心不依赖 GUI、daemon 或 IPC。
 
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
-| Phase 0–5 | ✅ 已完成 | workspace、codec/沙箱、RRQ 引擎、daemon、GUI 面板重设计（无边框自定义标题栏与窗口控件、工具栏状态徽标、状态栏、日志/传输列表、设置/关于、最近根目录）、文档/ADR/CI 文件 |
-| Phase 6 目标机验证/发布收尾 | 🟡 部分完成 | [0.1.0](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.1.0)、[0.2.0](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.2.0) 与 [0.2.1](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.2.1) 已发布（Windows/Linux × x64/arm64 四目标原生构建）；Windows/Linux CI 门已通过；真实/老式客户端、LAN/防火墙、Linux GUI、RDP、IME、其他 DPI、发布归档在目标机运行与依赖审计仍待完成 |
-| Phase 7 IPC | ⏳ 未开始 | GUI 仅 Embedded 模式；无 named pipe / daemon 控制 |
-| Phase 8 WRQ 上传 | ⏳ 未开始 | 默认且唯一行为是只读；`allow_upload=true` 被配置校验拒绝 |
-| 0.2.0 R1/R2 | ✅ 已发布（2026-11-20） | 默认端口 69 + 非强制提示（ADR 0007）；`port` + `bind_addresses` 多监听、GUI 多选地址选择器与目录选择器（ADR 0008）；首次启动自动打开设置（每用户一次）、选择器「全部网络」独占且不可清空、「全部网络」为首次启动默认、最近根目录可清空、空闲时配置/根目录变更自动重启（ADR 0009）；配置格式破坏性变更，`bind_address` 已删除 |
-| release 体积优化（2026-11-21） | ✅ 已完成（仅 GNU x64 实测） | release profile 改为 `opt-level="z"` + fat LTO + `panic="abort"` + strip；GUI 12.81 → 8.33 MiB（-35.0%）、daemon 2.07 → 1.19 MiB（-42.7%）；当时148 tests、fmt/clippy、release 构建、GUI smoke、release daemon 端到端均通过；后续合并重复测试函数后为145项，加入 exe 图标构建测试后当前148项；MSVC/Linux/arm64 体积与发布归档未重测，CI/release 工作流未用新 profile 重跑（ADR 0010） |
-| Windows exe 图标（2026-11-21） | ✅ 已完成（GNU x64 与 v0.2.1 MSVC x64 产物实测） | 两个 exe 内嵌 `app-icon.ico` 的 `RT_GROUP_ICON`/`RT_ICON`（7 帧）；新增 build-time crate `tftpd-r-build-support`；MSVC 直接链接构建期生成的 `.res`，GNU 用 `windres` 转 COFF；GNU 构建各 +112,640 B；arm64 资源路径未运行（ADR 0011） |
-| 0.2.1 发布（2026-11-21） | ✅ 已发布 | tag `v0.2.1` 的 [release workflow 44882456726](https://github.com/greyskysoul/tftpd-r/actions/runs/44882456726) 全绿（MSVC/Linux 测试门 + 四目标构建 + 发布）；下载 x64 MSVC 归档，SHA-256 与 `SHA256SUMS` 一致；MSVC 两个 exe 均含 7 帧图标，`--version`/`--help`/`--smoke-test`/5,000 字节 daemon e2e 均通过；arm64 与 Linux 产物未运行 |
+| Phase 0–5 | ✅ 已完成 | workspace、codec/沙箱、RRQ 引擎、daemon、GUI 面板（无边框标题栏、工具栏、状态栏、日志/传输列表、设置/关于、最近根目录）、文档/ADR/CI |
+| Phase 6 目标机验证/发布收尾 | 🟡 部分完成 | 0.1.0、0.2.0、0.2.1 已发布（Windows/Linux × x64/arm64）；Windows/Linux CI 已通过；真实/老式客户端、LAN/防火墙、Linux GUI、RDP、IME、其他 DPI、目标机运行仍待完成 |
+| Phase 7 IPC | ⏳ 未开始 | GUI 仅 Embedded 模式，无 named pipe/daemon 控制 |
+| Phase 8 WRQ 上传 | ⏳ 未开始 | 只读是默认且唯一行为，`allow_upload=true` 被校验拒绝 |
+| 0.2.0 R1/R2 | ✅ 已发布（2026-11-20） | 默认端口 69（ADR 0007）；`port` + `bind_addresses` 多监听、GUI 多选地址与目录选择器（ADR 0008）；首次启动自动设置、空闲时自动重启（ADR 0009） |
+| release 体积优化 | ✅ 已完成（GNU x64） | `opt-level="z"` + fat LTO + `panic="abort"` + strip（ADR 0010） |
+| Windows exe 图标 | ✅ 已完成（GNU/MSVC x64） | `tftpd-r-build-support` 生成 `.res`；7 帧图标（ADR 0011） |
+| 0.2.1 发布 | ✅ 已发布 | release workflow 44882456726；MSVC/Linux 测试门与四目标构建全绿 |
+| GUI 根目录未指定/记忆 | ✅ 已实现（未发布） | 空根目录、`last-root.txt`、`config.toml` 优先（ADR 0012） |
+| 根目录菜单 + 日志 | ✅ 已实现（未发布） | 菜单「选择…」立即应用；日志本地时钟/单行/级别筛选/导出（ADR 0012 修订、ADR 0013） |
+| 保存提示/诊断/便携状态 | ✅ 已实现（2026-11-21） | 设置页内联提示；`LastRoot` 写入失败/失效/覆盖 WARN/INFO；per-user 目录不可写时回退 `.tftpd-r` |
 
-已验证环境：Windows 11（10.0.26300）+ Rust 1.100.0 `x86_64-pc-windows-gnu` + MinGW-w64 GCC 15.3 + Slint 1.19.0；CI 另在 `windows-latest`（MSVC x64）与 `ubuntu-latest`（GNU x64）跑通 fmt/clippy/test，并在原生 arm64 runner 上构建 arm64 产物。**未验证**：MSVC 交互式 GUI 与长期服务行为、Linux 与 arm64 产物的**运行**（CI 只对 x64 跑测试，arm64 仅编译）、GUI 在 Linux 桌面上的运行、真实/外部 TFTP 客户端互操作、Windows Service、RDP、69 端口权限、真实键盘/IME 输入、其他 DPI/语言下的字体渲染与无障碍。不要在文档或回复中把这些写成已通过。
-
-此前最近一次 GUI 人工验证结果（2026-11-20 第四轮，GUI 首次启动/地址选择/历史清空/空闲自动重启）：`cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`（**147 passed**：core 单元 63、RRQ UDP 集成 29、daemon 单元 10、daemon CLI 集成 5、GUI 单元 39、doctest 1）、`cargo build --workspace --release` 全部通过；隔离 `APPDATA` 启动 GUI 确认无 `config.toml` 时自动打开设置且默认选中「全部网络 (0.0.0.0)」，同一 profile 第二次启动不再弹窗；窗口消息点击验证选择器五种切换状态（选具体地址清空「全部网络」、可叠加多个具体地址、选「全部网络」清空其他、再次点击「全部网络」仍保持选中、取消最后一个具体地址回退到「全部网络」）；最近目录「清空」删除 `recent-dirs.txt` 并显示空状态；运行中切换根目录且无传输时自动重启，新根目录可下载 `two.txt`，旧根目录文件返回 file not found；有活跃传输时只记录 WARN 并保持旧根目录/传输不中断。[0.2.0 发布工作流](https://github.com/greyskysoul/tftpd-r/actions/runs/44719989555) 全绿（Windows/Linux 测试门 + 四目标原生构建 + GitHub Release 发布），四个归档的 GitHub SHA-256 digest 与 `SHA256SUMS` 一致；**未验证**：真实鼠标硬件（点击为窗口消息）、其他 DPI、真实/外部 TFTP 客户端、Linux GUI 运行、下载后重新执行 MSVC/arm64 归档。首次 `v0.2.0` tag 运行因 Linux clippy 把 `netif.rs` 的 Windows-only 辅助函数判为 dead code 而失败，修复后移动了 tag（失败运行未发布任何资产）。此前的 0.1.0 人工验收与图标/配色结果见 `docs/testing.md`。执行新改动后必须重新运行并更新真实数字。
-
-本轮（2026-11-21 release 体积优化）的变动与影响：
-
-- **构建配置**：[Cargo.toml](Cargo.toml#L45-L55) 的 `[profile.release]` 从 thin LTO + 默认优化改为 `opt-level = "z"`、`lto = "fat"`、`codegen-units = 1`、`panic = "abort"`、`strip = "symbols"`。没有改依赖、feature、UI、协议或手写源码；debug/test profile 保持默认 unwind。
-- **体积**：GNU x64 实测 GUI 13,430,272 B（12.81 MiB）→ 8,734,208 B（8.33 MiB），**-35.0%**；daemon 2,174,976 B（2.07 MiB）→ 1,245,184 B（1.19 MiB），**-42.7%**。分 profile 的对比表、字节数和百分比见 [ADR 0010](docs/adr/0010-size-first-release-profile.md) 与 [docs/testing.md](docs/testing.md)。
-- **行为影响**：`panic = "abort"` 是刻意的 fail-fast 取舍，release 中 Tokio 任务里的 panic 会终止进程而不是被捕获为 `JoinError`；该行为只影响 release 产物，debug/test 仍 unwind。若此取舍不可接受，可改回 `panic = "unwind"`（约 8.81 MiB / 1.36 MiB，仍 -31.2% / -34.3%），但必须先重测并同步更新 ADR 0010、`docs/testing.md` 和本节数字。
-- **构建时间**：新 profile 首次完整 release 构建约 116.4 s，旧 profile 记录为 42.46 s；fat LTO 也使增量重建变慢。CI/release 的时间预算需要关注。
-- **验证**：`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --offline -- -D warnings`、`cargo test --workspace --offline`（**148 passed**：core 63 + RRQ 29 + daemon 10 + daemon CLI 5 + GUI 40 + doctest 1）、`cargo build --workspace --release --locked --offline` 全部 exit 0；release GUI `--smoke-test` exit 0、stdout/stderr 为空；release daemon 用临时 `port = 0` 配置完成 5,000 字节 `/image.bin` 原样下载并 Ctrl-Break 以 exit 0 优雅退出；`print-default-config` 仍与 `config.example.toml` 一致。`-v` 构建日志确认 rustc 实际带有 `-C opt-level=z -C panic=abort -C lto=fat -C codegen-units=1 -C strip=symbols`。
-- **未覆盖/未验证**：只测了 GNU x64；MSVC、Linux、arm64 的体积和重新打包的发布归档未测；CI/release 工作流未用新 profile 重跑；没有 release 模式吞吐基准，`opt-level = "z"` 的 CPU 代价未量化；GUI 只做了 smoke，未重新做交互/视觉验收。
-- **文档影响**：新增 [ADR 0010](docs/adr/0010-size-first-release-profile.md)；更新 [README.md](README.md#L96-L105) 的 Build 段、[docs/security.md](docs/security.md#L170-L190) 的 panic 策略、[docs/testing.md](docs/testing.md) 的体积与验证记录，以及本文件 §3.5/§4.3/§7 的约束。
-- **后续要求**：Phase 6/release 收尾时用新 profile 跑 CI 和四目标构建，记录各平台体积/归档并重新执行 GUI/daemon 验收；在引入 Windows Service 或任何“进程不退出”假设前重新评估 `panic = "abort"`。不要为继续减体积引入 UPX、nightly `build-std`/`panic_immediate_abort` 或 fork Slint 后端而不更新 ADR。
-
-本轮（2026-11-21 exe 图标）的变动与影响：
-
-- **构建**：新增 workspace 成员 [`tftpd-r-build-support`](crates/tftpd-r-build-support/src/lib.rs)，只作为 `tftpd-r-daemon` 与 `tftpd-r-gui-slint` 的 build-dependency；两个 crate 的 `build.rs` 调用 `embed_windows_icon`，从 [`app-icon.ico`](crates/tftpd-r-gui-slint/ui/icons/app-icon.ico) 在 `OUT_DIR` 生成 `.res`，非 Windows 目标直接 no-op。MSVC 把 `.res` 交给 `link.exe`；GNU 用 `windres` 转成 `.rsrc` COFF 目标文件。没有提交生成的 `.res`/`.o`，没有新增运行时依赖，也没有新增 unsafe。
-- **体积**：GNU x64 实测两个 exe 各 +112,640 B：daemon 1,245,184 → **1,357,824 B（1.29 MiB）**，GUI 8,734,208 → **8,846,848 B（8.44 MiB）**。ADR 0010 的 profile 结论不变，绝对基线更新见 §4.3。
-- **验证**：`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --offline -- -D warnings`、`cargo test --workspace --offline`（**148 passed**：build-support 3 + core 61 + RRQ 29 + daemon 9 + daemon CLI 5 + GUI 40 + doctest 1）、`cargo build --workspace --release --locked --offline`（50.08 s）全部 exit 0；生成的 `.res` 与 `windres -O res` 对同一 `.rc` 的输出逐字节一致（112,368 B，SHA-256 `29ccb912…d6a1`）；debug/release 两个 exe 用 `LoadLibraryExW(LOAD_LIBRARY_AS_DATAFILE)` + `FindResourceW` 均找到 `RT_GROUP_ICON` 1 的 7 帧且每帧字节数匹配；`ExtractAssociatedIcon` 返回 32x32 的 dns 图标；release GUI `--smoke-test` exit 0 且 stdout/stderr 为空；release daemon 完成 5,000 字节 `/image.bin` 下载并 Ctrl-Break exit 0。
-- **未验证**：aarch64 资源路径（arm64 产物未运行）；Linux 无图标（预期 no-op）；Explorer 图标缓存、快捷方式图标与其他 DPI 未在目标机目视确认；GNU arm64 交叉 `windres` 未测。MSVC x64 路径已由 `v0.2.1` release workflow 的 MSVC 构建与下载归档实测（见下）。
-- **文档影响**：新增 [ADR 0011](docs/adr/0011-windows-executable-icon.md)；更新 [README.md](README.md)（Downloads/Requirements/Build/CRATE 表）、[docs/architecture.md](docs/architecture.md)（crate 边界）、[docs/testing.md](docs/testing.md)（第六/七轮验证、测试数、体积、未验证项）、[docs/adr/0010](docs/adr/0010-size-first-release-profile.md)（体积后记）、[`ui/icons/README.md`](crates/tftpd-r-gui-slint/ui/icons/README.md)、[.github/workflows/release.yml](.github/workflows/release.yml) 注释，以及本文件 §3.5/§4.3/§5/§7。
-- **后续要求**：在 arm64 目标机上构建并确认 `.res`/资源路径（MSVC x64 已由 v0.2.1 归档确认）；不要在 GNU 上绕过 `windres`，不要提交生成的 `.res`/`.o`；更换图标时同步更新 build-support 单测中固定的帧尺寸与字节数。
-
-`0.2.1` 发布（2026-11-21）：tag `v0.2.1` 触发 [release workflow 44882456726](https://github.com/greyskysoul/tftpd-r/actions/runs/44882456726)，MSVC/Linux 测试门与四目标构建全绿并发布 [GitHub Release](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.2.1)。下载 `tftpd-r-0.2.1-x86_64-pc-windows-msvc.zip`（5,111,579 B）：SHA-256 `32b4e58f…bf2f` 与 `SHA256SUMS`/GitHub digest 一致；`tftpd-r.exe` 1,193,984 B、`tftpd-r-gui.exe` 8,513,024 B；两个 MSVC exe 均含 `RT_GROUP_ICON` 1 的 7 帧，`--version` 为 0.2.1、GUI `--help`/`--smoke-test` exit 0、daemon 完成 5,000 字节 `/image.bin` 并 Ctrl-Break exit 0。Linux 与 arm64 归档未下载/运行，Explorer 图标缓存未目视确认。
-
-此前的完整验证结果（2026-11-20 第二轮，0.2.0 改动）：`cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`（**131 passed**：core 单元 63、RRQ UDP 集成 29、daemon 单元 10、daemon CLI 集成 5、GUI 单元 23、doctest 1）、`cargo build --workspace --release` 全部通过；多监听 daemon 以 `127.0.0.1` 与 `192.168.3.17` 的**同一临时端口**各下载 5000 字节（`/image.bin`）并 Ctrl-Break 优雅退出；GUI debug/release `--smoke-test` 退出码 0、stderr 为空，PE 子系统为 Windows GUI（daemon 仍为 console）；`PrintWindow` 截图确认状态栏根目录仅显示末级目录名、状态栏横线修复、设置对话框的新端口/多选地址/浏览按钮，以及地址选择器列出 `192.168.3.17` 与两个全局 IPv6 地址。进度条方向用合成传输行（`TFTPD_R_GUI_PREVIEW=transfer`）截图确认左侧起算；**未验证**：真实鼠标点击、原生目录对话框、GUI 中的绑定失败提示、真实多网卡切换、真实 GUI 传输在修复后的渲染、Linux 上的低端口权限路径。此前的 0.1.0 人工验收记录（真实 2 MiB 传输、窗口控件、最近根目录等）见 `docs/testing.md`。执行新改动后必须重新运行并更新真实数字。
+已验证环境：Windows 11（10.0.26300）+ Rust 1.100.0 `x86_64-pc-windows-gnu` + MinGW-w64 GCC 15.3 + Slint 1.19.0；CI 另在 `windows-latest`（MSVC x64）与 `ubuntu-latest`（GNU x64）跑 fmt/clippy/test，并在原生 arm64 runner 构建。**未验证**：MSVC 交互式 GUI/长期服务、Linux/arm64 产物运行、Linux 桌面 GUI、真实/外部 TFTP 客户端、Windows Service、RDP、69 端口权限、真实键盘/IME、其他 DPI/语言渲染与无障碍。不要把未验证项写成已通过。
 
 ## 2. 仓库地图
 
 ```text
 .
-├── Cargo.toml                     # workspace、共享依赖版本、lint 配置
+├── Cargo.toml                     # workspace、共享依赖、lint、release profile
 ├── Cargo.lock                     # 应用 workspace，必须提交
 ├── config.example.toml            # 唯一安全默认配置示例（daemon 内嵌同一份）
 ├── README.md
-├── AGENTS.md                      # 本文件
+├── AGENTS.md
 ├── docs/
 │   ├── architecture.md            # crate 边界、生命周期、数据流、线程模型
 │   ├── security.md                # 威胁模型、沙箱、残余风险
 │   ├── testing.md                 # 实际执行记录与未验证项
-│   ├── roadmap.md                 # 0.2.1 已发布项与后续未实现项
-│   └── adr/0001–0011              # 已接受的决策（IPC 延后、上传关闭、octet only、端口 69、多地址绑定、GUI 首次启动/自动重启、体积优先 release profile、exe 图标资源等）
+│   ├── roadmap.md                 # 已发布项与后续未实现项
+│   └── adr/0001–0013              # 已接受决策
 ├── crates/
-│   ├── tftpd-r-build-support/    # 构建期辅助：从 app-icon.ico 生成 Windows PE 图标资源，不链接进产物
-│   │   └── src/lib.rs
+│   ├── tftpd-r-build-support/    # 构建期图标资源，不链接进产物
 │   ├── tftpd-r-core/             # 无 GUI/daemon/IPC 依赖
 │   │   ├── src/{lib,config,error,events,filesystem,server,session}.rs
 │   │   ├── src/protocol/{mod,packet,codec,options}.rs
 │   │   └── tests/rrq.rs           # 真实 loopback UDP 集成测试
 │   ├── tftpd-r-daemon/           # CLI + TOML + tracing + 信号处理
 │   │   ├── src/{main,cli,config_file,logging,shutdown}.rs
-│   │   ├── build.rs               # 调用 build-support 嵌入 exe 图标
-│   │   └── tests/cli.rs           # 运行编译后的二进制
+│   │   ├── build.rs               # exe 图标
+│   │   └── tests/cli.rs
 │   └── tftpd-r-gui-slint/        # Slint 面板 + EmbeddedController
-│       ├── src/{main,controller,recent,netif,folder_picker,user_state}.rs
+│       ├── src/{main,controller,recent,netif,folder_picker,user_state,logging,log_export}.rs
 │       ├── ui/{app,titlebar,toolbar,statusbar,logs,transfers,settings,about,
 │       │       root-menu,widgets,theme,icons,models}.slint
-│       ├── ui/icons/                           # Material 图标来源、产品图标（SVG/PNG/ICO/RGBA）
-│       └── build.rs               # Slint 编译 + 调用 build-support 嵌入 exe 图标
-├── .github/workflows/ci.yml       # push/PR：fmt、clippy、test、release 构建、GUI 编译
-├── .github/workflows/release.yml  # v* tag：四目标原生构建并发布 GitHub Release
-├── .github/release-notes/         # 每个 tag 一个发布说明文件（<version>.md）
-└── （未跟踪）计划文档 .md          # 只用本地编辑，禁止提交
+│       ├── ui/icons/              # Material 图标来源、产品图标
+│       └── build.rs               # Slint 编译 + exe 图标
+├── .github/workflows/{ci,release}.yml
+├── .github/release-notes/
+└── （未跟踪）本地计划文档 .md      # 禁止提交
 ```
 
-依赖方向必须保持：`tftpd-r-core` ← `tftpd-r-daemon`；`tftpd-r-core` ← `tftpd-r-gui-slint`。`tftpd-r-build-support` 只作为两个二进制 crate 的 build-dependency，不参与运行时依赖，也不得被链接进产物。GUI 目前不依赖 daemon；若新增 IPC，DTO/客户端协议必须放在独立 crate（例如 `tftpd-r-control-protocol`），不要污染 `tftpd-r-core`。
+依赖方向保持：`tftpd-r-core` ← `tftpd-r-daemon`；`tftpd-r-core` ← `tftpd-r-gui-slint`。`tftpd-r-build-support` 只作为两个二进制 crate 的 build-dependency。GUI 不依赖 daemon；未来 IPC 的 DTO/协议放在独立 crate（如 `tftpd-r-control-protocol`），不要污染 core。
 
 ## 3. 不可破坏的契约
 
 ### 3.1 协议行为
 
-- 只服务 RFC 1350 **RRQ**；WRQ 返回 ERROR 2（Access violation，消息 "Uploads are disabled"），不得悄悄实现写入。
-- 仅 `octet`。`netascii`、`mail` 显式拒绝（ERROR 0 + 明确消息）；未知 mode 在 codec 层返回 `UnsupportedMode`，主监听端口回 ERROR 4。**绝不能把 netascii 静默当 octet。**
-- 每个会话使用独立 UDP socket/TID；只接受来自预期 peer（IP+端口）的包；其他来源回 ERROR 5，且每个 block 交换最多 8 次。
-- 初始请求在监听端口处理；来自同一 peer 的重复 RRQ 必须转发 `SessionSignal::Resend` 给已有会话，**不能新建第二个会话/TID**。
-- DATA/ACK 状态机：等待匹配 ACK；重复/过期 ACK 忽略；重传必须发送与上次完全相同的已编码包；重传次数受 `max_retries` 限制；总时长受 `max_transfer_duration_secs` 限制。
-- 最终块规则：payload < block size 即结束；若文件长度是块大小整数倍，必须发送零长度 DATA 终止块。块号 16 位回绕（65535 → 0）必须正确。
-- 选项：`blksize` 8..=65464 且不超过配置 cap；`timeout` 1..=255；`tsize` 返回文件大小；未知选项忽略；重复或非法已知选项回 ERROR 8。请求 datagram 上限 1024 字节，超长/畸形回 ERROR 4。
-- 客户端可见 ERROR 文本必须是固定、脱敏的常量；**不得包含本地路径、OS 原始错误或内部结构**。文件名进入事件/日志前必须 `sanitize_display_name`。
-- 服务端默认只读、默认绑定回环、默认不开放上传。任何默认值改动都需要 ADR 与安全评审。
+- 只服务 RFC 1350 **RRQ**；WRQ 返回 ERROR 2（"Uploads are disabled"），不得悄悄实现写入。
+- 仅 `octet`。`netascii`/`mail` 显式拒绝（ERROR 0 + 明确消息）；未知 mode 在 codec 层 `UnsupportedMode`，主监听端口回 ERROR 4。**不得把 netascii 静默当 octet。**
+- 每个会话独立 UDP socket/TID；只接受预期 peer（IP+端口）的包；其他来源回 ERROR 5，每个 block 交换最多 8 次。
+- 初始请求在监听端口处理；同一 peer 的重复 RRQ 必须 `SessionSignal::Resend` 给已有会话，**不能新建第二个会话/TID**。
+- DATA/ACK：等待匹配 ACK；重复/过期 ACK 忽略；重传必须发送与上次完全相同的已编码包；重传次数受 `max_retries`，总时长受 `max_transfer_duration_secs`。
+- 最终块规则：payload < block size 即结束；文件长度为块大小整数倍时必须发送零长度 DATA 终止块；块号 16 位回绕（65535 → 0）必须正确。
+- 选项：`blksize` 8..=65464 且不超过配置 cap；`timeout` 1..=255；`tsize` 返回大小；未知选项忽略；重复/非法已知选项回 ERROR 8。请求 datagram 上限 1024 字节，超长/畸形回 ERROR 4。
+- 客户端可见 ERROR 文本必须是固定、脱敏常量；**不得包含本地路径、OS 原始错误或内部结构**。文件名进入事件/日志前必须 `sanitize_display_name`。
+- 默认只读、默认绑定回环、默认不开放上传；任何默认值改动需要 ADR 与安全评审。
 
 ### 3.2 路径与文件系统沙箱
 
-实现核心在 [`crates/tftpd-r-core/src/filesystem.rs`](crates/tftpd-r-core/src/filesystem.rs)。必须保持以下不变量：
+实现核心在 [`crates/tftpd-r-core/src/filesystem.rs`](crates/tftpd-r-core/src/filesystem.rs)。必须保持：
 
-1. **老客户端根目录前缀兼容**：文件名前导的任意 `/` 或 `\` 必须被剥离，并相对配置根目录解析（`get /firmware.bin` → `<root>/firmware.bin`）。只剥离**前导**分隔符；`a//b`、尾随分隔符仍拒绝；仅由分隔符组成的 `/` 表示根目录本身，作为无效文件名拒绝（TFTP 不传目录）。
-2. 剥离后仍拒绝：`..`、`.`、空组件、盘符/`:`（同时阻断 NTFS ADS）、Windows 保留设备名（`CON`/`NUL`/`COM1`…）、尾随点/空格、`< > " | ? *`、控制字符和 NUL。
-3. 根目录在 `Sandbox::new` 时 canonicalize；逐组件 `symlink_metadata` 检查，拒绝任何 reparse point / symlink；只允许普通文件；大小上限在 open 前后都检查。
-4. open 之后再次 canonicalize，并按**路径组件**（不是字符串前缀）与 canonical root 比较；Windows 大小写不敏感。`starts_with("C:\\root")` 这类写法永远不算安全。
-5. 残余风险（TOCTOU、根目录内硬链接）已在 `docs/security.md` 记录；**不要声称沙箱绝对安全**。任何上传/写入路径都必须重新做设计、ADR、原子临时文件与安全测试。
-6. 相关测试：`root_prefixed_names_map_to_the_root`、`opens_root_prefixed_file_without_leading_slash_in_display_name`、`rejects_traversal_and_drive_paths`、`root_prefixed_filename_is_served`、`root_prefix_does_not_escape_the_sandbox`、symlink/reparse 测试。修改命名逻辑必须同时保留正反向用例。
+1. **老客户端根目录前缀兼容**：文件名前导的任意 `/` 或 `\` 被剥离后相对根目录解析（`get /firmware.bin` → `<root>/firmware.bin`）。只剥离**前导**分隔符；`a//b`、尾随分隔符仍拒绝；仅由分隔符组成的 `/` 表示根目录本身，作为无效文件名拒绝（TFTP 不传目录）。
+2. 剥离后仍拒绝：`..`、`.`、空组件、盘符/`:`（阻断 NTFS ADS）、Windows 保留设备名（`CON`/`NUL`/`COM1`…）、尾随点/空格、`< > " | ? *`、控制字符和 NUL。
+3. 根目录在 `Sandbox::new` 时 canonicalize；逐组件 `symlink_metadata` 检查，拒绝 reparse point/symlink；只允许普通文件；大小上限在 open 前后都检查。
+4. open 后再次 canonicalize，并按**路径组件**（不是字符串前缀）与 canonical root 比较；Windows 大小写不敏感。`starts_with("C:\\root")` 永远不算安全。
+5. 残余风险（TOCTOU、根目录内硬链接）见 [docs/security.md](docs/security.md)；**不要声称沙箱绝对安全**。上传/写入路径必须重新设计、ADR、原子临时文件与安全测试。
+6. 相关测试：`root_prefixed_names_map_to_the_root`、`opens_root_prefixed_file_without_leading_slash_in_display_name`、`rejects_traversal_and_drive_paths`、`root_prefixed_filename_is_served`、`root_prefix_does_not_escape_the_sandbox`、symlink/reparse。修改命名逻辑必须同时保留正反向用例。
 
-### 3.3 配置
+### 3.3 配置与 GUI 状态
 
 - `ServerConfig` 使用 serde `deny_unknown_fields` + 安全默认值；`validate()` 是 daemon、GUI 和测试共用的唯一规则来源。
-- `allow_upload=true`、`overwrite=true` 当前必须是**配置错误**（上传尚未实现，不能给运维错误暗示）。
-- 监听配置是 `port` + `bind_addresses`（`Vec<IpAddr>`，1..=16 个）。默认 `127.0.0.1:69`（Linux 需 root/CAP_NET_BIND_SERVICE，Windows 通常允许普通用户但端口可能被系统保留）；端口 0 仅用于测试/临时实例，首个成功监听的端口会被其余地址复用。重复地址去重；同族通配 `0.0.0.0`/`::` 折叠该族其他地址；多播/广播拒绝（ADR 0008）。绑定**全有或全无**：任一地址失败即放弃全部已绑定 socket 并返回分类错误，不得静默只服务部分地址。GUI 在没有有效 `config.toml` 时的表单默认选中 `0.0.0.0`（ADR 0009），但核心/daemon 的默认值仍是回环，且服务只有用户点击「启动」后才启动；不要把 GUI 表单默认写进 `ServerConfig::default()`。
-- 绑定特权端口失败必须给出可操作提示，**不得**静默回退、自动提权或改写配置（ADR 0007）。
-- GUI 的网卡枚举与目录选择通过固定绝对路径的 PowerShell/.NET（Unix 为 `hostname`/`zenity`）辅助进程完成，后台线程执行；不得引入 shell、用户可控参数、提权或手写 unsafe。辅助进程失败时必须降级为两个特殊地址/手动输入，而不是崩溃。
-- `root_dir` 必须存在且为目录；低端口权限按平台处理（Linux 需 root/CAP_NET_BIND_SERVICE；Windows 通常允许普通用户，但端口可能被保留），README/security 与 ADR 0007 的表述必须与此一致，不要笼统写成“Windows 需要管理员”。
+- `allow_upload=true`、`overwrite=true` 当前必须是**配置错误**（上传未实现，不能给运维错误暗示）。
+- 监听配置是 `port` + `bind_addresses`（1..=16 个）。默认 `127.0.0.1:69`（Linux 需 root/CAP_NET_BIND_SERVICE；Windows 低端口通常允许但可能保留）；端口 0 仅测试；重复地址去重；同族通配 `0.0.0.0`/`::` 折叠；多播/广播拒绝（ADR 0008）。绑定**全有或全无**，不得静默只服务部分地址。GUI 无有效 `config.toml` 时表单默认选中 `0.0.0.0`（ADR 0009），核心/daemon 默认仍是回环；不要把 GUI 表单默认写进 `ServerConfig::default()`。
+- GUI 根目录默认**未指定**（空 `PathBuf`，仅 GUI 内部约定）：状态栏「未指定根目录」、设置页留空、启动/保存提示「请先选择根目录。」。`last-root.txt` 记录上次成功启动或显式保存的根目录，启动时在无有效 `config.toml` 时恢复；`config.toml` 的 `root_dir` 永远优先。设置页「浏览…」只改表单，选中后必须在表单内显示「点击保存设置后生效」，不能只写进被模态框遮挡的日志；`last-root.txt` 写入失败、启动时失效条目、`config.toml` 覆盖记忆值都必须有可见日志。
+- 三个状态文件优先写入 per-user 配置目录（Windows `%APPDATA%\TftpdR`，Unix `$XDG_CONFIG_HOME/tftpd-r` 或 `~/.config/tftpd-r`）。该目录不可创建/不可写（受限 profile、Low 完整性、沙箱）时，依次回退到 exe 旁 `.tftpd-r`、工作目录 `.tftpd-r`，启动日志 WARN 说明实际目录；不得因 `%APPDATA%` 写入失败放弃根目录记忆/最近历史/首次启动标记。
+- 不要把空根目录写进 `ServerConfig::default()`/daemon；不要把 `tftp-root` 当作 GUI 占位值显示或写入（ADR 0012）。
+- 绑定特权端口失败必须给出可操作提示，**不得**静默回退、提权或改写配置（ADR 0007）。
+- GUI 网卡枚举与目录/保存对话框通过固定绝对路径的 PowerShell/.NET（Unix 为 `hostname`/`zenity`/`kdialog`）辅助进程完成，后台线程执行；不得引入 shell、用户可控参数、提权或手写 unsafe。辅助失败时必须降级或给出可操作错误，不得崩溃。
+- `root_dir` 必须存在且为目录；低端口权限按平台处理，README/security 与 ADR 0007 的表述必须一致，不要笼统写成“Windows 需要管理员”。
 - `config.example.toml` 由 daemon `include_str!` 内嵌，`print-default-config` 必须与文件完全一致；修改示例时同步测试。
 
-### 3.4 资源、事件与生命周期
+### 3.4 资源、事件与日志
 
-- 全局 `max_sessions` 信号量 + 每 IP 最多 8 个并发会话；请求大小、文件大小、重传次数、总时长、事件环、GUI 日志行数都有上限。新增资源必须有明确上限。
+- 全局 `max_sessions` 信号量 + 每 IP 最多 8 个并发会话；请求大小、文件大小、重传次数、总时长、事件环、GUI 日志行数都有上限；新增资源必须有明确上限。
 - `EventSink::emit` 必须短小、非阻塞、不得 panic；GUI 通过 `EventBus::drain_since(seq)` 轮询，不直接由 Tokio task 改 UI。
-- 生命周期：`Starting → Running { local_addrs } → Stopping → Stopped`（或 `Failed`）；每个监听地址一个 accept loop，peer 表/会话上限/会话 ID 全局共享，会话 socket 绑定该监听地址（非通配时）；`ServerHandle::stop()` 幂等，先取消全部 accept loop，再在 `shutdown_grace_secs` 内并行 drain，最后 abort 剩余任务并释放 socket/permit/文件。
-- GUI 的 `stop()` 必须异步/轮询，不能阻塞 UI 线程等待宽限期；窗口关闭后 `EmbeddedController::shutdown()` 负责最终清理。
-- GUI 的配置/根目录变更自动重启只在 `Starting`/`Running`、配置确实变化且 `state.transfers` 为空时发生；有传输时只保存并 WARN，不得中断传输或排队在传输结束后自动重启。`Stopping` 绝不能被变更改回启动。`poll_status` 在 handle 已被 `stop()` 取走后不得继续报告陈旧的 `Running`。
+- 生命周期：`Starting → Running { local_addrs } → Stopping → Stopped`（或 `Failed`）；每个监听地址一个 accept loop，peer 表/会话上限/会话 ID 全局共享，会话 socket 绑定该监听地址（非通配时）；`ServerHandle::stop()` 幂等，先取消 accept loop，再在 `shutdown_grace_secs` 内并行 drain，最后 abort 剩余任务并释放 socket/permit/文件。
+- GUI `stop()` 必须异步/轮询，不能阻塞 UI 线程等待宽限期；关闭窗口后 `EmbeddedController::shutdown()` 负责最终清理。
+- GUI 配置/根目录变更自动重启只在 `Starting`/`Running`、配置确实变化且 `state.transfers` 为空时发生；有传输时只保存并 WARN，不得中断传输或排队自动重启。`Stopping` 绝不能被变更改回启动。`poll_status` 在 handle 被 `stop()` 取走后不得继续报告陈旧的 `Running`。
+- GUI 活动日志只驻留内存（≤500 行，最新在前），时间用本地 `HH:MM:SS`；级别筛选只影响显示，不得删除条目；消息入库前必须折叠为单行；打开/取消目录选择器和保存对话框不得写日志；导出必须由用户显式点击并通过原生保存对话框选择路径，Rust 侧只写文本文件，不自动落盘。状态目录回退到便携 `.tftpd-r` 时必须在启动日志 WARN 并给出实际目录。详见 ADR 0013。
 
 ### 3.5 代码与依赖
 
-- 全 workspace `unsafe_code = "deny"`；手写代码禁止新增 `unsafe`。Slint 生成的代码带有 `#[allow(unsafe_code)]`，这是生成器的例外，不要借此在手写代码中放宽。
+- 全 workspace `unsafe_code = "deny"`；手写代码禁止新增 `unsafe`。Slint 生成代码的 `#[allow(unsafe_code)]` 是生成器例外，不要借此放宽手写代码。
 - 不新增无必要依赖；新增依赖需核对许可证、维护状态、MSRV、Windows 支持、features 与传递依赖，并提交更新后的 `Cargo.lock`。
-- 不引入 WebView；GUI 保持 Slint + software renderer 组合（除非有 ADR 和实测依据变更）。
-- release profile 采用体积优先：`opt-level = "z"`、`lto = "fat"`、`codegen-units = 1`、`panic = "abort"`、`strip = "symbols"`（ADR 0010）。release 中的 panic 会终止进程，而不是被 Tokio 任务捕获；debug/test profile 仍为 unwind。改动该 profile（恢复 unwind、换 `opt-level = 3`、UPX、nightly `build-std` 等）必须先重新测量并同步更新 ADR 与 `docs/testing.md`。
-- Windows exe 图标由 [`tftpd-r-build-support`](crates/tftpd-r-build-support/src/lib.rs) 在构建期从 `app-icon.ico` 生成 `.res`：MSVC 把 `.res` 作为链接输入，GNU 用 MinGW `windres` 转 COFF；非 Windows 目标 no-op。不要提交 `.res`/`.o` 生成物、不要手改生成内容；GNU 构建缺少 `windres` 时必须给出明确错误。更换图标时同步更新 build-support 单测中固定的帧尺寸/字节数。
+- 不引入 WebView；GUI 保持 Slint + software renderer（除非有 ADR 和实测依据）。
+- release profile 体积优先：`opt-level="z"`、`lto="fat"`、`codegen-units=1`、`panic="abort"`、`strip="symbols"`（ADR 0010）。release 中 panic 终止进程，debug/test 仍 unwind；改 profile 必须先重测并同步 ADR/`docs/testing.md`。
+- Windows exe 图标由 [`tftpd-r-build-support`](crates/tftpd-r-build-support/src/lib.rs) 从 `app-icon.ico` 生成 `.res`：MSVC 交给 `link.exe`，GNU 用 `windres` 转 COFF，非 Windows no-op。不要提交 `.res`/`.o` 生成物，不要手改生成内容；GNU 缺少 `windres` 必须明确报错。更换图标时同步更新 build-support 单测中的固定帧尺寸/字节数。
 - `Cargo.lock` 属于应用 workspace，必须提交。不要提交 `target/`、`.dsh-toolchain/`、`.bootstrap/`、本地计划文档。
 
 ## 4. 开发工作流
@@ -147,12 +124,12 @@
 
 1. `git status`，确认没有未提交/未检查的改动；不要覆盖用户工作。
 2. 阅读本文件、README、相关 ADR、`docs/security.md` 与代码；先画模块/调用链，再动手。
-3. 确认当前平台、Rust 版本、Slint/Tokio 版本；本仓库验证基线是 Rust 1.100.0（GNU）。MSVC/Linux 未验证，不要假设。
-4. 若 `.bootstrap/env.ps1` 存在（本会话的便携工具链），先 `Set-ExecutionPolicy -Scope Process Bypass -Force; . .\.bootstrap\env.ps1`，否则使用系统 Rust。Cargo 依赖在受限沙箱内可能因 Schannel 报 `SEC_E_NO_CREDENTIALS`；这属于环境限制，依赖已缓存时用 `--offline`，不要为它改项目代码。
+3. 确认平台、Rust、Slint/Tokio 版本；基线是 Rust 1.100.0（GNU）。MSVC/Linux 未验证，不要假设。
+4. 若 `.bootstrap/env.ps1` 存在，先 `Set-ExecutionPolicy -Scope Process Bypass -Force; . .\.bootstrap\env.ps1`，否则用系统 Rust。沙箱内 Cargo 可能因 Schannel 报 `SEC_E_NO_CREDENTIALS`；依赖已缓存时用 `--offline`，不要为环境限制改项目代码。
 
 ### 4.2 变更流程
 
-1. **先复现/先写测试**：bug 或行为变更应先有失败测试（单元或 loopback UDP 集成测试），再进行实现。
+1. **先复现/先写测试**：bug 或行为变更应先有失败测试（单元或 loopback UDP 集成），再实现。
 2. 改动尽量小、可审查；保持 crate 依赖方向。
 3. 同步更新测试；安全相关必须同时有正向和反向用例。
 4. 更新文档：行为/架构变化改 README、architecture、security、ADR；验证结果改 `docs/testing.md`；计划变化只编辑本地计划文档（不提交）。
@@ -167,9 +144,11 @@ cargo test --workspace
 cargo build --workspace --release
 ```
 
-当前自动化基线是 **148 tests passed**（build-support 3、core 单元 61、RRQ UDP 集成 29、daemon 单元 9、daemon CLI 集成 5、GUI 单元 40（控制器 5 + 最近目录 7 + 网卡枚举 4 + 目录选择 2 + 用户状态 4 + 地址模型/首次启动/自动重启/产品图标/日志上限 18）、doctest 1）。其中 build-support 的 3 项覆盖 ICO 解析（正常 7 帧、截断/非法/越界拒绝）与 `.res` 的 null 资源、`RT_ICON`/`RT_GROUP_ICON`、帧字节和对齐。本轮之前合并了纯 RRQ codec 的无选项报文断言、合并了通用/旧 bind_address 配置拒绝用例，并移除了与同一 `include_str!` 重复比较的 daemon 测试；原断言分别保留在合并测试、默认模板解析和 CLI 集成覆盖中。最新复验结果见 `docs/testing.md`。
+当前自动化基线是 **175 tests passed**：build-support 3、core 单元 61、RRQ UDP 集成 29、daemon 单元 9、daemon CLI 集成 5、GUI 单元 67（控制器 5 + 最近目录 7 + 网卡枚举 4 + 目录选择 2 + 用户状态 12 + 日志 9 + 保存对话框 2 + 根目录/地址模型/首次启动/自动重启/产品图标/日志模型/轮询 26）、doctest 1。
 
-release 体积基线（GNU x64，2026-11-21，含 112,640 B 的 exe 图标资源，ADR 0010/0011）：`target/release/tftpd-r.exe` **1,357,824 B（1.29 MiB）**、`target/release/tftpd-r-gui.exe` **8,846,848 B（8.44 MiB）**。`v0.2.1` 的 MSVC x64 归档（CI 构建，已下载校验）为 `tftpd-r.exe` **1,193,984 B**、`tftpd-r-gui.exe` **8,513,024 B**；GNU 与 MSVC 体积不可直接比较。换工具链/目标平台后必须重测；这不是对其他平台的承诺。
+其中 build-support 覆盖 ICO 解析（7 帧、截断/非法/越界拒绝）与 `.res` 的 null 资源、`RT_ICON`/`RT_GROUP_ICON`、帧字节与对齐；GUI 根目录相关 13 项覆盖 `LastRoot` 持久化/失效/只读降级、状态目录选择/便携回退、启动优先级（`config.toml` > 记忆根目录 > 未指定）、空根目录拒绝与「未指定根目录」；日志相关 14 项覆盖级别/筛选/单行化/500 行上限/导出格式与写文件/轮询目标。最新复验见 `docs/testing.md`。
+
+release 体积基线（GNU x64，2026-11-21，含 112,640 B 图标资源与 GUI 改动；ADR 0010/0011/0012/0013）：`target/release/tftpd-r.exe` **1,357,824 B（1.29 MiB）**、`target/release/tftpd-r-gui.exe` **8,909,312 B（8.50 MiB）**。最近一次增量 release 构建 55.42 s；首次完整 size-profile 构建约 116.4 s。`v0.2.1` 的 MSVC x64 归档为 daemon 1,193,984 B、GUI 8,513,024 B；GNU 与 MSVC 体积不可直接比较。换工具链/平台必须重测，这不是对其他平台的承诺。
 
 其他有用命令：
 
@@ -179,11 +158,11 @@ cargo run -p tftpd-r-daemon -- serve --config config.toml
 cargo run -p tftpd-r-gui-slint -- --smoke-test
 ```
 
-`.bootstrap/e2e_daemon.py`（若存在，git-ignored）会用原始 UDP 客户端以 `/image.bin` 形式做 daemon 端到端验证；不是交付物。
+`.bootstrap/e2e_daemon.py`（若存在，git-ignored）用原始 UDP 客户端做 daemon 端到端验证；不是交付物。
 
 ### 4.4 提交规则
 
-- **绝不提交计划文档**：它未跟踪且被 `.git/info/exclude` 忽略；不要 `git add -f`，不要把它复制进 `docs/` 或其他跟踪文件。
+- **绝不提交计划文档**：它未跟踪且被 `.git/info/exclude` 忽略；不要 `git add -f`，不要复制进 `docs/` 或其他受跟踪文件。
 - 不提交 `target/`、`.dsh-toolchain/`、`.bootstrap/`、日志和临时文件。
 - 提交信息说明行为变化、验证命令与结果；一个提交聚焦一个主题。
 - 历史重写/强推只在用户明确要求时进行；远程为 `origin`（GitHub），但仍应避免无谓改写。
@@ -194,52 +173,39 @@ cargo run -p tftpd-r-gui-slint -- --smoke-test
 - **路径沙箱**：`../`、`/../`、双分隔符、盘符、ADS、设备名、符号链接/reparse、大小写/前缀混淆、root 前缀正向与反向、大小限制。
 - **session/server**：重传、重复 ACK、错误 TID、重复 RRQ、零长度终止块、块号回绕、并发、取消/停止、超时耗尽、事件。
 - **daemon**：CLI 解析、配置错误退出码（0/1/2）、默认配置与示例一致、二进制冒烟。
-- **构建辅助**：`tftpd-r-build-support` 的 ICO 解析（正常 7 帧、截断/非法/越界/空帧拒绝）、`.res` 结构（null 资源头、`RT_ICON`/`RT_GROUP_ICON`、语言/内存标志、帧字节与 4 字节对齐）以及当前产品图标的固定尺寸/字节数；更换 ICO 必须同步断言。
-- **GUI**：控制器契约（start/stop/重复 start/无效配置/异步 restart/restart 失败上报/`stop()` 后不再报告 `Running`）、`recent.rs`（顺序、去重、上限、持久化、canonicalize、失效目录清理、清空后删除状态文件）、`user_state.rs`（首次启动标记的持久化与只读 profile 降级）、`netif.rs`（IP 解析/过滤/排序）、`folder_picker.rs`（空选择与非目录拒绝）、地址选择模型（两个特殊项恒定存在、选中但未发现的地址保留、摘要截断、`0.0.0.0` 独占/不可取消/最后一个地址回退）以及首次启动默认与自动重启判定（运行中且配置变化且无传输才重启；有传输只记录、不排队；`Stopping` 不复活）；事件洪泛、真实键盘/IME、真实网卡枚举、系统目录对话框、布局与字体只能靠目标机/人工验收，需在 `docs/testing.md` 如实标注。
-- 时间相关测试目前使用真实计时器（1 s 级别），避免引入随机 sleep；新增测试尽量确定性。
+- **构建辅助**：ICO 解析、`.res` 结构、当前产品图标固定尺寸/字节数；更换 ICO 必须同步断言。
+- **GUI**：控制器契约、`recent.rs`、`user_state.rs`（首次启动标记、`LastRoot`、状态目录选择/便携回退）、根目录启动优先级、空根目录拒绝与状态文本、`store_root`、日志格式/筛选/上限/导出、`log_export.rs`、对话框轮询、`netif.rs`、`folder_picker.rs`、地址选择模型、首次启动与自动重启判定。真实键盘/IME、真实网卡枚举、系统目录/保存对话框、布局与字体只能靠目标机/人工验收，需在 `docs/testing.md` 如实标注。
+- 时间相关测试目前使用真实计时器（1 s 级别），避免随机 sleep；新增测试尽量确定性。
 
 ## 6. 后续路线与优先级
 
-1. **0.2.0 需求（R1/R2 及 GUI 交互补充已在 0.2.0 发布；详见 [docs/roadmap.md](docs/roadmap.md)）**
-   - **R1 默认端口 69 ✅**：默认端口 69；权限不足时提示可改用非特权端口（如 6969），不强制、不回退、不提权、不改写配置（ADR 0007）。
-   - **R2 多选绑定地址 ✅**：`port` + `bind_addresses` 多监听；GUI 多选选择器自动导入网卡 IP，并始终提供「全部网络 (0.0.0.0)」与「本地回环 (127.0.0.1)」（ADR 0008）。绑定全有或全无，不做部分失败服务。
-   - **GUI 交互补充 ✅**：无有效配置的首次启动自动打开设置（每 profile 一次）并预选「全部网络」，「全部网络」在 picker 中独占且不可清空，最近根目录可清空；保存设置或切换根目录时，服务运行中且无传输则自动重启，否则只保存并提示手动重启（ADR 0009）。核心/daemon 的回环默认不变。
-   - **R3 已取消**：INI 配置与固定位置 `~/.tftpdr.ini` 的需求经确认撤销，配置格式保持 TOML；GUI 继续读取工作目录的 `config.toml`。不要再实现或重新引入 INI 支持。
-2. **Phase 6：目标机验证、测试补强与发布收尾**
-   - 先验证已发布只读产品：MSVC Release、Linux 桌面 GUI、可用目标机上的 arm64 运行、真实/老式 TFTP 客户端（含 `get /file`）、LAN/防火墙/TID 端口、69 端口权限、RDP（仅当列入支持范围）、GUI 中文/IME/真实鼠标/其他 DPI、关闭窗口资源释放。
-   - 核验发布归档和 SHA-256，运行可用目标上的下载产物；完成依赖/许可证审计、支持矩阵、打包及升级/回滚说明。
-   - 对 codec fuzz/property、事件洪泛、可控丢包测试按价值和确定性逐项补强；新增测试应针对明确不变量，不以测试数量为目标。所有结果写入 `docs/testing.md`，未做项继续标记未验证。
-   - 不在本阶段新增 IPC、上传、服务注册、自动提权或公网默认监听。
-3. **Phase 7：本机 IPC + GUI daemon 控制**
-   - 先写 ADR，明确 daemon/GUI 生命周期、endpoint、平台边界、授权模型和断线语义；首个切片先连接已运行的 daemon，不默认让 GUI 启动/托管 daemon 进程。
-   - 新建 `tftpd-r-control-protocol`（版本化 DTO、长度前缀 framing、请求 ID、明确最大消息、错误码）。Windows named pipe / Unix domain socket 必须通过本机 ACL/权限校验并拒绝远程客户端。
-   - 初始命令限于查询状态、订阅有界事件、对 daemon 已加载配置 start/stop；不得经 IPC 修改 `root_dir`、开放上传或提权。限制连接数、速率、在途请求和订阅数；实现断线重连与 GUI IPC controller。
-   - 覆盖越权、畸形/超长消息、未知版本、断连、重连、资源上限和 GUI 不阻塞测试。
-4. **Phase 8：可选 WRQ 上传**
-   - 默认及当前唯一行为继续只读。只有产品明确需要时，先更新 ADR 0005/0003 与威胁模型，再实现显式 opt-in；默认禁止覆盖。
-   - 临时文件独占创建与同目录原子提交；处理取消、超时、磁盘满、flush/rename 失败并清理临时文件；持续强制上传大小/时长/并发限制；重新审查路径竞态与平台语义。
-   - 增加 WRQ 状态机、路径安全、失败注入、已有文件保护、RFC/外部客户端互操作测试；只有通过安全评审后才开放配置和 GUI 控件。
-5. **CI/发布现状**：`.github/workflows/ci.yml` 已在公开仓库运行（Windows x64 + Linux x64）；发布由 `.github/workflows/release.yml` 在 `v*` tag 上构建并发布 Windows/Linux × x64/arm64 四个原生目标的归档。构建通过不等于目标机运行通过。
-6. **Windows Service**：独立后续工作，不要混入前台 daemon 生命周期；不得自动注册服务或提权。
+1. **Phase 6 目标机验证/发布收尾**：验证 MSVC Release、Linux 桌面 GUI、arm64 运行、真实/老式 TFTP 客户端（含 `get /file`）、LAN/防火墙/TID 端口、69 端口权限、RDP、GUI 中文/IME/真实鼠标/其他 DPI、关闭窗口资源释放；核验归档与 SHA-256；完成依赖/许可证审计、支持矩阵、打包及升级/回滚说明；按价值补 codec fuzz/property、事件洪泛、可控丢包测试。所有结果写入 `docs/testing.md`，未做项标记未验证。不在本阶段新增 IPC、上传、服务注册、自动提权或公网默认监听。
+2. **Phase 7 本机 IPC + GUI daemon 控制**：先写 ADR，明确生命周期、endpoint、平台边界、授权与断线语义；首个切片连接已运行的 daemon，不默认让 GUI 启动/托管 daemon。新建 `tftpd-r-control-protocol`（版本化 DTO、长度前缀 framing、请求 ID、最大消息、错误码）；Windows named pipe/Unix domain socket 必须校验本机 ACL/权限并拒绝远程客户端；初始命令限于查询状态、订阅有界事件、对已加载配置 start/stop；不得经 IPC 修改 `root_dir`、开放上传或提权；限制连接/速率/在途/订阅；覆盖越权、畸形/超长消息、未知版本、断连、重连与 GUI 不阻塞。
+3. **Phase 8 可选 WRQ 上传**：默认及当前唯一行为继续只读。只有明确需要时先更新 ADR 0005/0003 与威胁模型，再实现显式 opt-in；默认禁止覆盖；临时文件独占创建与同目录原子提交，处理取消/超时/磁盘满/flush/rename 失败并清理；持续限制大小/时长/并发；重新审查路径竞态；增加 WRQ 状态机、路径安全、失败注入、已有文件保护、互操作测试；通过安全评审后才开放配置和 GUI。
+4. **CI/发布现状**：CI 在 Windows x64 + Linux x64 跑 fmt/clippy/test；release workflow 在 `v*` tag 构建并发布 Windows/Linux × x64/arm64。构建通过不等于目标机运行通过。
+5. **Windows Service**：独立后续工作，不混入前台 daemon 生命周期；不得自动注册服务或提权。
 
-阶段映射和验收门见 [docs/roadmap.md](docs/roadmap.md)；实际命令、结果与未验证项见 [docs/testing.md](docs/testing.md)。
 ## 7. 常见错误（禁止）
 
 - 用 `canonicalize + starts_with` 或字符串前缀比较替代组件级沙箱。
-- 为兼容老客户端而放宽 `..`、盘符/`:`、设备名或 reparse point 检查；根目录前缀只允许“剥离前导分隔符”。
+- 为兼容老客户端放宽 `..`、盘符/`:`、设备名或 reparse point 检查；根目录前缀只允许“剥离前导分隔符”。
 - 静默把 `netascii` 当 `octet`，或对 WRQ 假成功。
-- 在客户端 ERROR/日志中输出本地绝对路径或 OS 原始错误。
+- 在客户端 ERROR/日志中输出本地绝对路径、OS 原始错误或内部结构。
 - 重复 RRQ 时新建会话；或对错误 TID 无限回 ERROR 5。
 - UI 线程同步等待 stop/grace；或让后台任务直接改 Slint 属性。
-- 自定义无边框标题栏时让 `WindowMoveArea` 覆盖窗口按钮（Windows 上按下按钮会同时开始拖动并把最大化窗口还原）；最小化/最大化/关闭必须走 `slint::Window` API（`set_minimized`/`set_maximized`/`quit_event_loop`），不要只依赖 Slint 的 `minimized`/`maximized` window property。
+- 自定义无边框标题栏时让 `WindowMoveArea` 覆盖窗口按钮；最小化/最大化/关闭必须走 `slint::Window` API（`set_minimized`/`set_maximized`/`quit_event_loop`），不要只依赖 Slint 的 `minimized`/`maximized` window property。
 - 无上限的事件/日志/会话/请求缓冲。
-- 在仍有进行中的传输时自动重启服务，或在传输结束后排队自动重启；配置变更应保存并提示手动重启（ADR 0009）。
-- 把 `Stopping`（用户明确停止）因配置变更改回启动，或在 `stop()` 取走 handle 后仍从 watch 通道报告陈旧的 `Running`。
-- 把 GUI 无配置时的「全部网络」表单默认写进 `ServerConfig::default()` 或 daemon 默认值，破坏核心/daemon 的回环默认。
-- 把 `slint_build` 的 `embed_resources` 改成 `EmbedResourcesKind::EmbedForSoftwareRenderer`：该模式会在构建期预烘焙字形，使全部中文文案与运行时日志文本渲染成空白（2026-11-20 实际踩到）。窗口图标走 `include_bytes!` + `Window.icon`（见 `src/main.rs` 的 `app_icon()`），不要为此开启 `image-default-formats` 或改用该嵌入模式。
+- 在仍有进行中的传输时自动重启，或在传输结束后排队自动重启；配置变更应保存并提示手动重启（ADR 0009）。
+- 把 `Stopping` 因配置变更改回启动，或在 `stop()` 取走 handle 后仍报告陈旧的 `Running`。
+- 把 GUI 无配置时的「全部网络」表单默认写进 `ServerConfig::default()` 或 daemon 默认值。
+- 在 GUI 未选择根目录时显示/记录 dummy `tftp-root`；`config.toml` 有效时用 `last-root.txt` 覆盖其 `root_dir`；用最近根目录列表代替 `last-root.txt`（「清空」不应忘记上次根目录，取消的浏览也不应被记为已选根目录）。
+- 把 `last-root.txt` 写入失败、启动时失效条目或 `config.toml` 覆盖记忆值做成静默；只把「选中目录后还要保存设置」写在日志里而不在设置表单内提示（日志被模态框遮挡）。
+- 因 per-user 配置目录不可写就放弃根目录记忆/最近历史/首次启动标记（必须先尝试 exe 旁、再尝试工作目录的便携 `.tftpd-r`）；不得把便携状态写到未经验证的可疑位置或不经日志说明。
+- 把日志级别筛选做成删除条目或影响导出；自动写日志文件/轮转；把「打开目录选择器/保存对话框」写入日志；允许带换行的日志消息破坏行高或导出格式；在日志导出中使用未经验证的 helper 输出路径。
+- 把 `slint_build` 的 `embed_resources` 改成 `EmbedResourcesKind::EmbedForSoftwareRenderer`（该模式会预烘焙字形，使中文文案/运行时日志空白）；窗口图标走 `include_bytes!` + `Window.icon`（见 `src/main.rs` 的 `app_icon()`），不要为此开启 `image-default-formats` 或改用该嵌入模式。
 - 未经 ADR 与安全审查新增 `unsafe`、上传、IPC、服务注册或公网默认监听。
-- 提交 `.res`/`.o` 等 exe 图标生成物、手改 `tftpd-r-build-support` 的输出，或在非 Windows 目标强行调用 `windres`；GNU 构建失败时不得静默跳过图标。
-- 未重新测量、未更新 ADR 0010 与 `docs/testing.md` 就改动 release profile（例如恢复 unwind、换 `opt-level = 3`），或为减体积引入 UPX、nightly `build-std`/`panic_immediate_abort`。
+- 提交 `.res`/`.o` 等图标生成物、手改 build-support 输出，或在非 Windows 目标强行调用 `windres`；GNU 构建失败时不得静默跳过图标。
+- 未重新测量、未更新 ADR 0010 与 `docs/testing.md` 就改 release profile（恢复 unwind、换 `opt-level=3` 等），或为减体积引入 UPX、nightly `build-std`/`panic_immediate_abort`。
 - 提交本地计划文档、便携工具链、构建产物；或在 CI/README 中宣称未验证的平台/客户端已通过。
 
 ## 8. 交付格式

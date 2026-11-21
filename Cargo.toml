@@ -16,6 +16,7 @@ version = "0.2.1"
 [workspace.dependencies]
 tftpd-r-build-support = { path = "crates/tftpd-r-build-support" }
 tftpd-r-core = { path = "crates/tftpd-r-core" }
+chrono = "0.4.45"
 tokio = { version = "1.54", features = ["rt", "rt-multi-thread", "net", "time", "sync", "fs", "io-util", "macros", "signal"] }
 tokio-util = { version = "0.7.20", features = ["rt"] }
 thiserror = "2.0"
