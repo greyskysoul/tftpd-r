@@ -37,7 +37,8 @@ use std::os::windows::process::CommandExt;
 use std::process::{Child, ChildStdin, Command, Stdio};
 #[cfg(windows)]
 use std::sync::{Arc, Mutex};
-#[cfg(windows)]
+// The worker thread exists on every platform: Windows runs the warm helper on
+// it, Unix runs the one-shot zenity/kdialog call there.
 use std::thread;
 #[cfg(windows)]
 use std::time::Duration;
