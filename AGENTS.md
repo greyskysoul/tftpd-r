@@ -11,16 +11,17 @@
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
 | Phase 0–5 | ✅ 已完成 | workspace、codec/沙箱、RRQ 引擎、daemon、GUI 面板（无边框标题栏、工具栏、状态栏、日志/传输列表、设置/关于、最近根目录）、文档/ADR/CI |
-| Phase 6 目标机验证/发布收尾 | 🟡 部分完成 | 0.1.0、0.2.0、0.2.1 已发布（Windows/Linux × x64/arm64）；Windows/Linux CI 已通过；真实/老式客户端、LAN/防火墙、Linux GUI、RDP、IME、其他 DPI、目标机运行仍待完成 |
+| Phase 6 目标机验证/发布收尾 | 🟡 部分完成 | 0.1.0、0.2.0、0.2.1、0.2.2 已发布（Windows/Linux × x64/arm64）；Windows/Linux CI 已通过；真实/老式客户端、LAN/防火墙、Linux GUI、RDP、IME、其他 DPI、目标机运行仍待完成 |
 | Phase 7 IPC | ⏳ 未开始 | GUI 仅 Embedded 模式，无 named pipe/daemon 控制 |
 | Phase 8 WRQ 上传 | ⏳ 未开始 | 只读是默认且唯一行为，`allow_upload=true` 被校验拒绝 |
 | 0.2.0 R1/R2 | ✅ 已发布（2026-11-20） | 默认端口 69（ADR 0007）；`port` + `bind_addresses` 多监听、GUI 多选地址与目录选择器（ADR 0008）；首次启动自动设置、空闲时自动重启（ADR 0009） |
 | release 体积优化 | ✅ 已完成（GNU x64） | `opt-level="z"` + fat LTO + `panic="abort"` + strip（ADR 0010） |
 | Windows exe 图标 | ✅ 已完成（GNU/MSVC x64） | `tftpd-r-build-support` 生成 `.res`；7 帧图标（ADR 0011） |
 | 0.2.1 发布 | ✅ 已发布 | release workflow 44882456726；MSVC/Linux 测试门与四目标构建全绿 |
-| GUI 根目录未指定/记忆 | ✅ 已实现（未发布） | 空根目录、`last-root.txt`、`config.toml` 优先（ADR 0012） |
-| 根目录菜单 + 日志 | ✅ 已实现（未发布） | 菜单「选择…」立即应用；日志本地时钟/单行/级别下拉筛选/导出（ADR 0012 修订、ADR 0013 及其 2026-11-22 更新） |
-| 保存提示/诊断/便携状态 | ✅ 已实现（2026-11-21） | 设置页内联提示；`LastRoot` 写入失败/失效/覆盖 WARN/INFO；per-user 目录不可写时回退 `.tftpd-r` |
+| 0.2.2 发布 | ✅ 已发布（2026-11-22） | release workflow 44976411968；测试门与四目标构建全绿；MSVC x64 归档 SHA-256 与 `SHA256SUMS`/GitHub digest 一致 |
+| GUI 根目录未指定/记忆 | ✅ 已发布（0.2.2） | 空根目录、`last-root.txt`、`config.toml` 优先（ADR 0012） |
+| 根目录菜单 + 日志 | ✅ 已发布（0.2.2） | 菜单「选择…」立即应用；日志本地时钟/单行/级别下拉筛选/导出（ADR 0012 修订、ADR 0013 及其 2026-11-22 更新） |
+| 保存提示/诊断/便携状态 | ✅ 已发布（0.2.2） | 设置页内联提示；`LastRoot` 写入失败/失效/覆盖 WARN/INFO；per-user 目录不可写时回退 `.tftpd-r` |
 
 已验证环境：Windows 11（10.0.26300）+ Rust 1.100.0 `x86_64-pc-windows-gnu` + MinGW-w64 GCC 15.3 + Slint 1.19.0；CI 另在 `windows-latest`（MSVC x64）与 `ubuntu-latest`（GNU x64）跑 fmt/clippy/test，并在原生 arm64 runner 构建。**未验证**：MSVC 交互式 GUI/长期服务、Linux/arm64 产物运行、Linux 桌面 GUI、真实/外部 TFTP 客户端、Windows Service、RDP、69 端口权限、真实键盘/IME、其他 DPI/语言渲染与无障碍。不要把未验证项写成已通过。
 
@@ -148,7 +149,7 @@ cargo build --workspace --release
 
 其中 build-support 覆盖 ICO 解析（7 帧、截断/非法/越界拒绝）与 `.res` 的 null 资源、`RT_ICON`/`RT_GROUP_ICON`、帧字节与对齐；GUI 根目录相关 13 项覆盖 `LastRoot` 持久化/失效/只读降级、状态目录选择/便携回退、启动优先级（`config.toml` > 记忆根目录 > 未指定）、空根目录拒绝与「未指定根目录」；日志相关 14 项覆盖级别/筛选/单行化/500 行上限/导出格式与写文件/轮询目标；目录选择 4 项覆盖目录校验、非 ASCII 目录名与 `PICK:` 协议解析，ignored 集成测试覆盖预热 helper 的启动、真实弹窗与关闭。最新复验见 `docs/testing.md`。
 
-release 体积基线（GNU x64，2026-11-22，含 112,640 B 图标资源、日志级别下拉框与无分隔线表头；ADR 0010/0011/0012/0013/0014）：`target/release/tftpd-r.exe` **1,357,824 B（1.29 MiB）**、`target/release/tftpd-r-gui.exe` **8,980,480 B（8.56 MiB）**。最近一次增量 release 构建 59.04 s（0.2.2 版本号变更后的完整重建；此前 GUI 增量 51.43 s）；首次完整 size-profile 构建约 116.4 s。`v0.2.1` 的 MSVC x64 归档为 daemon 1,193,984 B、GUI 8,513,024 B；GNU 与 MSVC 体积不可直接比较。换工具链/平台必须重测，这不是对其他平台的承诺。
+release 体积基线（GNU x64，2026-11-22，含 112,640 B 图标资源、日志级别下拉框与无分隔线表头；ADR 0010/0011/0012/0013/0014）：`target/release/tftpd-r.exe` **1,357,824 B（1.29 MiB）**、`target/release/tftpd-r-gui.exe` **8,980,480 B（8.56 MiB）**。最近一次增量 release 构建 59.04 s（0.2.2 版本号变更后的完整重建；此前 GUI 增量 51.43 s）；首次完整 size-profile 构建约 116.4 s。`v0.2.2` 的 MSVC x64 归档为 daemon 1,193,984 B、GUI 8,641,024 B；GNU 与 MSVC 体积不可直接比较。换工具链/平台必须重测，这不是对其他平台的承诺。
 
 其他有用命令：
 

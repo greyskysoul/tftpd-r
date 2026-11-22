@@ -16,7 +16,7 @@ are defined in [roadmap.md](roadmap.md).
 | Linker | MinGW-w64 GCC 15.3.0 (winlibs, msvcrt runtime); `windres` 2.46.1 from the same binutils for the executable icon |
 | Slint | 1.19.0, features `std`, `backend-winit`, `renderer-software`, `software-renderer-systemfonts`, `compat-1-2` |
 | Release profile | `opt-level = "z"`, `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = "symbols"` (ADR 0010; measured 2026-11-21) |
-| Date | 2026-11-20 (size-profile, executable-icon and `v0.2.1` release checks added 2026-11-21; log drop-down and unified header added 2026-11-22) |
+| Date | 2026-11-20 (size-profile, executable-icon and `v0.2.1` release checks added 2026-11-21; log drop-down, unified header and `v0.2.2` release artifacts added 2026-11-22) |
 
 The development environment used a portable toolchain stored in
 `.dsh-toolchain/` (git-ignored) because the agent sandbox could not perform
@@ -637,6 +637,36 @@ drop-down (it has no accessible role, like the previous custom buttons), DPI
 scaling other than the 100 % forced for captures, Linux/macOS rendering, and an
 interactively driven release build (the click test used the debug binary).
 ADR 0013 update.
+
+### v0.2.2 release artifacts (2026-11-22, thirteenth run)
+
+The `v0.2.2` release workflow
+([44976411968](https://github.com/greyskysoul/tftpd-r/actions/runs/44976411968))
+passed the MSVC/Linux test gate, built all four native targets and published the
+[GitHub Release](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.2.2).
+The preceding `main` CI run
+([44976121542](https://github.com/greyskysoul/tftpd-r/actions/runs/44976121542))
+was green on `windows-latest` and `ubuntu-latest`, confirming the Linux clippy
+fix from `fix(gui): import the worker thread on every platform`.
+
+- **Checksum.** `tftpd-r-0.2.2-x86_64-pc-windows-msvc.zip` is 5,164,937 bytes;
+  its SHA-256 `f065523d0b479346be14ad4fb32e1725d7d98842ce852c7f3a55bd36ef91ec5a`
+  matches both `SHA256SUMS` and GitHub's asset digest.
+- **Contents.** `tftpd-r.exe` 1,193,984 B, `tftpd-r-gui.exe` 8,641,024 B,
+  `tftpd-r-gui.ico` 112,094 B, `config.example.toml`, `README.md`,
+  `LICENSE-MIT` and `LICENSE-APACHE`.
+- **PE resources.** Both executables contain `RT_GROUP_ICON` id 1 with the same
+  seven frames as 0.2.1 (1,128 / 2,440 / 4,264 / 9,640 / 16,936 / 67,624 /
+  9,944 bytes for 16 / 24 / 32 / 48 / 64 / 128 / 256 px).
+- **Execution.** `tftpd-r.exe --version` reports `tftpd-r 0.2.2`;
+  `tftpd-r-gui.exe --help` reports `tftpd-r-gui 0.2.2` and exits 0;
+  `--smoke-test` exits 0. The MSVC daemon served a 5,000-byte `/image.bin`
+  byte-for-byte over loopback and exited 0 after Ctrl-Break, logging
+  `TFTP server stopped`.
+- **Not run.** The x86_64 Linux archive and both aarch64 archives were not
+  downloaded or executed; the interactive MSVC GUI and the GUI on Linux remain
+  unverified. The synthetic-click drop-down checks above used the GNU debug
+  build, not these archives.
 
 ## Not verified (and therefore not claimed)
 - **External TFTP client interoperability** (tftp-hpa, Tftpd64, PXE firmware,
