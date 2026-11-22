@@ -5,11 +5,17 @@ implemented. A phase is complete only when its code (where applicable), tests,
 documentation, and acceptance evidence satisfy the stated Definition of Done.
 A checklist item marked **not verified** must not be described as passed.
 
-## Current baseline: `0.2.1`
+## Current baseline: `0.2.2`
 
-`0.2.1` is a patch release on `0.2.0`: both Windows executables now embed the
+`0.2.2` is a feature release on `0.2.1`. The desktop panel now keeps the root
+directory across launches, offers a recent-root menu, shows a local-time activity
+log with an exact-level filter and explicit export, pre-warms the native folder
+picker, and selects the log level from a drop-down; the title bar and toolbar are
+drawn as one continuous header. The configuration format, daemon and protocol are
+unchanged (ADRs 0012/0013/0014).
+
+`0.2.1` was a patch release on `0.2.0`: both Windows executables embed the
 product icon as a PE resource ([ADR 0011](adr/0011-windows-executable-icon.md)).
-Configuration, protocol, defaults and all other runtime behaviour are unchanged.
 
 `0.2.0` ships TOML configuration (`port` + `bind_addresses`, defaulting to
 `127.0.0.1:69`), the read-only RRQ server, a standalone daemon, and the embedded
@@ -17,25 +23,6 @@ Slint panel. The 0.2.0 CI/release workflows completed for Windows/Linux x64 and
 native arm64 builds. The latest recorded local verification is 177 passing tests
 on Windows 11 with Rust 1.100.0 / GNU; see [testing.md](testing.md) for the exact
 commands, CI evidence, manual checks, and gaps.
-
-Unreleased on top of `0.2.1`: the panel no longer shows a dummy `tftp-root` root
-(its status bar says `未指定根目录` and the settings field stays empty until a
-directory is selected) and it restores the root of the previous start from
-`last-root.txt` when no valid `config.toml` supplies one. The recent-root menu
-also has a 选择… button that applies a directory immediately and restarts an
-idle server, and the activity log now uses local wall-clock times, has an
-exact-level display filter and can be exported to a user-chosen text file.
-Picking a directory in the settings form now shows an inline "点击保存设置后生效"
-hint, and losing/ignoring the remembered root (write failure, stale entry,
-`config.toml` precedence) is logged instead of silently dropped. When the
-per-user configuration directory is not writable (restricted or low-integrity
-launch), the panel keeps its state in `.tftpd-r` beside the executable or in the
-working directory and logs the fallback. The native folder picker is now served
-by a helper that is pre-warmed when the settings dialog or recent-root menu
-opens, so it no longer pays the 1–2 s PowerShell startup on every click, and
-non-ASCII directory names survive the helper round trip.
-ADRs 0012/0013/0014 record the decisions; the configuration format, daemon and
-protocol are unchanged.
 
 The configuration format remains **TOML**. An INI configuration at a fixed path
 was considered and dropped; do not reintroduce it. The GUI loads `config.toml`
@@ -57,8 +44,15 @@ from its working directory and does not write that file.
   [ADR 0009](adr/0009-gui-first-run-and-auto-restart.md).
 - **R3 (INI) was withdrawn.** Configuration remains TOML.
 
-### Patch releases
+### Feature and patch releases
 
+- **0.2.2 — GUI workflow release.** Remembered root directory and recent-root
+  menu, activity log with an exact-level drop-down filter and explicit export,
+  pre-warmed native folder picker, and one continuous title-bar/toolbar header.
+  No protocol or configuration change. See
+  [ADR 0012](adr/0012-gui-root-selection-and-memory.md),
+  [ADR 0013](adr/0013-gui-activity-log.md) and
+  [ADR 0014](adr/0014-prewarmed-folder-picker-helper.md).
 - **0.2.1 — Windows executable icon.** `tftpd-r.exe` and `tftpd-r-gui.exe` embed
   `app-icon.ico` as an `RT_GROUP_ICON`/`RT_ICON` resource, generated at build
   time by `tftpd-r-build-support` (MSVC links the `.res` directly; GNU converts
