@@ -4,7 +4,7 @@ import { ScrollView } from "std-widgets.slint";
 import { Icons, MaterialIcon } from "icons.slint";
 import { LogRow } from "models.slint";
 import { Theme } from "theme.slint";
-import { Panel, SmallButton } from "widgets.slint";
+import { Panel, SelectButton, SmallButton } from "widgets.slint";
 
 export component LogsPanel inherits Panel {
     in property <[LogRow]> rows;
@@ -12,11 +12,35 @@ export component LogsPanel inherits Panel {
     in property <int> total-count: 0;
     // "ALL", "INFO", "WARN" or "ERROR"; exact-level display filter.
     in property <string> filter: "ALL";
+    // Expanded state of the level drop-down. Two-way so the window can close
+    // the list when another overlay opens (and the development screenshot
+    // preview can open it without synthesising a click).
+    in-out property <bool> filter-open: false;
     callback clear-requested();
     callback export-requested();
     callback filter-changed(string);
 
     min-height: 150px;
+
+    // Label shown in the trigger and in the option list. The key itself stays
+    // stable because the Rust side parses it back into `LogFilter`.
+    pure function filter-label(key: string) -> string {
+        key == "INFO" ? "仅 INFO"
+            : key == "WARN" ? "仅 WARN"
+            : key == "ERROR" ? "仅 ERROR"
+            : "全部级别"
+    }
+
+    // The option list is an overlay anchored to the laid-out trigger: its right
+    // edge follows the trigger and it opens just below the 30 px header row.
+    // Deriving both from `absolute-position` keeps the list correct if the
+    // header padding changes, instead of hard-coding an offset.
+    property <length> trigger-x: filter-button.absolute-position.x - root.absolute-position.x;
+    property <length> trigger-y: filter-button.absolute-position.y - root.absolute-position.y;
+    property <length> list-y: root.trigger-y + filter-button.height + 4px;
+    // Four 28 px rows plus 4 px padding, clamped to the panel: a short panel
+    // gets a scrollable list instead of clipped options.
+    property <length> list-height: min(4 * 28px + 8px, root.height - root.list-y - 8px);
 
     VerticalLayout {
         padding-left: 14px;
@@ -47,31 +71,15 @@ export component LogsPanel inherits Panel {
                 vertical-alignment: center;
             }
             Rectangle { horizontal-stretch: 1; background: transparent; }
-            // The filter only hides rows; clearing it restores every entry and
-            // the export always contains the complete retained log.
-            SmallButton {
-                label: "全部";
-                button-width: 52px;
-                primary: root.filter == "ALL";
-                clicked => { root.filter-changed("ALL"); }
-            }
-            SmallButton {
-                label: "INFO";
-                button-width: 52px;
-                primary: root.filter == "INFO";
-                clicked => { root.filter-changed("INFO"); }
-            }
-            SmallButton {
-                label: "WARN";
-                button-width: 52px;
-                primary: root.filter == "WARN";
-                clicked => { root.filter-changed("WARN"); }
-            }
-            SmallButton {
-                label: "ERROR";
-                button-width: 58px;
-                primary: root.filter == "ERROR";
-                clicked => { root.filter-changed("ERROR"); }
+            // The four levels are mutually exclusive, so they are a drop-down
+            // rather than a row of flat buttons. The filter only hides rows;
+            // clearing it restores every entry and the export always contains
+            // the complete retained log.
+            filter-button := SelectButton {
+                label: root.filter-label(root.filter);
+                open: root.filter-open;
+                button-width: 104px;
+                clicked => { root.filter-open = !root.filter-open; }
             }
             SmallButton {
                 label: "导出";
@@ -160,6 +168,75 @@ export component LogsPanel inherits Panel {
                                 vertical-alignment: center;
                                 overflow: elide;
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Dismiss the level list on any click outside it. This catcher is declared
+    // after the layout (so it sits above the header and the log rows) but
+    // before the card (so option clicks still reach the list). Reacting to the
+    // press, like the recent-root menu, makes the dismissal deterministic.
+    if root.filter-open : Rectangle {
+        background: transparent;
+        TouchArea {
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    root.filter-open = false;
+                }
+            }
+        }
+    }
+
+    if root.filter-open : Rectangle {
+        x: root.trigger-x + filter-button.width - self.width;
+        y: root.list-y;
+        width: 136px;
+        height: root.list-height;
+        background: Theme.panel-bg;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: Theme.panel-border-strong;
+        clip: true;
+
+        ScrollView {
+            vertical-scrollbar-policy: as-needed;
+            horizontal-scrollbar-policy: always-off;
+            mouse-drag-pan-enabled: false;
+            VerticalLayout {
+                padding: 4px;
+                for level in ["ALL", "INFO", "WARN", "ERROR"] : Rectangle {
+                    height: 28px;
+                    border-radius: 5px;
+                    background: level-touch.has-hover ? Theme.row-hover
+                        : level == root.filter ? #eff6ff
+                        : transparent;
+                    HorizontalLayout {
+                        cross-axis-alignment: center;
+                        padding-left: 9px;
+                        padding-right: 8px;
+                        spacing: 6px;
+                        Text {
+                            text: root.filter-label(level);
+                            color: level == root.filter ? Theme.accent-strong : Theme.text;
+                            font-size: 12px;
+                            font-weight: level == root.filter ? 600 : 400;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        if level == root.filter : MaterialIcon {
+                            path-data: Icons.check;
+                            tint: Theme.accent;
+                            icon-size: 15px;
+                        }
+                    }
+                    level-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.filter-open = false;
+                            root.filter-changed(level);
                         }
                     }
                 }

@@ -127,6 +127,56 @@ export component SmallButton inherits Rectangle {
     }
 }
 
+// Closed state of a drop-down selector: the current value plus a chevron.
+// The option list is not part of this component; callers render it as an overlay
+// sibling of their content. Keeping the list out of the header layout lets it
+// draw above the panel's rows and lets the panel, not the layout, bound it.
+export component SelectButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> open: false;
+    in property <length> button-width: 104px;
+    callback clicked();
+
+    width: self.button-width;
+    height: 30px;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: self.open ? Theme.accent : Theme.panel-border-strong;
+    background: self.open ? #eff6ff
+        : touchArea.pressed ? #e2e8f0
+        : touchArea.has-hover ? Theme.row-hover
+        : Theme.panel-bg;
+
+    HorizontalLayout {
+        // The chevron has a fixed 16 px height, so the layout must centre the
+        // cross axis explicitly; otherwise it is placed at the top of the 30 px
+        // trigger and looks detached from the label.
+        alignment: center;
+        cross-axis-alignment: center;
+        padding-left: 10px;
+        padding-right: 8px;
+        spacing: 6px;
+        Text {
+            text: root.label;
+            color: root.open ? Theme.accent-strong : Theme.text;
+            font-size: 12px;
+            font-weight: 600;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        MaterialIcon {
+            path-data: Icons.keyboard-arrow-down;
+            tint: root.open ? Theme.accent : Theme.text-muted;
+            icon-size: 16px;
+        }
+    }
+
+    touchArea := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
 // Single-line text input with the panel's border and focus colors. The plain
 // TextInput builtin is used so the field does not depend on the std-widgets
 // style (the panel uses its own visual language).

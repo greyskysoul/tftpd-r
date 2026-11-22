@@ -60,6 +60,9 @@ export component AppWindow inherits Window {
     // Activity-log display filter ("ALL"/"INFO"/"WARN"/"ERROR") and the number
     // of retained entries before filtering (used for the export button state).
     in-out property <string> log-filter: "ALL";
+    // Expanded state of the log-level drop-down; also settable from Rust for
+    // the `TFTPD_R_GUI_PREVIEW=log-filter` development screenshot mode.
+    in-out property <bool> log-filter-open: false;
     in-out property <int> log-total-count: 0;
 
     in-out property <string> settings-port: "69";
@@ -110,10 +113,12 @@ export component AppWindow inherits Window {
                 root.about-open = false;
                 root.settings-open = !root.settings-open;
                 root.settings-picker-open = false;
+                root.log-filter-open = false;
             }
             about-requested => {
                 root.settings-open = false;
                 root.about-open = !root.about-open;
+                root.log-filter-open = false;
             }
         }
 
@@ -126,6 +131,7 @@ export component AppWindow inherits Window {
                 rows: root.logs;
                 total-count: root.log-total-count;
                 filter: root.log-filter;
+                filter-open <=> root.log-filter-open;
                 clear-requested => { root.clear-logs(); }
                 export-requested => { root.export-logs(); }
                 filter-changed(level) => {
@@ -146,7 +152,10 @@ export component AppWindow inherits Window {
             bind-text: root.bind-text;
             root-text: root.root-text;
             detail-text: root.status-detail;
-            root-clicked => { root.recent-menu-open = !root.recent-menu-open; }
+            root-clicked => {
+                root.recent-menu-open = !root.recent-menu-open;
+                root.log-filter-open = false;
+            }
         }
     }
 

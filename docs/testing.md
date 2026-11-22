@@ -16,7 +16,7 @@ are defined in [roadmap.md](roadmap.md).
 | Linker | MinGW-w64 GCC 15.3.0 (winlibs, msvcrt runtime); `windres` 2.46.1 from the same binutils for the executable icon |
 | Slint | 1.19.0, features `std`, `backend-winit`, `renderer-software`, `software-renderer-systemfonts`, `compat-1-2` |
 | Release profile | `opt-level = "z"`, `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = "symbols"` (ADR 0010; measured 2026-11-21) |
-| Date | 2026-11-20 (size-profile, executable-icon and `v0.2.1` release checks added 2026-11-21) |
+| Date | 2026-11-20 (size-profile, executable-icon and `v0.2.1` release checks added 2026-11-21; log drop-down and unified header added 2026-11-22) |
 
 The development environment used a portable toolchain stored in
 `.dsh-toolchain/` (git-ignored) because the agent sandbox could not perform
@@ -31,7 +31,7 @@ with network access; subsequent builds/tests ran with `--offline`.
 | `cargo fmt --all -- --check` | Pass (exit 0) |
 | `cargo clippy --workspace --all-targets --offline -- -D warnings` | Pass (exit 0, no warnings) |
 | `cargo test --workspace --offline` | **177 passed, 0 failed, 1 ignored** (the ignored test opens the native folder dialog; see the eleventh run) |
-| `cargo build --workspace --release --locked --offline` | Pass (exit 0, 49.08 s on the final tree; 53.74 s on the previous incremental run, 2026-11-21). The first full size-profile build was 116.4 s. |
+| `cargo build --workspace --release --locked --offline` | Pass (exit 0, 59.04 s on the 0.2.2 final tree, 51.43 s for the GUI-only increment before the version bump, 49.08 s on the previous tree). The first full size-profile build was 116.4 s. |
 
 The workspace was renamed from `rust-tftpd`/`tftp-*` to TftpdR/`tftpd-r-*` on
 2026-11-20. The original `0.2.0` verification ran on 2026-11-20 (offline, GNU toolchain)
@@ -64,8 +64,9 @@ profile (ADR 0010) the same tree produced `tftpd-r.exe` **1,245,184 bytes
 35.0 % smaller. Embedding the Windows icon resource (ADR 0011) adds 112,640
 bytes to each. The GUI root-memory/log/state work and the later save hint,
 diagnostics and portable fallback bring the current measurements to
-**1,357,824 bytes (1.29 MiB)** for the daemon and **8,931,328 bytes (8.52 MiB)**
-for the GUI (the pre-warmed picker added 22,016 bytes to the GUI). These figures
+**1,357,824 bytes (1.29 MiB)** for the daemon and **8,980,480 bytes (8.56 MiB)**
+for the GUI (the pre-warmed picker added 22,016 bytes to the GUI; the 2026-11-22
+log-level drop-down and unified header added another 49,152 bytes). These figures
 are informational only; they are not an acceptance criterion and not a promise
 for other machines/toolchains.
 
@@ -595,6 +596,47 @@ dialog inside the Slint panel (the agent session cannot drive the GUI; the
 z-order on a real desktop after the helper change, and non-Chinese/non-GBK
 Windows installations. The ignored test covers the Rust worker and the real
 dialog lifecycle, not the Slint click wiring. ADR 0014.
+
+### GUI log-level drop-down and unified header (2026-11-22, twelfth run)
+
+Two UI-polish requests were implemented on top of the activity log and header:
+
+- **Level filter as a drop-down.** The four exact-level buttons (`全部`, `INFO`,
+  `WARN`, `ERROR`) became one trigger (`全部级别` / `仅 INFO` / `仅 WARN` /
+  `仅 ERROR`) with a chevron and a four-row list. The list is an in-panel overlay
+  anchored to the trigger, draws above the log rows and is clipped by the panel.
+  The Slint keys (`ALL`/`INFO`/`WARN`/`ERROR`), `LogFilter`, the Rust callback and
+  the export are unchanged. The chevron was initially top-aligned inside the
+  30 px trigger; the layout now sets `cross-axis-alignment: center`.
+- **No title-bar/toolbar hairline.** The 1 px `Theme.toolbar-divider` line at the
+  bottom of `titlebar.slint` was removed, so the two rows read as one flat
+  `#37474f` header block; the vertical dividers inside each row remain.
+
+Automated gates (final tree): `cargo fmt --all -- --check` exit 0;
+`cargo clippy --workspace --all-targets --offline -- -D warnings` exit 0;
+`cargo test --workspace --offline` **177 passed, 1 ignored**;
+`cargo build --workspace --release --locked --offline` exit 0 in 59.04 s,
+`tftpd-r.exe` 1,357,824 B and `tftpd-r-gui.exe` 8,980,480 B.
+
+Visual and interaction checks (`PrintWindow`, Windows PowerShell 5.1):
+
+- `TFTPD_R_GUI_PREVIEW=log-filter` (a development-only opener added for this
+  check) at 1120x780 and at the 900x600 minimum: the list opens just below the
+  trigger, right-aligned with it, marks the active level with a check, stays
+  inside the panel and is clamped/scrolled rather than overflowing.
+- Synthetic `WM_MOUSEMOVE`/`WM_LBUTTONDOWN`/`WM_LBUTTONUP` sequence on a debug
+  build: open the list; select `仅 WARN` (the INFO startup row disappears and
+  `当前筛选级别下没有日志。` is shown); reopen (the check is on `仅 WARN`); click
+  the log area (list closes, filter unchanged — that capture is byte-identical to
+  the post-selection one); reopen and select `全部级别` (the hidden row returns).
+- Header capture at 1120x780 shows one continuous dark band with no line between
+  the caption row and the toolbar.
+
+Not verified here: a real mouse, keyboard navigation/accessibility for the custom
+drop-down (it has no accessible role, like the previous custom buttons), DPI
+scaling other than the 100 % forced for captures, Linux/macOS rendering, and an
+interactively driven release build (the click test used the debug binary).
+ADR 0013 update.
 
 ## Not verified (and therefore not claimed)
 - **External TFTP client interoperability** (tftp-hpa, Tftpd64, PXE firmware,

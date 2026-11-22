@@ -416,6 +416,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             app.set_about_open(false);
             app.set_recent_menu_open(true);
         }
+        Some("log-filter") => {
+            app.set_settings_open(false);
+            app.set_about_open(false);
+            app.set_log_filter_open(true);
+        }
         Some("transfer") => {
             app.set_settings_open(false);
             app.set_about_open(false);

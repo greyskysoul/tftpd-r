@@ -109,7 +109,7 @@ pub enum LogFilter {
 }
 
 impl LogFilter {
-    /// Stable key used by the Slint property and the filter buttons.
+    /// Stable key used by the Slint property and the level drop-down.
     #[must_use]
     pub fn key(self) -> &'static str {
         match self {

@@ -110,3 +110,47 @@ coherent log experience.
 - The native save dialog itself needs the same target-machine acceptance as the
   directory picker (real desktop interaction); the text formatting, file writing
   and result polling are covered by automated tests.
+
+## Update 2026-11-22: level filter as a drop-down
+
+### Context
+
+The four exact-level filters were a flat row of buttons (`全部`, `INFO`, `WARN`,
+`ERROR`) in the log header. They are mutually exclusive, but the row read as four
+independent toggles, and it consumed about 222 px of header width. The operator
+asked for a drop-down instead.
+
+### Decision
+
+- The button row is replaced by a single `SelectButton` trigger that shows the
+  active level (`全部级别` / `仅 INFO` / `仅 WARN` / `仅 ERROR`) and a chevron.
+  Clicking it expands a four-row list; the current level is highlighted with a
+  check mark. Selecting a row applies and closes the list.
+- The **filter semantics are unchanged**: exact-level, display-only, entries are
+  never dropped, and `清空` still clears every level. The Slint filter keys stay
+  `ALL`/`INFO`/`WARN`/`ERROR`, so `LogFilter`, the Rust callback and the export
+  format are untouched; only the human-readable labels are new.
+- The option list is an in-panel overlay anchored to the laid-out trigger
+  (`absolute-position`), not a `PopupWindow` and not part of the header layout.
+  That keeps one native window and the software renderer path, draws the list
+  above the log rows, and lets the panel's own clip bound it instead of relying
+  on a separate OS popup. Its height is clamped to the panel (with a scrollable
+  list) so the fourth option stays reachable at the minimum window size.
+- Clicking anywhere outside the list dismisses it (on press, like the
+  recent-root menu) without changing the filter; reopening the settings, about
+  or recent-root overlay also closes it. `TFTPD_R_GUI_PREVIEW=log-filter` opens
+  the list at startup for screenshots only; it is not reachable otherwise.
+
+### Consequences
+
+- Choosing a level is now two clicks instead of one, in exchange for an
+  unambiguous single-selection control and about 90 px less header width.
+- The trigger and the list derive their position from `absolute-position`, so a
+  header padding change cannot leave the list detached from the trigger.
+- Keyboard access is not improved: like the previous buttons, the custom
+  trigger has no accessible role or keyboard handling. That remains an open
+  target-machine/accessibility item rather than a claim of this update.
+- Verified with `PrintWindow` captures at 1120x780 and the 900x600 minimum, plus
+  synthetic window messages (open, select `仅 WARN`, dismiss outside, restore
+  `全部级别`); this is not a real-mouse acceptance run. See
+  [docs/testing.md](../testing.md).

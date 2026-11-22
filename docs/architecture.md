@@ -158,11 +158,14 @@ The GUI crate stays deliberately small:
   for dragging. `resize-border-width` keeps the native edge/corner resize
   behaviour, and a one-pixel dark frame drawn by `app.slint` bounds the client
   area. The drag area stops before the window buttons so pressing a button
-  cannot also start a window move.
+  cannot also start a window move. The title bar and the toolbar share the same
+  flat `#37474f` fill and draw no hairline between them, so the two rows read as
+  one header block; the dividing rules that remain are the vertical ones inside
+  each row.
 - `ui/widgets.slint` holds the icon-over-label toolbar button, compact buttons,
-  the text field and panel primitives; `ui/theme.slint` centralises the palette;
-  `ui/icons.slint` embeds Material Design icon path data, so no image decoder or
-  extra image files are needed at runtime.
+  the drop-down trigger, the text field and panel primitives; `ui/theme.slint`
+  centralises the palette; `ui/icons.slint` embeds Material Design icon path
+  data, so no image decoder or extra image files are needed at runtime.
 - The service status is a dedicated chip at the far left of the toolbar; the
   status bar keeps the read-only hint or the last error, the bound address(es)
   and the clickable root selector (last path component, full path in the
@@ -217,13 +220,14 @@ The GUI crate stays deliberately small:
   runs.
 - `src/logging.rs` owns the bounded in-memory activity log: at most 500 entries
   (newest first), local wall-clock timestamps, `Info`/`Warn`/`Error` levels, an
-  exact-level display filter that never drops entries, single-line message
-  normalisation and the plain-text export format. `src/log_export.rs` runs the
-  native save dialog in a helper process on a background thread; the UI timer
-  writes the snapshot and reports success or an actionable failure. The log
-  table is rebuilt only when entries or the filter change, so the scroll
-  position survives the 200 ms refresh. Opening a folder/save picker is not
-  logged; only the chosen directory, export result and real errors are.
+  exact-level display filter selected from a drop-down that never drops entries,
+  single-line message normalisation and the plain-text export format.
+  `src/log_export.rs` runs the native save dialog in a helper process on a
+  background thread; the UI timer writes the snapshot and reports success or an
+  actionable failure. The log table is rebuilt only when entries or the filter
+  change, so the scroll position survives the 200 ms refresh. Opening a
+  folder/save picker is not logged; only the chosen directory, export result and
+  real errors are.
 - `src/folder_picker.rs` owns the native directory dialog. On Windows one
   PowerShell + WinForms helper process is kept warm for the session: a
   background worker starts it the first time the settings dialog or the
@@ -275,9 +279,12 @@ The GUI crate stays deliberately small:
 Dialogs and the drop-downs (recent roots, bind address picker) are sibling
 rectangles inside the same Slint window rather than separate native windows;
 this keeps the software renderer and DPI handling simple and guarantees they
-render above the main layout. The layout relies on explicit positions for sized
-boxes that are not managed by a layout (borders and progress fills), because a
-sized child without `x`/`y` is centred by the renderer.
+render above the main layout. The activity-log **level** list is the one nested
+overlay: it is a sibling of the log panel's layout (inside the panel's clip), so
+it draws over the log rows without a second native window. The layout relies on
+explicit positions for sized boxes that are not managed by a layout (borders and
+progress fills), because a sized child without `x`/`y` is centred by the
+renderer.
 
 ## GUI threading
 

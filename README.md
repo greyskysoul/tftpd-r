@@ -231,12 +231,13 @@ root for a deployment. The panel is in Chinese and is organized as follows:
 - **Activity log**: every transfer logs a start line and a completion or failure
   line (file, peer, size and duration), even when the start event was already
   evicted from the bounded event ring. Lines carry the local wall-clock time and
-  are single-line. The header filters the table by exact level
-  (全部 / INFO / WARN / ERROR); the filter only hides rows, so 全部 restores
-  them and the export stays complete. 导出 opens a native save dialog and writes
-  all retained entries (up to 500, oldest first) with the version, export time
-  and row count. Opening a picker is not logged; exported files contain local
-  paths and peer addresses and are only created by this explicit action.
+  are single-line. A level drop-down in the header filters the table by exact
+  level (全部级别 / 仅 INFO / 仅 WARN / 仅 ERROR); the filter only hides rows, so
+  全部级别 restores them and the export stays complete. 导出 opens a native save
+  dialog and writes all retained entries (up to 500, oldest first) with the
+  version, export time and row count. Opening a picker is not logged; exported
+  files contain local paths and peer addresses and are only created by this
+  explicit action.
 
 Recently used roots are kept (most recent first, at most 8) in
 `%APPDATA%\TftpdR\recent-dirs.txt` on Windows and
