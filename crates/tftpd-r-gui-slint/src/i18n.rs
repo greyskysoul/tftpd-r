@@ -833,6 +833,7 @@ impl Text {
     }
 
     /// File-type filter of the save dialog.
+    #[cfg_attr(not(windows), allow(dead_code))]
     #[must_use]
     pub fn save_dialog_filter(self) -> &'static str {
         text!(
