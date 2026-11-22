@@ -10,7 +10,7 @@ export component TopToolbar inherits Rectangle {
     in property <bool> stop-enabled: false;
     in property <bool> settings-active: false;
     in property <bool> about-active: false;
-    in property <string> status-text: "已停止";
+    in property <string> status-text: "Stopped";
     in property <int> status-kind: 0;
 
     callback primary-requested();
@@ -33,7 +33,7 @@ export component TopToolbar inherits Rectangle {
             width: 132px;
             height: 44px;
             border-radius: 8px;
-            background: rgba(255, 255, 255, 0.05);
+            background: Theme.toolbar-chip-bg;
 
             HorizontalLayout {
                 cross-axis-alignment: center;
@@ -44,24 +44,24 @@ export component TopToolbar inherits Rectangle {
                     width: 9px;
                     height: 9px;
                     border-radius: 5px;
-                    background: root.status-kind == 1 ? #22c55e
-                        : root.status-kind == 4 ? #ef4444
-                        : root.status-kind == 2 || root.status-kind == 3 ? #f59e0b
-                        : #94a3b8;
+                    background: root.status-kind == 1 ? Theme.status-running
+                        : root.status-kind == 4 ? Theme.status-error
+                        : root.status-kind == 2 || root.status-kind == 3 ? Theme.status-busy
+                        : Theme.status-idle;
                 }
                 VerticalLayout {
                     alignment: center;
                     spacing: 0;
                     Text {
-                        text: "服务状态";
+                        text: @tr("Service status");
                         color: Theme.text-faint;
                         font-size: 9px;
                     }
                     Text {
                         text: root.status-text;
-                        color: root.status-kind == 1 ? #4ade80
-                            : root.status-kind == 4 ? #f87171
-                            : root.status-kind == 2 || root.status-kind == 3 ? #fbbf24
+                        color: root.status-kind == 1 ? Theme.status-running-text
+                            : root.status-kind == 4 ? Theme.status-error-text
+                            : root.status-kind == 2 || root.status-kind == 3 ? Theme.status-busy-text
                             : Theme.toolbar-icon;
                         font-size: 13px;
                         font-weight: 700;
@@ -74,18 +74,18 @@ export component TopToolbar inherits Rectangle {
         Rectangle { width: 4px; background: transparent; }
 
         ToolButton {
-            label: root.primary-is-restart ? "重启" : "启动";
+            label: root.primary-is-restart ? @tr("Restart") : @tr("Start");
             icon-data: root.primary-is-restart ? Icons.restart-alt : Icons.play-arrow;
-            icon-tint: root.primary-is-restart ? #fbbf24 : #4ade80;
+            icon-tint: root.primary-is-restart ? Theme.status-busy-text : Theme.status-running-text;
             label-tint: Theme.toolbar-label;
             available: root.primary-enabled;
             clicked => { root.primary-requested(); }
         }
 
         ToolButton {
-            label: "停止";
+            label: @tr("Stop");
             icon-data: Icons.stop;
-            icon-tint: #f87171;
+            icon-tint: Theme.status-error-text;
             available: root.stop-enabled;
             clicked => { root.stop-requested(); }
         }
@@ -93,14 +93,14 @@ export component TopToolbar inherits Rectangle {
         Rectangle { width: 6px; background: transparent; }
 
         ToolButton {
-            label: "设置";
+            label: @tr("Settings");
             icon-data: Icons.settings;
             active: root.settings-active;
             clicked => { root.settings-requested(); }
         }
 
         ToolButton {
-            label: "关于";
+            label: @tr("About");
             icon-data: Icons.info;
             active: root.about-active;
             clicked => { root.about-requested(); }

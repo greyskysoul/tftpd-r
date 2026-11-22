@@ -46,7 +46,8 @@ pub struct ServeArgs {
     /// Override the configured root directory.
     #[arg(long, value_name = "DIR")]
     pub root: Option<PathBuf>,
-    /// Log filter directive (overrides the TFTPD_R_LOG environment variable).
+    /// Log filter: a level (off/error/warn/info/debug/trace) or comma-separated
+    /// `target=level` directives; overrides the TFTPD_R_LOG environment variable.
     #[arg(long, value_name = "FILTER")]
     pub log: Option<String>,
 }

@@ -57,7 +57,7 @@ export component RootMenu inherits Rectangle {
                     icon-size: 17px;
                 }
                 Text {
-                    text: "最近使用的根目录";
+                    text: @tr("Recent root directories");
                     color: Theme.text-strong;
                     font-size: 13px;
                     font-weight: 600;
@@ -65,13 +65,13 @@ export component RootMenu inherits Rectangle {
                 }
                 Rectangle { horizontal-stretch: 1; background: transparent; }
                 SmallButton {
-                    label: "选择…";
+                    label: @tr("Select…");
                     icon-data: Icons.folder-open;
                     button-width: 88px;
                     clicked => { root.browse-requested(); }
                 }
                 SmallButton {
-                    label: "清空";
+                    label: @tr("Clear");
                     icon-data: Icons.delete-sweep;
                     tint: Theme.text-muted;
                     button-width: 72px;
@@ -98,7 +98,7 @@ export component RootMenu inherits Rectangle {
                 VerticalLayout {
                     spacing: 2px;
                     if root.items.length == 0 : Text {
-                        text: "暂无最近使用的目录。点击“选择…”可直接选择一个根目录并应用。";
+                        text: @tr("No recent directories. Click “Select…” to choose and apply a root directory directly.");
                         color: Theme.text-faint;
                         font-size: 12px;
                         wrap: word-wrap;
@@ -107,7 +107,7 @@ export component RootMenu inherits Rectangle {
                         height: 40px;
                         border-radius: 6px;
                         background: itemTouch.has-hover ? Theme.row-hover
-                            : dir.active ? #eff6ff
+                            : dir.active ? Theme.info-soft
                             : transparent;
 
                         HorizontalLayout {
@@ -141,7 +141,7 @@ export component RootMenu inherits Rectangle {
                             }
                             Rectangle { horizontal-stretch: 1; background: transparent; }
                             if dir.active : Text {
-                                text: "当前";
+                                text: @tr("Current");
                                 color: Theme.success;
                                 font-size: 10px;
                                 font-weight: 600;
@@ -159,7 +159,7 @@ export component RootMenu inherits Rectangle {
 
             Rectangle { height: 1px; background: Theme.panel-border; }
             Text {
-                text: "服务运行中切换目录：无进行中的传输时自动重启，否则请稍后手动重启。";
+                text: @tr("Switching directories while the server runs restarts it automatically when no transfer is active; otherwise restart it manually later.");
                 color: Theme.text-faint;
                 font-size: 10px;
             }

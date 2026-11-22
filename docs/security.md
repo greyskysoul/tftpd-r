@@ -159,12 +159,15 @@ is network ACL/firewall or loopback-only binding, not the protocol implementatio
 | GUI recent roots | 8 canonicalised paths in a per-user local state file |
 | GUI remembered root | 1 canonicalised path in a per-user local state file |
 | GUI first-run flag | one boolean in a per-user local state file |
+| GUI appearance choice | one `system`/`light`/`dark` word in a per-user local state file |
+| System theme probe | one helper process at startup, then one every 30 s while following the system, 3 s timeout |
 | Shutdown drain | `shutdown_grace_secs` (default 5) |
 
-The GUI writes three small local state files under the current user's profile:
+The GUI writes four small local state files under the current user's profile:
 `recent-dirs.txt` (up to eight absolute directory paths), `last-root.txt` (the
-root of the last successful start or explicit selection) and `ui-state.txt`
-(one `setup-shown` flag). If that profile directory cannot be created, the same
+root of the last successful start or explicit selection), `ui-state.txt`
+(one `setup-shown` flag) and `ui-prefs.txt` (one `theme-mode` word). If that
+profile directory cannot be created, the same
 files go to a portable `.tftpd-r` directory beside the executable, then in the
 working directory; the choice is logged. They contain no credentials and are
 treated as advisory: unreadable or unwritable state never prevents the panel
@@ -174,7 +177,9 @@ and starts the server. A valid `config.toml` root takes precedence over
 `last-root.txt`. A failed `last-root.txt` write is logged as a WARN (the current
 session keeps the value, the next launch will not restore it), and a stored path
 that no longer exists is reported on the next launch; neither message contains
-more than the local path that the operator already selected. A writable
+more than the local path that the operator already selected. A UTF-8 BOM that an
+editor adds to one of these files is ignored rather than treated as part of the
+first key. A writable
 executable/working directory already permits control of the binary and
 `config.toml`, so the portable fallback adds no meaningful new trust boundary.
 
@@ -217,6 +222,13 @@ The desktop panel has no native interface-enumeration or file-dialog dependency
   `zenity --save`/`kdialog --getsavefilename`. The chosen path is only a
   destination for the text the Rust side writes; it is never executed and does
   not have to exist yet.
+- The system-theme probe (`src/theme.rs`) runs `reg.exe query` on Windows or
+  `gsettings get` on Unix, with fixed absolute paths and fixed arguments, off
+  the UI thread and with a 3 s kill timeout. Only the returned
+  `REG_DWORD`/`preferred-scheme` value is parsed; a missing or unparsable answer
+  means "light". Dialog titles and the save filter are passed to the PowerShell
+  helpers through environment variables, never interpolated into the script
+  text, so a translated string cannot become script content.
 - Both Windows dialogs are shown with a 1×1, fully transparent, top-most owner
   form. This only affects window activation/Z-order: it keeps the native dialog
   visible above the panel and other windows. It does not add privileges or

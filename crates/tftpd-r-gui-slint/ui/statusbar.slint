@@ -6,7 +6,7 @@ import { Theme } from "theme.slint";
 
 export component StatusBar inherits Rectangle {
     in property <string> bind-text: "—";
-    in property <string> root-text: "未指定根目录";
+    in property <string> root-text: "No root directory";
     in property <string> detail-text: "";
 
     callback root-clicked();
@@ -52,13 +52,13 @@ export component StatusBar inherits Rectangle {
 
                 if root.detail-text != "" : Text {
                     text: root.detail-text;
-                    color: #b91c1c;
+                    color: Theme.danger-text;
                     font-size: 11px;
                     horizontal-stretch: 1;
                     vertical-alignment: center;
                 }
                 if root.detail-text == "" : Text {
-                    text: "RFC 1350 · 只读 RRQ · 上传已禁用";
+                    text: @tr("RFC 1350 · read-only RRQ · uploads disabled");
                     color: Theme.text-faint;
                     font-size: 11px;
                     vertical-alignment: center;
@@ -85,8 +85,8 @@ export component StatusBar inherits Rectangle {
             border-radius: 6px;
             clip: true;
             horizontal-stretch: 0;
-            background: rootTouchArea.pressed ? #e2e8f0
-                : rootTouchArea.has-hover ? #f1f5f9
+            background: rootTouchArea.pressed ? Theme.pressed-bg
+                : rootTouchArea.has-hover ? Theme.hover-bg
                 : transparent;
 
             HorizontalLayout {

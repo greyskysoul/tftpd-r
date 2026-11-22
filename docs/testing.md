@@ -16,7 +16,7 @@ are defined in [roadmap.md](roadmap.md).
 | Linker | MinGW-w64 GCC 15.3.0 (winlibs, msvcrt runtime); `windres` 2.46.1 from the same binutils for the executable icon |
 | Slint | 1.19.0, features `std`, `backend-winit`, `renderer-software`, `software-renderer-systemfonts`, `compat-1-2` |
 | Release profile | `opt-level = "z"`, `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = "symbols"` (ADR 0010; measured 2026-11-21) |
-| Date | 2026-11-20 (size-profile, executable-icon and `v0.2.1` release checks added 2026-11-21; log drop-down, unified header and `v0.2.2` release artifacts added 2026-11-22) |
+| Date | 2026-11-22 (historical runs from 2026-11-20 onward; 0.3.0 candidate preparation added 2026-11-22) |
 
 The development environment used a portable toolchain stored in
 `.dsh-toolchain/` (git-ignored) because the agent sandbox could not perform
@@ -29,9 +29,9 @@ with network access; subsequent builds/tests ran with `--offline`.
 | Command | Result |
 | --- | --- |
 | `cargo fmt --all -- --check` | Pass (exit 0) |
-| `cargo clippy --workspace --all-targets --offline -- -D warnings` | Pass (exit 0, no warnings) |
-| `cargo test --workspace --offline` | **177 passed, 0 failed, 1 ignored** (the ignored test opens the native folder dialog; see the eleventh run) |
-| `cargo build --workspace --release --locked --offline` | Pass (exit 0, 59.04 s on the 0.2.2 final tree, 51.43 s for the GUI-only increment before the version bump, 49.08 s on the previous tree). The first full size-profile build was 116.4 s. |
+| `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` | Pass (exit 0, no warnings on the 0.3.0 candidate) |
+| `cargo test --workspace --offline` | **211 passed, 0 failed, 1 ignored** (the ignored test opens the native folder dialog; see the eleventh run) |
+| `cargo build --workspace --release --locked --offline` | Pass (exit 0, **66.65 s on the 0.3.0 candidate**; 57.16 s on the pre-0.3.0 daemon log-filter tree; 84 s on the language/theme tree; 59.04 s on the 0.2.2 final tree, 51.43 s for the GUI-only increment before the version bump, 49.08 s on the previous tree). The first full size-profile build was 116.4 s. |
 
 The workspace was renamed from `rust-tftpd`/`tftp-*` to TftpdR/`tftpd-r-*` on
 2026-11-20. The original `0.2.0` verification ran on 2026-11-20 (offline, GNU toolchain)
@@ -45,9 +45,13 @@ That left 145 test functions. The executable-icon work then added 3
 `tftpd-r-build-support` tests. The GUI root-memory and activity-log changes added
 25 GUI tests, and the portable state-directory fallback added 2 more. The
 pre-warmed folder-picker work added 2 GUI tests plus one ignored Windows
-integration test, so the current suite has **177 test functions** (3
-build-support, 61 core unit, 29 RRQ integration, 9 daemon unit, 5 CLI
-integration, 69 GUI, 1 doctest) and one ignored test. GUI coverage includes
+integration test, so the suite then had **177 test functions**. The
+language/theme work added 28 GUI tests (language mapping, the `Text` messages,
+catalogue consistency, the theme preference and the system-theme parsers), so the
+suite reached 205 test functions. The daemon log-filter work added 6 daemon unit
+tests (`logging`), so the current suite has **211 test functions** (3
+build-support, 61 core unit, 29 RRQ integration, 15 daemon unit, 5 CLI
+integration, 97 GUI, 1 doctest) and one ignored test. GUI coverage includes
 `log_model_stays_bounded_and_keeps_newest_entries_first`, a deterministic
 501-entry check for the 500-row newest-first cap,
 `helper_replies_are_parsed_without_mangling_the_path` /
@@ -63,10 +67,19 @@ profile (ADR 0010) the same tree produced `tftpd-r.exe` **1,245,184 bytes
 (1.19 MiB)** and `tftpd-r-gui.exe` **8,734,208 bytes (8.33 MiB)** — 42.7 % and
 35.0 % smaller. Embedding the Windows icon resource (ADR 0011) adds 112,640
 bytes to each. The GUI root-memory/log/state work and the later save hint,
-diagnostics and portable fallback bring the current measurements to
+diagnostics and portable fallback brought the measurements to
 **1,357,824 bytes (1.29 MiB)** for the daemon and **8,980,480 bytes (8.56 MiB)**
 for the GUI (the pre-warmed picker added 22,016 bytes to the GUI; the 2026-11-22
-log-level drop-down and unified header added another 49,152 bytes). These figures
+log-level drop-down and unified header added another 49,152 bytes). The
+language/theme work (ADR 0015: the bundled `zh_CN` catalogue, the second palette
+and the theme probe) brings the GUI to **9,036,288 bytes (8.62 MiB)**, +55,808
+bytes (+0.62 %); the daemon stayed at 1,357,824 bytes at that point. ADR 0016
+then removed `tracing-subscriber`'s `env-filter` (and with it the `regex`
+engine) from the daemon: it now measures **1,063,936 bytes (1.01 MiB)**, 293,888
+bytes (−21.6 %) below the previous baseline. The GUI is unchanged at
+**9,036,288 bytes (8.62 MiB)** because it has no `tracing` subscriber. The
+attribution came from an unstripped build inspected with `nm --demangle` over
+the COFF symbol table (see the fifteenth run below). These figures
 are informational only; they are not an acceptance criterion and not a promise
 for other machines/toolchains.
 
@@ -136,7 +149,7 @@ Test breakdown from `cargo test --workspace`:
 | `tftpd-r-core` integration `tests/rrq.rs` | 29 | real loopback UDP server and client: small/exact-multiple/empty files, missing file, traversal, legacy `/file` and `\file` requests, root-prefixed traversal rejection, `blksize`/`tsize`/`timeout` negotiation, clamping, invalid option, duplicate ACK, retransmission, unknown TID ERROR 5, duplicate RRQ resend without a new session, WRQ rejection, netascii rejection, unknown mode/malformed/oversized datagrams, size limit, concurrent transfers, lifecycle events, shutdown cancellation, idempotent stop, retry exhaustion, **block-number wrap 65535 → 0** with `blksize = 8` (65,537 blocks); multiple listeners on one resolved port (IPv6 checked when available), wildcard collapsing to one listener, and an unbindable address aborting the whole start |
 | `tftpd-r-daemon` unit tests | 9 | CLI parsing/defaults/overrides, parsed embedded example template safety/validity, config loading errors, unknown fields, override validation, status-channel failure path |
 | `tftpd-r-daemon` integration `tests/cli.rs` | 5 | binary `print-default-config` equals `config.example.toml`; `check-config` success/missing file/uploads-rejected exit code 2; `serve` refuses invalid config with exit code 1; `serve` stays running with a valid config |
-| `tftpd-r-gui-slint` unit tests | 69 | embedded controller start/stop, double-start rejection, invalid root, asynchronous restart (old server → new config), failed-restart error reporting and the no-stale-`Running`-after-stop guarantee; recent-root ordering, de-duplication, cap, persistence, canonicalisation, stale-directory cleanup and clearing the state file; one-time setup-flag persistence and read-only-profile tolerance; interface-address parsing/filtering/sorting; folder-selection validation and the warm picker's `PICK:` reply parsing/UTF-8 path handling; address picker model (two permanent entries, selected-but-undiscovered addresses preserved, duplicate removal, summaries) and the exclusive/sticky/fallback "全部网络" toggle rules; first-run all-network defaults; idle auto-restart with a real embedded server, deferral while a transfer is tracked, unchanged configuration and a deliberate stop; status-bar address summary and leaf-directory name; newest-first 500-row log-model bound under a 501-entry flood |
+| `tftpd-r-gui-slint` unit tests | 97 | embedded controller start/stop, double-start rejection, invalid root, asynchronous restart (old server → new config), failed-restart error reporting and the no-stale-`Running`-after-stop guarantee; recent-root ordering, de-duplication, cap, persistence, canonicalisation, stale-directory cleanup and clearing the state file; one-time setup-flag persistence and read-only-profile tolerance; interface-address parsing/filtering/sorting; folder-selection validation and the warm picker's `PICK:` reply parsing/UTF-8 path handling; address picker model (two permanent entries, selected-but-undiscovered addresses preserved, duplicate removal, summaries) and the exclusive/sticky/fallback "All networks" toggle rules; first-run all-network defaults; idle auto-restart with a real embedded server, deferral while a transfer is tracked, unchanged configuration and a deliberate stop; status-bar address summary and leaf-directory name; newest-first 500-row log-model bound under a 501-entry flood; startup-language mapping (Simplified vs Traditional Chinese, other languages, missing locale), the localised `Text` messages, translation-catalogue coverage/unused entries/placeholders, English-only `.slint` sources, theme-mode parsing and persistence, BOM-tolerant state files, the platform theme parsers and the watcher |
 | `tftpd-r-core` doc test | 1 | crate-level usage example compiles |
 
 The block-wrap test transfers 65,537 blocks in roughly 3–4 seconds on the
@@ -668,6 +681,120 @@ fix from `fix(gui): import the worker thread on every platform`.
   unverified. The synthetic-click drop-down checks above used the GNU debug
   build, not these archives.
 
+### GUI language selection and light/dark theme (2026-11-22, fourteenth run)
+
+Automated: 205 tests pass, clippy and fmt clean, release build 84 s
+(see the table above). The new coverage is the language mapping, the `Text`
+messages, the `.po` catalogue (every `@tr()` string translated, no unused
+entries, matching `{}` placeholders, English-only `.slint` sources), the theme
+preference, the BOM-tolerant state reader and the platform theme parsers.
+
+Headless evidence (`tftpd-r-gui.exe --smoke-test`, which now prints the resolved
+language, the translated tagline — proof that the bundled catalogue was applied
+— the theme choice and the resolved darkness):
+
+| `TFTPD_R_GUI_LANGUAGE` | Output |
+| --- | --- |
+| `en` | `language=en translation=ok tagline=Rust TFTP server theme=system dark=true` |
+| `zh-CN` | `language=zh_CN translation=ok tagline=Rust TFTP 服务端 theme=system dark=true` |
+| `zh-TW` | `language=en translation=ok tagline=Rust TFTP server theme=system dark=true` |
+
+Theme resolution with an isolated `APPDATA` whose `ui-prefs.txt` was seeded
+(`theme-mode=...`); the machine's Windows `AppsUseLightTheme` is `0`, i.e. the
+system preference is dark:
+
+| `theme-mode` | Result |
+| --- | --- |
+| `system` | `theme=system dark=true` (follows the system) |
+| `light` | `theme=light dark=false` |
+| `dark` | `theme=dark dark=true` |
+| `neon` (invalid) | `theme=system dark=true` (falls back to the system) |
+
+Visual check with `PrintWindow` captures of the debug build at 1120×780 logical
+(1960×1365 physical, scale factor 1.75), with an isolated `APPDATA` and the
+development `TFTPD_R_GUI_PREVIEW` variable where a dialog had to be opened:
+
+- **Simplified Chinese + dark settings dialog.** Every label, including the new
+  Appearance row (`外观`: `跟随系统` / `浅色` / `深色`, with `深色` highlighted),
+  the log line and the status bar are Chinese; the whole panel, dialog, inputs
+  and footer use the dark palette; the dialog fits in the window.
+- **English + light main window.** Title bar `TftpdR · Rust TFTP server`,
+  toolbar `Service status / Stopped`, `Start`, `Stop` (disabled), `Settings`,
+  `About`, log header `Activity log / Newest first` with `All levels`, `Export`,
+  `Clear`, English empty-state text in the transfer table, status bar
+  `RFC 1350 · read-only RRQ · uploads disabled`, `0.0.0.0:69`,
+  `No root directory`. The light palette is the previous one, unchanged.
+
+Not verified in this run: a real system-theme change while the panel follows the
+system (the 30 s watcher path was exercised only through the seeded preference);
+a real mouse/keyboard session with the new Appearance buttons; the Linux GUI; and
+the MSVC build of this tree. The `PrintWindow` capture needed a DPI-aware bitmap
+size because the non-DPI-aware helper is virtualized to 1120×780 physical; this
+is a property of the capture tool, not of the panel.
+
+### Daemon log filter without `env-filter` (2026-11-22, fifteenth run)
+
+Size follow-up to ADR 0010, decided in
+[ADR 0016](adr/0016-log-filter-without-env-filter.md). Nothing in the protocol,
+the GUI or the configuration changed; the daemon now parses the level-based
+filter subset itself instead of linking `tracing-subscriber`'s `env-filter`.
+
+- **Attribution.** `CARGO_PROFILE_RELEASE_STRIP=none cargo build --release` on
+  this tree produced 3,773,224 B (daemon) and 13,613,513 B (GUI) unstripped
+  images. `nm -n --demangle` (MinGW binutils 2.46.1) over the COFF symbol table,
+  sizing each code symbol by the distance to the next one, gives a daemon
+  `.text` of 965,632 B. Largest entries: `core` 153,329 B, `clap_builder`
+  105,637 B, `std` 81,203 B, `regex-automata` 71,735 B, `regex-syntax`
+  70,311 B, `alloc` 67,522 B, `tokio` 51,225 B, `toml` 45,610 B,
+  `tracing-subscriber` 36,655 B. The GUI `.text` is 4,363,248 B and dominated
+  by Slint internals (`i_slint_core` 480,891 B, `skrifa` 267,433 B,
+  `read_fonts` 261,102 B, `zeno` 221,432 B, `harfrust` 209,428 B, `usvg`
+  205,165 B, `i_slint_renderer_software` 199,459 B, plus the image decoders),
+  which `i-slint-backend-winit` enables unconditionally; the workspace cannot
+  turn them off without an upstream feature or a fork.
+- **Prototype measurements** (same tree, stripped): baseline 1,357,824 B;
+  fixed `LevelFilter` only 1,059,840 B; the chosen level-based `Targets` filter
+  **1,063,936 B** (−293,888 B, −21.6 %).
+- **Measured and rejected:** `clap` without `color` 18,432 B, without
+  `suggestions` 6,656 B (both cost CLI hints); `slint` `compat-1-2` →
+  `compat-1-18` 0 B; `chrono` with `default-features = false` 0 B. The GUI
+  stayed at 9,036,288 B in every variant.
+- **Implementation.** `crates/tftpd-r-daemon/src/logging.rs` gained
+  `parse_filter` (level / `target=level` / bare target, comma-separated,
+  invalid directives warned and skipped) and installs a `registry` + `fmt::layer`
+  subscriber with `Targets`. Six unit tests cover the parser. The rendered line
+  format is unchanged (UTC timestamp, level, message, fields; ANSI only on a
+  terminal).
+- **Behaviour checks** (release `tftpd-r.exe`, loopback config on port 6969,
+  each run for 2–3 s):
+  - default start printed the same three INFO lines as before, e.g.
+    `2026-11-22T05:38:20.483593Z  INFO starting TFTP server ...`;
+  - `TFTPD_R_LOG=warn` suppressed them;
+  - `--log tftpd_r_core=debug` kept the INFO lines (documented target-narrowing
+    behaviour, unlike `EnvFilter`);
+  - `--log "=info, bogus=loud, info"` printed
+    `warning: ignoring invalid log filter directive "=info"` and
+    `... "bogus=loud"` on stderr and started normally.
+- **0.3.0 candidate build.** Workspace package version and lockfile were updated
+  to `0.3.0`; `cargo check --workspace --offline` passed (11.55 s). The final
+  `cargo build --workspace --release --locked --offline` passed in 66.65 s;
+  `tftpd-r.exe --version` and `tftpd-r-gui.exe --help` both report `0.3.0`.
+  Release sizes are 1,063,936 B (daemon) and 9,036,288 B (GUI). The GUI
+  `--smoke-test` printed `language=zh_CN translation=ok ... theme=system`
+  and exited successfully. `print-default-config` matches `config.example.toml`;
+  `cargo tree -p tftpd-r-daemon --locked --offline` contains no `regex`,
+  `matchers` or `tracing-log` entries.
+- **Gates.** `cargo fmt --all -- --check` exit 0; `cargo clippy --workspace
+  --all-targets --locked --offline -- -D warnings` exit 0; `cargo test --workspace
+  --locked --offline` **211 passed, 1 ignored** (daemon unit 9 → 15);
+  `cargo build --workspace --release --locked --offline` exit 0 in 66.65 s,
+  `tftpd-r.exe` **1,063,936 B**, `tftpd-r-gui.exe` **9,036,288 B** (unchanged).
+- **Not verified here.** MSVC/Linux/arm64 sizes (GNU x64 only; the saving must
+  be remeasured per target), throughput (no benchmark; the change only affects
+  logging), `log`-crate record forwarding (the feature is no longer installed and
+  no daemon dependency uses `log` today), and a real transfer against the new
+  binary (the RRQ path is untouched and covered by the existing suite).
+
 ## Not verified (and therefore not claimed)
 - **External TFTP client interoperability** (tftp-hpa, Tftpd64, PXE firmware,
   U-Boot, etc.). Only the in-repo test client and the raw Python client were
@@ -718,7 +845,14 @@ fix from `fix(gui): import the worker thread on every platform`.
   initial size were verified. Snap layouts and double-click-to-maximize on the
   custom drag area are also untested.
 - **Font rendering beyond this machine:** other DPI scales, Windows locale
-  settings, Linux font stacks and screen readers/accessibility roles.
+  settings, Linux font stacks and screen readers/accessibility roles. The
+  English and Simplified Chinese layouts were captured at one scale factor
+  (1.75) only; a German/Traditional Chinese system is not a supported language,
+  and the English fallback for it was checked headlessly, not visually.
+- **Live system-theme tracking.** The 30 s `SystemThemeWatcher` re-read was not
+  exercised against an actual change of the Windows app theme; only the startup
+  read and the seeded preference were verified. The Linux probe (`gsettings`,
+  `GTK_THEME`) was not executed at all.
 - **Visual sign-off by a designer/user** on the new layout; the screenshots above
   are evidence of rendering, not an approved design review.
 - **Windows Service, IPC, uploads** — not implemented in this release.
@@ -734,6 +868,17 @@ fix from `fix(gui): import the worker thread on every platform`.
    resizing, the service-status chip at the far left of the toolbar, the bind
    address and the root *name* in the status bar, and that Chinese text renders
    without missing glyphs. Confirm that no console window appears.
+2a. Set the Windows display language to Simplified Chinese and relaunch: every
+   label, log line, status text and native dialog caption must be Chinese. Set
+   it to any other language (including Traditional Chinese) and relaunch: the
+   whole panel must be English with no mixed strings. Chinese content on disk and
+   peer addresses must still render correctly in English mode.
+2b. Switch the Windows app theme (`Settings → Personalisation → Colours`) while
+   the panel runs in "Follow system": the panel must turn dark/light within
+   30 seconds without a restart. Then choose Light and Dark in the settings
+   dialog and confirm both apply immediately, survive a relaunch and are not
+   overridden by the system setting. Check the settings dialog, the recent-root
+   menu, the log filter drop-down, the inputs and the scrollbars in both schemes.
 3. Start the server, download a file with a real TFTP client, confirm the file
    hash matches and the transfer appears/disappears in the 传输列表 with a live
    progress bar.
@@ -769,7 +914,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo build --workspace --release
 
-# GUI smoke test (opens a window for ~1.5 s)
+# GUI smoke test (opens a window for ~1.5 s and prints the resolved
+# language, translated tagline, theme and darkness)
 cargo run -p tftpd-r-gui-slint -- --smoke-test
 ```
 

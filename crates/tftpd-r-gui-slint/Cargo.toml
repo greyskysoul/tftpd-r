@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 tftpd-r-core.workspace = true
 chrono.workspace = true
+sys-locale.workspace = true
 tokio.workspace = true
 slint.workspace = true
 thiserror.workspace = true

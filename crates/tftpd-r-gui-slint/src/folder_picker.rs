@@ -1,4 +1,4 @@
-//! Native folder picker without a GUI-toolkit dependency.
+﻿//! Native folder picker without a GUI-toolkit dependency.
 //!
 //! The workspace does not depend on a file-dialog crate and hand-written FFI is
 //! forbidden, so the platform's own dialog is shown through a helper process:
@@ -80,19 +80,22 @@ enum Message {
 
 impl FolderPicker {
     /// Start the worker thread. No helper process is spawned yet.
+    ///
+    /// `title` is the dialog caption in the language chosen at startup; it is
+    /// fixed for the life of the process.
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(title: String) -> Self {
         let (messages, receiver) = mpsc::channel();
         #[cfg(windows)]
         {
             let child = Arc::new(Mutex::new(None));
             let worker_child = Arc::clone(&child);
-            let _ = thread::spawn(move || run_worker(receiver, worker_child));
+            let _ = thread::spawn(move || run_worker(receiver, title, worker_child));
             Self { messages, child }
         }
         #[cfg(not(windows))]
         {
-            let _ = thread::spawn(move || run_worker(receiver));
+            let _ = thread::spawn(move || run_worker(receiver, title));
             Self { messages }
         }
     }
@@ -135,7 +138,7 @@ impl FolderPicker {
 }
 
 #[cfg(windows)]
-fn run_worker(messages: Receiver<Message>, child: Arc<Mutex<Option<Child>>>) {
+fn run_worker(messages: Receiver<Message>, title: String, child: Arc<Mutex<Option<Child>>>) {
     let mut helper: Option<Helper> = None;
     // A helper that could not be started (or died) is not retried: every later
     // request uses the one-shot helper, which keeps the button usable but loses
@@ -145,13 +148,13 @@ fn run_worker(messages: Receiver<Message>, child: Arc<Mutex<Option<Child>>>) {
         match message {
             Message::Warm => {
                 if helper.is_none() && !helper_failed {
-                    helper = Helper::start(Arc::clone(&child));
+                    helper = Helper::start(Arc::clone(&child), &title);
                     helper_failed = helper.is_none();
                 }
             }
             Message::Pick { initial, reply } => {
                 if helper.is_none() && !helper_failed {
-                    helper = Helper::start(Arc::clone(&child));
+                    helper = Helper::start(Arc::clone(&child), &title);
                     helper_failed = helper.is_none();
                 }
                 if let Some(active) = helper.as_mut() {
@@ -171,7 +174,7 @@ fn run_worker(messages: Receiver<Message>, child: Arc<Mutex<Option<Child>>>) {
                         }
                     }
                 }
-                let _ = reply.send(pick_folder_once(initial.as_deref()));
+                let _ = reply.send(pick_folder_once(initial.as_deref(), &title));
             }
             Message::Shutdown => break,
         }
@@ -179,10 +182,10 @@ fn run_worker(messages: Receiver<Message>, child: Arc<Mutex<Option<Child>>>) {
 }
 
 #[cfg(not(windows))]
-fn run_worker(messages: Receiver<Message>) {
+fn run_worker(messages: Receiver<Message>, title: String) {
     while let Ok(message) = messages.recv() {
         if let Message::Pick { initial, reply } = message {
-            let _ = reply.send(pick_folder_once(initial.as_deref()));
+            let _ = reply.send(pick_folder_once(initial.as_deref(), &title));
         }
     }
 }
@@ -198,7 +201,7 @@ struct Helper {
 
 #[cfg(windows)]
 impl Helper {
-    fn start(slot: Arc<Mutex<Option<Child>>>) -> Option<Self> {
+    fn start(slot: Arc<Mutex<Option<Child>>>, title: &str) -> Option<Self> {
         let mut command = Command::new(powershell_program());
         command
             .args([
@@ -208,6 +211,9 @@ impl Helper {
                 "-Command",
                 PERSISTENT_SCRIPT,
             ])
+            // The caption travels through the environment, never through the
+            // script text (that would be an injection risk).
+            .env("TFTPD_R_PICKER_TITLE", title)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -293,8 +299,8 @@ fn parse_reply(line: &str) -> Option<Option<PathBuf>> {
     Some((!path.is_empty()).then(|| PathBuf::from(path)))
 }
 
-fn pick_folder_once(initial: Option<&Path>) -> Option<PathBuf> {
-    let output = platform_pick(initial)?;
+fn pick_folder_once(initial: Option<&Path>, title: &str) -> Option<PathBuf> {
+    let output = platform_pick(initial, title)?;
     accept_selection(&String::from_utf8_lossy(&output.stdout))
 }
 
@@ -323,7 +329,7 @@ const PERSISTENT_SCRIPT: &str = concat!(
     "$initial = $in.ReadLine(); ",
     "if ($null -eq $initial) { break }; ",
     "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; ",
-    "$dialog.Description = '选择 TFTP 根目录'; ",
+    "$dialog.Description = $env:TFTPD_R_PICKER_TITLE; ",
     "$dialog.ShowNewFolderButton = $true; ",
     "if ($initial -and (Test-Path -LiteralPath $initial)) { $dialog.SelectedPath = $initial }; ",
     "$owner = New-Object System.Windows.Forms.Form; ",
@@ -343,9 +349,9 @@ const PERSISTENT_SCRIPT: &str = concat!(
 );
 
 #[cfg(windows)]
-fn platform_pick(initial: Option<&Path>) -> Option<std::process::Output> {
-    // `SelectedPath` is read from an environment variable: interpolating the
-    // path into the script would be an injection risk.
+fn platform_pick(initial: Option<&Path>, title: &str) -> Option<std::process::Output> {
+    // `SelectedPath` and the dialog title are read from environment variables:
+    // interpolating them into the script would be an injection risk.
     //
     // The dialog is shown with a tiny, invisible, top-most owner form. Without
     // an owner the helper process's dialog can be created behind the panel (or
@@ -355,7 +361,7 @@ fn platform_pick(initial: Option<&Path>) -> Option<std::process::Output> {
         "Add-Type -AssemblyName System.Windows.Forms; ",
         "Add-Type -AssemblyName System.Drawing; ",
         "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; ",
-        "$dialog.Description = '选择 TFTP 根目录'; ",
+        "$dialog.Description = $env:TFTPD_R_PICKER_TITLE; ",
         "$dialog.ShowNewFolderButton = $true; ",
         "$initial = $env:TFTPD_R_INITIAL_DIR; ",
         "if ($initial -and (Test-Path -LiteralPath $initial)) { $dialog.SelectedPath = $initial }; ",
@@ -381,6 +387,7 @@ fn platform_pick(initial: Option<&Path>) -> Option<std::process::Output> {
             "TFTPD_R_INITIAL_DIR",
             initial.unwrap_or_else(|| Path::new("")),
         )
+        .env("TFTPD_R_PICKER_TITLE", title)
         .creation_flags(CREATE_NO_WINDOW);
     command.output().ok()
 }
@@ -402,17 +409,18 @@ pub(crate) fn powershell_program() -> PathBuf {
 }
 
 #[cfg(not(windows))]
-fn platform_pick(initial: Option<&Path>) -> Option<std::process::Output> {
+fn platform_pick(initial: Option<&Path>, title: &str) -> Option<std::process::Output> {
     let initial = initial.unwrap_or_else(|| Path::new(""));
     let zenity = ["/usr/bin/zenity", "/usr/local/bin/zenity"]
         .into_iter()
         .find(|program| Path::new(program).is_file());
     if let Some(program) = zenity {
         let mut command = std::process::Command::new(program);
+        // The title is one argument, not script text (and no shell is used).
         command.args([
             "--file-selection",
             "--directory",
-            "--title=选择 TFTP 根目录",
+            &format!("--title={title}"),
             "--filename",
         ]);
         command.arg(format!("{}/", initial.display()));
@@ -426,7 +434,11 @@ fn platform_pick(initial: Option<&Path>) -> Option<std::process::Output> {
         .into_iter()
         .find(|program| Path::new(program).is_file())?;
     let mut command = std::process::Command::new(kdialog);
-    command.arg("--getexistingdirectory").arg(initial);
+    command
+        .arg("--title")
+        .arg(title)
+        .arg("--getexistingdirectory")
+        .arg(initial);
     command.output().ok()
 }
 
@@ -490,7 +502,7 @@ mod tests {
         use std::sync::mpsc::TryRecvError;
         use std::time::{Duration, Instant};
 
-        let picker = FolderPicker::new();
+        let picker = FolderPicker::new("Select the TFTP root directory".to_string());
         picker.prewarm();
         // WinForms needs ~1.5 s to load; the worker starts it in the
         // background, so give it time before opening the dialog.

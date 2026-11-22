@@ -10,6 +10,8 @@
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 
+use crate::i18n::Text;
+
 /// Result of the save-file dialog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SaveChoice {
@@ -25,12 +27,13 @@ pub enum SaveChoice {
 ///
 /// `default_name` is a file name, not a path: it is passed through an
 /// environment variable (Windows) or a fixed argument (Unix), never through a
-/// shell.
+/// shell. The dialog title and file-type filter are translated by the caller;
+/// they travel the same way, so no message text ever becomes script text.
 #[must_use]
-pub fn save_log_async(default_name: String) -> Receiver<SaveChoice> {
+pub fn save_log_async(default_name: String, text: Text) -> Receiver<SaveChoice> {
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
-        let _ = sender.send(platform_save(&default_name));
+        let _ = sender.send(platform_save(&default_name, text));
     });
     receiver
 }
@@ -45,15 +48,15 @@ fn accept_save_path(stdout: &str) -> Option<PathBuf> {
 }
 
 #[cfg(windows)]
-fn platform_save(default_name: &str) -> SaveChoice {
+fn platform_save(default_name: &str, text: Text) -> SaveChoice {
     use std::os::windows::process::CommandExt;
 
     let script = concat!(
         "Add-Type -AssemblyName System.Windows.Forms; ",
         "Add-Type -AssemblyName System.Drawing; ",
         "$dialog = New-Object System.Windows.Forms.SaveFileDialog; ",
-        "$dialog.Title = '导出运行日志'; ",
-        "$dialog.Filter = '文本文件 (*.txt)|*.txt|所有文件 (*.*)|*.*'; ",
+        "$dialog.Title = $env:TFTPD_R_SAVE_TITLE; ",
+        "$dialog.Filter = $env:TFTPD_R_SAVE_FILTER; ",
         "$dialog.FileName = $env:TFTPD_R_LOG_NAME; ",
         "$documents = [Environment]::GetFolderPath('MyDocuments'); ",
         "if ($documents) { $dialog.InitialDirectory = $documents }; ",
@@ -73,6 +76,8 @@ fn platform_save(default_name: &str) -> SaveChoice {
     let output = std::process::Command::new(crate::folder_picker::powershell_program())
         .args(["-NoLogo", "-NoProfile", "-STA", "-Command", script])
         .env("TFTPD_R_LOG_NAME", default_name)
+        .env("TFTPD_R_SAVE_TITLE", text.save_dialog_title())
+        .env("TFTPD_R_SAVE_FILTER", text.save_dialog_filter())
         .creation_flags(crate::folder_picker::CREATE_NO_WINDOW)
         .output();
     match output {
@@ -85,7 +90,7 @@ fn platform_save(default_name: &str) -> SaveChoice {
 }
 
 #[cfg(not(windows))]
-fn platform_save(default_name: &str) -> SaveChoice {
+fn platform_save(default_name: &str, text: Text) -> SaveChoice {
     use std::path::Path;
 
     let zenity = ["/usr/bin/zenity", "/usr/local/bin/zenity"]
@@ -97,7 +102,7 @@ fn platform_save(default_name: &str) -> SaveChoice {
                 "--file-selection",
                 "--save",
                 "--confirm-overwrite",
-                "--title=导出运行日志",
+                &format!("--title={}", text.save_dialog_title()),
             ])
             .arg(format!("--filename={default_name}"))
             .output();
@@ -117,9 +122,11 @@ fn platform_save(default_name: &str) -> SaveChoice {
         .find(|program| Path::new(program).is_file());
     if let Some(program) = kdialog {
         let output = std::process::Command::new(program)
+            .arg("--title")
+            .arg(text.save_dialog_title())
             .arg("--getsavefilename")
             .arg(default_name)
-            .arg("文本文件 (*.txt)")
+            .arg(text.save_dialog_kdialog_filter())
             .output();
         return match output {
             Ok(output) if output.status.success() => {

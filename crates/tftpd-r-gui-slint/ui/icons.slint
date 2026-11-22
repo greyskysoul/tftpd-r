@@ -38,10 +38,14 @@ export global Icons {
 }
 
 // A Material icon rendered as a vector path. `path-data` receives one of the
-// `Icons.*` constants; `icon-size` is the rendered square size in px.
+// `Icons.*` constants; `icon-size` is the rendered square size in px. The tint
+// defaults to the body text colour so an icon without an explicit tint follows
+// the light/dark palette.
+import { Theme } from "theme.slint";
+
 export component MaterialIcon inherits Path {
     in property <string> path-data;
-    in property <color> tint: #334155;
+    in property <color> tint: Theme.text;
     in property <length> icon-size: 20px;
 
     width: self.icon-size;

@@ -7,7 +7,7 @@ import { Panel } from "widgets.slint";
 
 export component TransfersPanel inherits Panel {
     in property <[TransferRow]> rows;
-    in property <string> active-text: "0 个进行中";
+    in property <string> active-text: "0 active";
     in property <string> throughput-text: "—";
 
     min-height: 170px;
@@ -28,7 +28,7 @@ export component TransfersPanel inherits Panel {
                 icon-size: 17px;
             }
             Text {
-                text: "传输列表";
+                text: @tr("Transfers");
                 color: Theme.text-strong;
                 font-size: 14px;
                 font-weight: 600;
@@ -64,11 +64,11 @@ export component TransfersPanel inherits Panel {
                 padding-left: 10px;
                 padding-right: 10px;
                 spacing: 8px;
-                Text { text: "文件"; color: Theme.text-faint; font-size: 11px; font-weight: 600; horizontal-stretch: 3; vertical-alignment: center; }
-                Text { text: "客户端"; color: Theme.text-faint; font-size: 11px; font-weight: 600; width: 150px; vertical-alignment: center; }
-                Text { text: "进度"; color: Theme.text-faint; font-size: 11px; font-weight: 600; width: 160px; vertical-alignment: center; }
-                Text { text: "大小"; color: Theme.text-faint; font-size: 11px; font-weight: 600; width: 150px; vertical-alignment: center; }
-                Text { text: "状态"; color: Theme.text-faint; font-size: 11px; font-weight: 600; width: 80px; vertical-alignment: center; }
+                Text { text: @tr("File"); color: Theme.text-faint; font-size: 11px; font-weight: 600; horizontal-stretch: 3; vertical-alignment: center; }
+                Text { text: @tr("Client"); color: Theme.text-faint; font-size: 11px; font-weight: 600; width: 150px; vertical-alignment: center; }
+                Text { text: @tr("Progress"); color: Theme.text-faint; font-size: 11px; font-weight: 600; width: 160px; vertical-alignment: center; }
+                Text { text: @tr("Size"); color: Theme.text-faint; font-size: 11px; font-weight: 600; width: 150px; vertical-alignment: center; }
+                Text { text: @tr("State"); color: Theme.text-faint; font-size: 11px; font-weight: 600; width: 80px; vertical-alignment: center; }
             }
         }
 
@@ -88,7 +88,7 @@ export component TransfersPanel inherits Panel {
                             icon-size: 30px;
                         }
                         Text {
-                            text: "暂无传输。服务启动后，客户端下载文件会显示在这里。";
+                            text: @tr("No transfers. Client downloads appear here once the server starts.");
                             color: Theme.text-faint;
                             font-size: 12px;
                             horizontal-alignment: center;
@@ -175,10 +175,10 @@ export component TransfersPanel inherits Panel {
                                 width: 80px;
                                 height: 20px;
                                 border-radius: 4px;
-                                background: row.progress >= 1 ? #dcfce7 : #eff6ff;
+                                background: row.progress >= 1 ? Theme.success-soft : Theme.info-soft;
                                 Text {
                                     text: row.status;
-                                    color: row.progress >= 1 ? #15803d : #1d4ed8;
+                                    color: row.progress >= 1 ? Theme.success-text : Theme.info-text;
                                     font-size: 10px;
                                     font-weight: 600;
                                     horizontal-alignment: center;
@@ -188,7 +188,7 @@ export component TransfersPanel inherits Panel {
                                 }
                             }
                         }
-                        Rectangle { height: 1px; background: #f1f5f9; }
+                        Rectangle { height: 1px; background: Theme.panel-border; }
                     }
                 }
             }

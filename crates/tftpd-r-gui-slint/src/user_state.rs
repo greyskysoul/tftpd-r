@@ -13,12 +13,16 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+use crate::theme::ThemeMode;
+
 /// File with the canonicalised, most-recently-used root directories.
 pub const RECENT_DIRS_FILE: &str = "recent-dirs.txt";
 /// File with the root directory of the last successful start.
 pub const LAST_ROOT_FILE: &str = "last-root.txt";
 /// File with one-time setup flags.
 pub const SETUP_STATE_FILE: &str = "ui-state.txt";
+/// File with the panel's display preferences (currently the theme choice).
+pub const UI_PREFS_FILE: &str = "ui-prefs.txt";
 
 /// Portable state directory used when the per-user configuration directory
 /// cannot be created (for example in a low-integrity or otherwise restricted
@@ -117,6 +121,16 @@ pub fn state_file(name: &str) -> Option<PathBuf> {
     state_location().map(|location| location.dir.join(name))
 }
 
+/// Read one state file as text, removing a UTF-8 byte-order mark.
+///
+/// The panel writes these files without a BOM, but an operator editing them in
+/// a Windows editor can add one; without stripping it the first line would
+/// never match its key and the stored value would silently be ignored.
+fn read_state_text(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    Some(text.trim_start_matches('\u{feff}').to_string())
+}
+
 /// The portable fallback directory when the per-user directory was not usable.
 #[must_use]
 pub fn fallback_state_dir() -> Option<&'static Path> {
@@ -212,7 +226,7 @@ impl LastRoot {
         let mut discarded = None;
         if let Some(line) = storage
             .as_ref()
-            .and_then(|storage| std::fs::read_to_string(storage).ok())
+            .and_then(|storage| read_state_text(storage))
             .map(|text| text.trim().to_string())
             .filter(|line| !line.is_empty())
         {
@@ -278,7 +292,7 @@ impl SetupState {
     fn load_from(storage: Option<PathBuf>) -> Self {
         let shown = storage
             .as_ref()
-            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|path| read_state_text(path))
             .is_some_and(|text| text.lines().any(|line| line.trim() == "setup-shown=true"));
         Self { storage, shown }
     }
@@ -292,6 +306,86 @@ impl SetupState {
         }
         // Best effort: a read-only profile must not break the panel.
         let _ = std::fs::write(storage, "setup-shown=true\n");
+    }
+}
+
+/// Persistent display preferences of the panel.
+///
+/// Currently only the theme choice. Unlike the server configuration this is a
+/// local display preference: it is not part of `ServerConfig`, never affects the
+/// TFTP server and is stored in its own small state file so the setup flag and
+/// the remembered root keep their meaning.
+pub struct UiPrefs {
+    storage: Option<PathBuf>,
+    theme_mode: ThemeMode,
+}
+
+impl UiPrefs {
+    /// Load the preferences for the current user.
+    #[must_use]
+    pub fn load() -> Self {
+        Self::load_from(state_file(UI_PREFS_FILE))
+    }
+
+    /// The persisted theme choice (follow the system when unset or invalid).
+    #[must_use]
+    pub fn theme_mode(&self) -> ThemeMode {
+        self.theme_mode
+    }
+
+    /// Preferences without a storage file, for tests in other modules.
+    #[cfg(test)]
+    #[must_use]
+    pub fn empty_for_tests() -> Self {
+        Self {
+            storage: None,
+            theme_mode: ThemeMode::System,
+        }
+    }
+
+    /// Remember `mode` and write the state file.
+    ///
+    /// The in-memory value is updated even when the write fails, so the choice
+    /// still applies for the current session; the caller decides whether to tell
+    /// the operator.
+    ///
+    /// # Errors
+    ///
+    /// Returns the filesystem error when the state file cannot be written.
+    pub fn set_theme_mode(&mut self, mode: ThemeMode) -> std::io::Result<()> {
+        self.theme_mode = mode;
+        self.save()
+    }
+
+    fn load_from(storage: Option<PathBuf>) -> Self {
+        let theme_mode = storage
+            .as_ref()
+            .and_then(|storage| read_state_text(storage))
+            .and_then(|text| {
+                text.lines().find_map(|line| {
+                    line.trim()
+                        .strip_prefix("theme-mode=")
+                        .and_then(ThemeMode::parse)
+                })
+            })
+            .unwrap_or_default();
+        Self {
+            storage,
+            theme_mode,
+        }
+    }
+
+    fn save(&self) -> std::io::Result<()> {
+        let Some(storage) = &self.storage else {
+            return Ok(());
+        };
+        if let Some(parent) = storage.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(
+            storage,
+            format!("theme-mode={}\n", self.theme_mode.as_str()),
+        )
     }
 }
 
@@ -476,5 +570,101 @@ mod tests {
         state.mark_setup_shown();
         // The in-memory flag still suppresses a second dialog in this run.
         assert!(!state.should_show_setup());
+    }
+
+    #[test]
+    fn the_theme_preference_round_trips_through_the_state_file() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let storage = temp.path().join(UI_PREFS_FILE);
+        let mut prefs = UiPrefs::load_from(Some(storage.clone()));
+        // Follow the system when nothing has been stored yet.
+        assert_eq!(prefs.theme_mode(), ThemeMode::System);
+
+        prefs
+            .set_theme_mode(ThemeMode::Dark)
+            .expect("write the preference");
+        assert_eq!(prefs.theme_mode(), ThemeMode::Dark);
+        assert_eq!(
+            std::fs::read_to_string(&storage).expect("read preference"),
+            "theme-mode=dark\n"
+        );
+        assert_eq!(
+            UiPrefs::load_from(Some(storage.clone())).theme_mode(),
+            ThemeMode::Dark
+        );
+
+        prefs
+            .set_theme_mode(ThemeMode::Light)
+            .expect("overwrite the preference");
+        assert_eq!(
+            UiPrefs::load_from(Some(storage)).theme_mode(),
+            ThemeMode::Light
+        );
+    }
+
+    #[test]
+    fn a_missing_or_unreadable_theme_preference_falls_back_to_the_system() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        assert_eq!(
+            UiPrefs::load_from(Some(temp.path().join(UI_PREFS_FILE))).theme_mode(),
+            ThemeMode::System
+        );
+
+        let corrupt = temp.path().join("corrupt.txt");
+        std::fs::write(&corrupt, "theme-mode=neon\nsomething-else=1\n").expect("write corrupt");
+        assert_eq!(
+            UiPrefs::load_from(Some(corrupt)).theme_mode(),
+            ThemeMode::System
+        );
+
+        // A directory where a file is expected is treated the same way.
+        let directory = temp.path().join("prefs-dir");
+        std::fs::create_dir(&directory).expect("prefs dir");
+        assert_eq!(
+            UiPrefs::load_from(Some(directory)).theme_mode(),
+            ThemeMode::System
+        );
+    }
+
+    #[test]
+    fn a_failed_theme_write_keeps_the_choice_for_this_session() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let parent_file = temp.path().join("not-a-directory");
+        std::fs::write(&parent_file, b"x").expect("write parent file");
+        let mut prefs = UiPrefs::load_from(Some(parent_file.join(UI_PREFS_FILE)));
+        // The write fails, but the operator still gets the chosen theme now.
+        assert!(prefs.set_theme_mode(ThemeMode::Dark).is_err());
+        assert_eq!(prefs.theme_mode(), ThemeMode::Dark);
+    }
+
+    #[test]
+    fn a_byte_order_mark_does_not_hide_the_stored_values() {
+        // An editor on Windows can add a UTF-8 BOM; without stripping it the
+        // first key would never match and the value would be silently ignored.
+        let temp = tempfile::tempdir().expect("temp dir");
+        let theme = temp.path().join(UI_PREFS_FILE);
+        std::fs::write(&theme, "\u{feff}theme-mode=dark\n").expect("write theme");
+        assert_eq!(
+            UiPrefs::load_from(Some(theme)).theme_mode(),
+            ThemeMode::Dark
+        );
+
+        let setup = temp.path().join(SETUP_STATE_FILE);
+        std::fs::write(&setup, "\u{feff}setup-shown=true\n").expect("write setup");
+        assert!(!SetupState::load_from(Some(setup)).should_show_setup());
+
+        let root = temp.path().join("share");
+        std::fs::create_dir(&root).expect("share dir");
+        let canonical = std::fs::canonicalize(&root).expect("canonical");
+        let last_root = temp.path().join(LAST_ROOT_FILE);
+        std::fs::write(
+            &last_root,
+            format!("\u{feff}{}\n", canonical.to_string_lossy()),
+        )
+        .expect("write last root");
+        assert_eq!(
+            LastRoot::load_from(Some(last_root)).path(),
+            Some(canonical.as_path())
+        );
     }
 }

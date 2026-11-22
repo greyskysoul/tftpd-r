@@ -4,7 +4,9 @@ import { Theme } from "theme.slint";
 import { IconButton, SmallButton, BrandMark } from "widgets.slint";
 
 export component AboutDialog inherits Rectangle {
-    in property <string> app-version: "0.2.1";
+    in property <string> app-version: "0.0.0";
+    // Name of the language the panel started in (see `i18n::Language`).
+    in property <string> language: "";
 
     callback close-requested();
 
@@ -40,7 +42,7 @@ export component AboutDialog inherits Rectangle {
                 cross-axis-alignment: center;
                 spacing: 7px;
                 Text {
-                    text: "关于";
+                    text: @tr("About");
                     color: Theme.text-strong;
                     font-size: 16px;
                     font-weight: 700;
@@ -70,7 +72,12 @@ export component AboutDialog inherits Rectangle {
                         font-weight: 700;
                     }
                     Text {
-                        text: "版本 " + root.app-version;
+                        text: @tr("Version {}", root.app-version);
+                        color: Theme.text-muted;
+                        font-size: 12px;
+                    }
+                    Text {
+                        text: @tr("Language: {}", root.language);
                         color: Theme.text-muted;
                         font-size: 12px;
                     }
@@ -78,7 +85,7 @@ export component AboutDialog inherits Rectangle {
             }
 
             Text {
-                text: "TftpdR 中的 R 代表 Rust。这是一个只读 TFTP 服务端，守护进程与桌面面板共享同一套协议内核与配置校验规则。";
+                text: @tr("The R in TftpdR stands for Rust. This is a read-only TFTP server; the daemon and the desktop panel share one protocol core and one set of configuration rules.");
                 color: Theme.text;
                 font-size: 12px;
                 wrap: word-wrap;
@@ -90,19 +97,19 @@ export component AboutDialog inherits Rectangle {
                     cross-axis-alignment: center;
                     spacing: 7px;
                     MaterialIcon { path-data: Icons.check-circle; tint: Theme.success; icon-size: 14px; }
-                    Text { text: "RFC 1350 RRQ 下载，WRQ 显式拒绝（只读）"; color: Theme.text; font-size: 11px; }
+                    Text { text: @tr("RFC 1350 RRQ downloads, WRQ explicitly refused (read-only)"); color: Theme.text; font-size: 11px; }
                 }
                 HorizontalLayout {
                     cross-axis-alignment: center;
                     spacing: 7px;
                     MaterialIcon { path-data: Icons.check-circle; tint: Theme.success; icon-size: 14px; }
-                    Text { text: "blksize / timeout / tsize 选项协商与重传"; color: Theme.text; font-size: 11px; }
+                    Text { text: @tr("blksize / timeout / tsize option negotiation and retransmission"); color: Theme.text; font-size: 11px; }
                 }
                 HorizontalLayout {
                     cross-axis-alignment: center;
                     spacing: 7px;
                     MaterialIcon { path-data: Icons.check-circle; tint: Theme.success; icon-size: 14px; }
-                    Text { text: "组件级路径沙箱，拒绝越权、符号链接与设备名"; color: Theme.text; font-size: 11px; }
+                    Text { text: @tr("Component-wise path sandbox that rejects traversal, symlinks and device names"); color: Theme.text; font-size: 11px; }
                 }
             }
 
@@ -111,12 +118,12 @@ export component AboutDialog inherits Rectangle {
             VerticalLayout {
                 spacing: 3px;
                 Text {
-                    text: "图标：Google Material Design Icons（Apache License 2.0）";
+                    text: @tr("Icons: Google Material Design Icons (Apache License 2.0)");
                     color: Theme.text-muted;
                     font-size: 10px;
                 }
                 Text {
-                    text: "许可证：MIT OR Apache-2.0 · 上传功能未实现，服务端默认只读";
+                    text: @tr("License: MIT OR Apache-2.0 · uploads are not implemented, the server is read-only");
                     color: Theme.text-muted;
                     font-size: 10px;
                 }
@@ -128,7 +135,7 @@ export component AboutDialog inherits Rectangle {
                 cross-axis-alignment: center;
                 Rectangle { horizontal-stretch: 1; background: transparent; }
                 SmallButton {
-                    label: "关闭";
+                    label: @tr("Close");
                     primary: true;
                     button-width: 72px;
                     clicked => { root.close-requested(); }

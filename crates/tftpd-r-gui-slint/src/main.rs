@@ -12,10 +12,12 @@ slint::include_modules!();
 
 mod controller;
 mod folder_picker;
+mod i18n;
 mod log_export;
 mod logging;
 mod netif;
 mod recent;
+mod theme;
 mod user_state;
 
 use std::cell::RefCell;
@@ -36,12 +38,14 @@ use tftpd_r_core::ServerConfig;
 
 use controller::EmbeddedController;
 use folder_picker::FolderPicker;
+use i18n::{Language, Text};
 use log_export::SaveChoice;
 use logging::{
     export_file_name, format_export, write_export, LogEntry, LogFilter, LogLevel, MAX_LOG_ROWS,
 };
 use recent::RecentDirs;
-use user_state::{fallback_state_dir, LastRoot, SetupState};
+use theme::{SystemThemeWatcher, ThemeMode};
+use user_state::{fallback_state_dir, LastRoot, SetupState, UiPrefs};
 
 const UI_TICK: Duration = Duration::from_millis(200);
 
@@ -86,6 +90,15 @@ struct AddressChoice {
 struct UiState {
     last_seq: u64,
     last_status_key: i32,
+    /// Localised operator-facing text for the language chosen at startup.
+    text: Text,
+    /// Theme choice of the operator; `None` would mean "unset", but the
+    /// preference always resolves to [`ThemeMode::System`] by default.
+    theme_mode: ThemeMode,
+    /// Persisted UI preferences (currently only the theme choice).
+    prefs: UiPrefs,
+    /// Newest observed system dark-mode value, refreshed from the watcher.
+    system_dark: bool,
     /// Retained activity-log entries, newest first.
     logs: VecDeque<LogEntry>,
     /// Which severity the log table shows (display-only filter).
@@ -157,16 +170,56 @@ struct PendingLogExport {
     text: String,
 }
 
+/// Language and appearance settings of the panel, decided at startup.
+///
+/// Grouped so [`UiState::new`] stays readable and so the two things that are
+/// *not* server configuration (the startup language and the theme preference)
+/// travel together.
+struct Appearance {
+    text: Text,
+    theme_mode: ThemeMode,
+    prefs: UiPrefs,
+    system_dark: bool,
+}
+
+impl Appearance {
+    fn new(text: Text, theme_mode: ThemeMode, prefs: UiPrefs, system_dark: bool) -> Self {
+        Self {
+            text,
+            theme_mode,
+            prefs,
+            system_dark,
+        }
+    }
+
+    /// English panel that follows the system theme, without a state file.
+    #[cfg(test)]
+    fn for_tests(text: Text) -> Self {
+        Self::new(text, ThemeMode::System, UiPrefs::empty_for_tests(), false)
+    }
+}
+
 impl UiState {
     fn new(
         config: ServerConfig,
         recent: RecentDirs,
         last_root: LastRoot,
         discovered: Arc<StdMutex<Option<Vec<IpAddr>>>>,
+        appearance: Appearance,
     ) -> Self {
+        let Appearance {
+            text,
+            theme_mode,
+            prefs,
+            system_dark,
+        } = appearance;
         Self {
             last_seq: 0,
             last_status_key: 0,
+            text,
+            theme_mode,
+            prefs,
+            system_dark,
             logs: VecDeque::new(),
             log_filter: LogFilter::All,
             log_model: Rc::new(VecModel::default()),
@@ -184,11 +237,16 @@ impl UiState {
             address_options: Vec::new(),
             discovered,
             discovery_applied: false,
-            folder_picker: FolderPicker::new(),
+            folder_picker: FolderPicker::new(text.folder_dialog_title().to_string()),
             pending_pick: None,
             picker_prewarmed: false,
             log_export: None,
         }
+    }
+
+    /// Whether the panel is currently dark.
+    fn is_dark(&self) -> bool {
+        self.theme_mode.is_dark(self.system_dark)
     }
 
     fn push_log(&mut self, level: LogLevel, message: impl Into<String>) {
@@ -244,18 +302,15 @@ impl UiState {
         if root_is_set(&self.config.root_dir) {
             let root = self.config.root_dir.clone();
             match self.last_root.record(&root) {
-                Ok(true) => self.push_log(
-                    LogLevel::Info,
-                    format!(
-                        "已记住根目录：{}，下次启动将自动恢复。",
-                        display_root_path(&root)
-                    ),
-                ),
+                Ok(true) => {
+                    let message = self.text.root_remembered(&display_root_path(&root));
+                    self.push_log(LogLevel::Info, message);
+                }
                 Ok(false) => {}
-                Err(error) => self.push_log(
-                    LogLevel::Warn,
-                    format!("无法记住根目录：{error}；下次启动不会自动恢复。"),
-                ),
+                Err(error) => {
+                    let message = self.text.root_not_remembered(&error.to_string());
+                    self.push_log(LogLevel::Warn, message);
+                }
             }
         }
     }
@@ -287,18 +342,22 @@ impl UiState {
     }
 
     fn rebuild_address_options(&mut self, selected: &[IpAddr], discovered: &[IpAddr]) {
-        self.address_options = build_address_choices(selected, discovered);
+        self.address_options = build_address_choices(selected, discovered, self.text);
     }
 
     fn bind_summary(&self) -> String {
-        bind_summary_text(&self.address_options)
+        bind_summary_text(&self.address_options, self.text)
     }
 }
 
 /// Build the picker entries: the two mandated special addresses first, then the
 /// discovered interface addresses, then any selected address that discovery did
 /// not report (so a hand-written configuration is never silently dropped).
-fn build_address_choices(selected: &[IpAddr], discovered: &[IpAddr]) -> Vec<AddressChoice> {
+fn build_address_choices(
+    selected: &[IpAddr],
+    discovered: &[IpAddr],
+    text: Text,
+) -> Vec<AddressChoice> {
     let mut ips: Vec<IpAddr> = vec![
         IpAddr::V4(Ipv4Addr::UNSPECIFIED),
         IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -311,25 +370,22 @@ fn build_address_choices(selected: &[IpAddr], discovered: &[IpAddr]) -> Vec<Addr
     ips.into_iter()
         .map(|ip| AddressChoice {
             ip,
-            label: address_label(ip),
+            label: address_label(ip, text),
             selected: selected.contains(&ip),
         })
         .collect()
 }
 
-fn bind_summary_text(options: &[AddressChoice]) -> String {
+fn bind_summary_text(options: &[AddressChoice], text: Text) -> String {
     let selected: Vec<&AddressChoice> = options.iter().filter(|option| option.selected).collect();
     match selected.len() {
-        0 => "未选择地址".to_string(),
+        0 => text.no_address_selected().to_string(),
         1 | 2 => selected
             .iter()
             .map(|option| option.label.clone())
             .collect::<Vec<_>>()
-            .join("、"),
-        count => format!(
-            "{}、{} 等 {count} 个地址",
-            selected[0].label, selected[1].label
-        ),
+            .join(text.list_separator()),
+        count => text.address_count_summary(&selected[0].label, &selected[1].label, count),
     }
 }
 
@@ -374,12 +430,60 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let discovered = Arc::new(StdMutex::new(None));
     spawn_discovery(discovered.clone());
 
+    // Language: decided once, from the system locale. Simplified Chinese is the
+    // only supported translation; every other locale (and a failed detection)
+    // keeps the English source strings. The choice drives both the bundled
+    // Slint translation and the strings the Rust side builds.
+    //
+    // `TFTPD_R_GUI_LANGUAGE` is a development/diagnostic override: a machine
+    // whose Windows UI language is, say, English cannot otherwise be used to
+    // look at the Chinese layout. It is not reachable from the UI and is
+    // documented as a development aid only.
+    let language = match std::env::var("TFTPD_R_GUI_LANGUAGE") {
+        Ok(value) => Language::from_locale(Some(&value)),
+        Err(_) => Language::detect(),
+    };
+    let text = Text::new(language);
+
+    // Theme: the persisted preference decides between following the system and
+    // forcing light/dark. Reading the system value starts a helper process, so
+    // it happens once here (before the first frame) and afterwards on the
+    // watcher thread.
+    let prefs = UiPrefs::load();
+    let theme_mode = prefs.theme_mode();
+    let theme_watcher = SystemThemeWatcher::start();
+    let system_dark = theme_watcher.latest().unwrap_or(false);
+    theme_watcher.set_enabled(theme_mode == ThemeMode::System);
+    // The watcher must outlive the UI timer closure (which polls it) and is
+    // stopped when the event loop ends.
+    let theme_watcher_slot: Rc<RefCell<Option<SystemThemeWatcher>>> =
+        Rc::new(RefCell::new(Some(theme_watcher)));
+
     let app = AppWindow::new()?;
     app.set_app_icon(app_icon());
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
+    app.set_language(language.display_name().into());
+    // Selecting the bundled catalogue must happen after the first component
+    // exists; `"en"` selects the source strings. This also overrides Slint's
+    // own locale guess, which would treat e.g. zh-TW as Chinese.
+    let translation = slint::select_bundled_translation(language.slint_locale());
+    if let Err(error) = &translation {
+        eprintln!(
+            "warning: cannot select the bundled translation {:?}: {error}",
+            language.slint_locale()
+        );
+    }
 
-    let mut state = UiState::new(initial_config, recent, last_root, discovered);
+    let mut state = UiState::new(
+        initial_config,
+        recent,
+        last_root,
+        discovered,
+        Appearance::new(text, theme_mode, prefs, system_dark),
+    );
     app.set_log_filter(state.log_filter.key().into());
+    app.set_theme_mode(state.theme_mode.slint_value());
+    apply_theme(&app, &state);
     apply_config_to_settings(&app, &mut state);
 
     // First start without a usable `config.toml`: open the settings dialog so
@@ -453,64 +557,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     state.refresh_recent_model();
     state.push_log(
         LogLevel::Info,
-        format!(
-            "TftpdR {} 面板已启动：只读 RRQ，上传已禁用。",
-            env!("CARGO_PKG_VERSION")
-        ),
+        state.text.panel_started(env!("CARGO_PKG_VERSION")),
     );
     if let Some(dir) = fallback_state_dir() {
-        state.push_log(
-            LogLevel::Warn,
-            format!(
-                "用户配置目录不可写；状态文件改用便携目录：{}。",
-                display_path(dir)
-            ),
-        );
+        let message = state.text.portable_state_dir(&display_path(dir));
+        state.push_log(LogLevel::Warn, message);
     }
     if let Some(root) = restored_root {
-        state.push_log(LogLevel::Info, format!("已恢复上次使用的根目录：{root}。"));
+        let message = state.text.root_restored(&root);
+        state.push_log(LogLevel::Info, message);
     }
     if let Some(stale) = stale_root {
-        state.push_log(
-            LogLevel::Warn,
-            format!(
-                "上次使用的根目录已不可用，已忽略：{}。",
-                display_path(Path::new(&stale))
-            ),
-        );
+        let message = state.text.root_stale(&display_path(Path::new(&stale)));
+        state.push_log(LogLevel::Warn, message);
     }
     if initial.is_configured() {
-        state.push_log(LogLevel::Info, "已加载 config.toml。");
+        state.push_log(LogLevel::Info, state.text.config_loaded());
         if remembered_root.is_some() {
-            state.push_log(
-                LogLevel::Info,
-                "config.toml 已提供根目录，因此未使用上次使用记录。",
-            );
+            state.push_log(LogLevel::Info, state.text.config_overrides_memory());
         }
     }
     if let Some(error) = initial.error() {
-        state.push_log(
-            LogLevel::Warn,
-            format!("config.toml 不可用：{error}；已使用面板默认值。"),
-        );
+        let message = state.text.config_unusable(error);
+        state.push_log(LogLevel::Warn, message);
     }
     if show_setup {
-        state.push_log(
-            LogLevel::Info,
-            "首次启动：请选择根目录和绑定地址，然后保存设置。",
-        );
+        state.push_log(LogLevel::Info, state.text.first_start());
     }
     let state = Rc::new(RefCell::new(state));
     let controller = Rc::new(RefCell::new(EmbeddedController::new()?));
 
     apply_status(&app, &ServerStatus::Stopped, &state.borrow());
-    install_callbacks(&app, &controller, &state);
+    install_callbacks(&app, &controller, &state, &theme_watcher_slot);
 
     let timer = Timer::default();
     {
         let weak = app.as_weak();
         let controller = controller.clone();
         let state = state.clone();
+        let theme_watcher = theme_watcher_slot.clone();
         timer.start(TimerMode::Repeated, UI_TICK, move || {
             let Some(app) = weak.upgrade() else {
                 return;
@@ -518,11 +603,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let events = controller.borrow().events();
             let status = controller.borrow_mut().poll_status();
             let restart_error = controller.borrow_mut().take_error();
+            let system_dark = theme_watcher
+                .borrow()
+                .as_ref()
+                .and_then(SystemThemeWatcher::latest)
+                .unwrap_or(false);
             let mut state = state.borrow_mut();
+            // A changed system scheme is applied on the next tick, at most one
+            // probe interval after the operating system changed.
+            if state.system_dark != system_dark {
+                state.system_dark = system_dark;
+                apply_theme(&app, &state);
+            }
             drain_events(&events, &mut state);
             if let Some(error) = restart_error {
                 state.failed_message = Some(error.clone());
-                state.push_log(LogLevel::Error, format!("自动重启失败：{error}"));
+                let message = state.text.restart_failed(&error);
+                state.push_log(LogLevel::Error, message);
             }
             if state.apply_discovered() {
                 apply_address_options(&app, &state);
@@ -560,6 +657,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let quit_timer = Timer::default();
     if smoke_test {
         // Development smoke test: build the window, run a few UI ticks and exit.
+        // Report the resolved language, the translated window title (proof that
+        // the bundled catalogue was applied) and the resolved palette, so a
+        // headless run shows the whole startup decision.
+        println!(
+            "smoke-test: language={} translation={} tagline={} theme={} dark={}",
+            language.slint_locale(),
+            if translation.is_ok() { "ok" } else { "missing" },
+            app.get_tagline(),
+            state.borrow().theme_mode.as_str(),
+            state.borrow().is_dark(),
+        );
         quit_timer.start(TimerMode::SingleShot, Duration::from_millis(1500), || {
             let _ = slint::quit_event_loop();
         });
@@ -571,6 +679,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Stop the pre-warmed picker helper (including an open dialog) before the
     // process exits; otherwise PowerShell would outlive the panel.
     state.borrow().folder_picker.shutdown();
+    if let Some(mut watcher) = theme_watcher_slot.borrow_mut().take() {
+        watcher.stop();
+    }
     controller.borrow_mut().shutdown();
     result?;
     Ok(())
@@ -657,7 +768,7 @@ fn load_initial_config() -> InitialConfig {
             Err(error) => InitialConfig::Invalid(error.to_string()),
         },
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => InitialConfig::Missing,
-        Err(error) => InitialConfig::Invalid(format!("无法读取 config.toml：{error}")),
+        Err(error) => InitialConfig::Invalid(error.to_string()),
     }
 }
 
@@ -735,24 +846,20 @@ fn handle_folder_pick(
         Some(path) if path.is_dir() => {
             let display = display_root_path(&path);
             // Only the form is updated here: the directory becomes the
-            // configured root when the dialog is saved, so 取消 still restores
-            // the value that is currently in effect.
+            // configured root when the dialog is saved, so Cancel still
+            // restores the value that is currently in effect.
             let _ = state.recent.record(&path);
             app.set_settings_root(display.clone().into());
             // The log is behind the modal dialog, so repeat the "not saved yet"
             // hint in the form itself. Picking a directory only edits the form;
-            // 保存设置 (or the recent-root menu's 选择…) applies it.
-            app.set_settings_hint("已选择目录，点击“保存设置”后生效。".into());
-            state.push_log(
-                LogLevel::Info,
-                format!("已选择根目录：{display}。点击“保存设置”后生效。"),
-            );
+            // "Save settings" (or the recent-root menu's "Select…") applies it.
+            app.set_settings_hint(state.text.root_selected_not_saved().into());
+            let message = state.text.root_selected_in_form(&display);
+            state.push_log(LogLevel::Info, message);
         }
         Some(path) => {
-            state.push_log(
-                LogLevel::Error,
-                format!("所选路径不是目录：{}。", display_path(&path)),
-            );
+            let message = state.text.path_is_not_a_directory(&display_path(&path));
+            state.push_log(LogLevel::Error, message);
             // Remove the "opening…" hint without discarding an older reminder.
             app.set_settings_hint(previous_hint.into());
         }
@@ -776,10 +883,8 @@ fn handle_root_pick(
     match picked {
         Some(path) if path.is_dir() => switch_root(app, controller, state, path),
         Some(path) => {
-            state.push_log(
-                LogLevel::Error,
-                format!("无法切换根目录：{} 不存在或不是目录。", display_path(&path)),
-            );
+            let message = state.text.root_unavailable(&display_path(&path));
+            state.push_log(LogLevel::Error, message);
             refresh_models(app, state);
         }
         None => {}
@@ -796,7 +901,7 @@ fn store_root(state: &mut UiState, path: PathBuf) -> String {
 }
 
 /// Store `path` as the configured root, remember it and apply it to a running
-/// idle server. Shared by the recent-root list and its 选择… button.
+/// idle server. Shared by the recent-root list and its "Select…" button.
 fn switch_root(
     app: &AppWindow,
     controller: &Rc<RefCell<EmbeddedController>>,
@@ -807,28 +912,25 @@ fn switch_root(
     app.set_settings_root(root_text.clone().into());
     let config = state.config.clone();
     match auto_restart_if_idle(controller, state, &config) {
-        RestartDisposition::Restarted => state.push_log(
-            LogLevel::Info,
-            format!("根目录已切换为 {root_text}；当前无进行中的传输，正在自动重启服务。"),
-        ),
-        RestartDisposition::Deferred { transfers } => state.push_log(
-            LogLevel::Warn,
-            format!(
-                "根目录已切换为 {root_text}；有 {transfers} 个进行中的传输，未自动重启，稍后请手动重启。"
-            ),
-        ),
-        RestartDisposition::Failed => state.push_log(
-            LogLevel::Error,
-            format!("根目录已切换为 {root_text}；自动重启失败，请手动重启。"),
-        ),
+        RestartDisposition::Restarted => {
+            let message = state.text.root_switched_restarting(&root_text);
+            state.push_log(LogLevel::Info, message);
+        }
+        RestartDisposition::Deferred { transfers } => {
+            let message = state.text.root_switched_deferred(&root_text, transfers);
+            state.push_log(LogLevel::Warn, message);
+        }
+        RestartDisposition::Failed => {
+            let message = state.text.root_switched_restart_failed(&root_text);
+            state.push_log(LogLevel::Error, message);
+        }
         RestartDisposition::Unchanged => {
-            state.push_log(LogLevel::Info, format!("根目录已经是 {root_text}，无需重启。"));
+            let message = state.text.root_unchanged(&root_text);
+            state.push_log(LogLevel::Info, message);
         }
         RestartDisposition::NotRunning => {
-            state.push_log(
-                LogLevel::Info,
-                format!("根目录已设置为 {root_text}；将在下次启动时生效。"),
-            );
+            let message = state.text.root_stored_for_next_start(&root_text);
+            state.push_log(LogLevel::Info, message);
         }
     }
     refresh_models(app, state);
@@ -840,17 +942,20 @@ fn switch_root(
 fn finish_log_export(app: &AppWindow, state: &mut UiState, choice: SaveChoice, text: String) {
     match choice {
         SaveChoice::Path(path) => match write_export(&path, text.as_str()) {
-            Ok(()) => state.push_log(
-                LogLevel::Info,
-                format!("运行日志已导出：{}。", display_path(&path)),
-            ),
-            Err(error) => state.push_log(LogLevel::Error, format!("导出运行日志失败：{error}。")),
+            Ok(()) => {
+                let message = state.text.log_exported(&display_path(&path));
+                state.push_log(LogLevel::Info, message);
+            }
+            Err(error) => {
+                let message = state.text.log_export_failed(&error.to_string());
+                state.push_log(LogLevel::Error, message);
+            }
         },
         SaveChoice::Cancelled => {}
-        SaveChoice::Unavailable => state.push_log(
-            LogLevel::Error,
-            "导出运行日志失败：未找到可用的保存对话框（需要 PowerShell、zenity 或 kdialog）。",
-        ),
+        SaveChoice::Unavailable => {
+            let message = state.text.log_export_unavailable();
+            state.push_log(LogLevel::Error, message);
+        }
     }
     refresh_models(app, state);
 }
@@ -859,6 +964,7 @@ fn install_callbacks(
     app: &AppWindow,
     controller: &Rc<RefCell<EmbeddedController>>,
     state: &Rc<RefCell<UiState>>,
+    theme_watcher: &Rc<RefCell<Option<SystemThemeWatcher>>>,
 ) {
     // Start / restart: the same button changes meaning while the server runs.
     {
@@ -870,11 +976,12 @@ fn install_callbacks(
                 return;
             };
             let mut state = state.borrow_mut();
-            let config = match read_config(&app, &state.config) {
+            let config = match read_config(&app, &state.config, state.text) {
                 Ok(config) => config,
                 Err(message) => {
                     app.set_settings_error(message.clone().into());
-                    state.push_log(LogLevel::Error, format!("设置无效：{message}"));
+                    let log = state.text.settings_invalid(&message);
+                    state.push_log(LogLevel::Error, log);
                     // The problematic value lives in the dialog; open it so the
                     // operator can fix it (for example pick a root directory).
                     app.set_settings_open(true);
@@ -904,26 +1011,18 @@ fn install_callbacks(
                     }
                     let root = state.config.root_dir.clone();
                     let _ = state.recent.record(&root);
-                    let verb = if running { "重启" } else { "启动" };
                     let bind = state.config.bind_summary();
                     let root = display_root_path(&state.config.root_dir);
-                    state.push_log(
-                        LogLevel::Info,
-                        format!("正在{verb}服务：监听 {bind}，根目录：{root}。"),
-                    );
+                    let message = state.text.service_starting(running, &bind, &root);
+                    state.push_log(LogLevel::Info, message);
                     app.set_settings_error("".into());
                     app.set_settings_hint("".into());
                 }
                 Err(error) => {
                     let message = error.to_string();
                     state.failed_message = Some(message.clone());
-                    state.push_log(
-                        LogLevel::Error,
-                        format!(
-                            "无法{}服务：{message}",
-                            if running { "重启" } else { "启动" }
-                        ),
-                    );
+                    let log = state.text.service_start_failed(running, &message);
+                    state.push_log(LogLevel::Error, log);
                 }
             }
             refresh_models(&app, &mut state);
@@ -942,7 +1041,8 @@ fn install_callbacks(
             };
             let mut state = state.borrow_mut();
             if controller.borrow_mut().stop() {
-                state.push_log(LogLevel::Info, "正在停止服务；活动传输会按宽限期取消。");
+                let message = state.text.service_stopping();
+                state.push_log(LogLevel::Info, message);
             }
             refresh_models(&app, &mut state);
             let status = controller.borrow_mut().poll_status();
@@ -959,32 +1059,32 @@ fn install_callbacks(
                 return;
             };
             let mut state = state.borrow_mut();
-            match read_config(&app, &state.config) {
+            match read_config(&app, &state.config, state.text) {
                 Ok(config) => {
                     state.config = config.clone();
                     state.remember_root();
                     let root = state.config.root_dir.clone();
                     let _ = state.recent.record(&root);
                     match auto_restart_if_idle(&controller, &mut state, &config) {
-                        RestartDisposition::Restarted => state.push_log(
-                            LogLevel::Info,
-                            "设置已保存：当前无进行中的传输，正在自动重启服务。",
-                        ),
-                        RestartDisposition::Deferred { transfers } => state.push_log(
-                            LogLevel::Warn,
-                            format!(
-                                "设置已保存：有 {transfers} 个进行中的传输，未自动重启，稍后请手动重启。"
-                            ),
-                        ),
-                        RestartDisposition::Failed => state.push_log(
-                            LogLevel::Error,
-                            "设置已保存，但自动重启失败；请手动重启。",
-                        ),
+                        RestartDisposition::Restarted => {
+                            let message = state.text.settings_saved_restarting();
+                            state.push_log(LogLevel::Info, message);
+                        }
+                        RestartDisposition::Deferred { transfers } => {
+                            let message = state.text.settings_saved_deferred(transfers);
+                            state.push_log(LogLevel::Warn, message);
+                        }
+                        RestartDisposition::Failed => {
+                            let message = state.text.settings_saved_restart_failed();
+                            state.push_log(LogLevel::Error, message);
+                        }
                         RestartDisposition::NotRunning => {
-                            state.push_log(LogLevel::Info, "设置已保存；将在下次启动时生效。");
+                            let message = state.text.settings_saved_next_start();
+                            state.push_log(LogLevel::Info, message);
                         }
                         RestartDisposition::Unchanged => {
-                            state.push_log(LogLevel::Info, "设置未发生变化。");
+                            let message = state.text.settings_unchanged();
+                            state.push_log(LogLevel::Info, message);
                         }
                     }
                     app.set_settings_error("".into());
@@ -993,7 +1093,8 @@ fn install_callbacks(
                 }
                 Err(message) => {
                     app.set_settings_error(message.clone().into());
-                    state.push_log(LogLevel::Error, format!("设置无效：{message}"));
+                    let log = state.text.settings_invalid(&message);
+                    state.push_log(LogLevel::Error, log);
                 }
             }
             refresh_models(&app, &mut state);
@@ -1068,12 +1169,12 @@ fn install_callbacks(
             // The dialog is not visible yet while the pre-warmed helper is
             // still loading; show that the click was registered instead of
             // leaving the form unchanged for a moment.
-            app.set_settings_hint("正在打开文件夹选择器…".into());
+            app.set_settings_hint(state.text.opening_folder_picker().into());
         });
     }
     // Native folder picker opened from the recent-root menu. Unlike the form
     // field above, the chosen directory is applied immediately (and restarts an
-    // idle running server) without passing through 保存设置.
+    // idle running server) without passing through "Save settings".
     {
         let state = state.clone();
         app.on_browse_root_menu(move || {
@@ -1123,9 +1224,9 @@ fn install_callbacks(
                 return;
             }
             let now = Local::now().fixed_offset();
-            let text = format_export(&state.logs, env!("CARGO_PKG_VERSION"), now);
+            let text = format_export(&state.logs, env!("CARGO_PKG_VERSION"), now, state.text);
             state.log_export = Some(PendingLogExport {
-                receiver: log_export::save_log_async(export_file_name(now)),
+                receiver: log_export::save_log_async(export_file_name(now), state.text),
                 text,
             });
         });
@@ -1157,10 +1258,8 @@ fn install_callbacks(
             let mut state = state.borrow_mut();
             let path = PathBuf::from(path_text.as_str());
             if !path.is_dir() {
-                state.push_log(
-                    LogLevel::Error,
-                    format!("无法切换根目录：{} 不存在或不是目录。", display_path(&path)),
-                );
+                let message = state.text.root_unavailable(&display_path(&path));
+                state.push_log(LogLevel::Error, message);
                 refresh_models(&app, &mut state);
                 return;
             }
@@ -1179,11 +1278,45 @@ fn install_callbacks(
             };
             let mut state = state.borrow_mut();
             state.recent.clear();
-            state.push_log(LogLevel::Info, "最近使用的根目录已清空。");
+            let message = state.text.recent_cleared();
+            state.push_log(LogLevel::Info, message);
             refresh_models(&app, &mut state);
         });
     }
 
+    // Appearance: follow the system, light or dark. This is a local display
+    // preference, so it applies immediately and never restarts the server.
+    {
+        let weak = app.as_weak();
+        let state = state.clone();
+        let theme_watcher = theme_watcher.clone();
+        app.on_theme_mode_changed(move |value| {
+            let Some(app) = weak.upgrade() else {
+                return;
+            };
+            let Some(mode) = ThemeMode::from_slint_value(value) else {
+                return;
+            };
+            let mut state = state.borrow_mut();
+            if state.theme_mode == mode {
+                app.set_theme_mode(mode.slint_value());
+                return;
+            }
+            state.theme_mode = mode;
+            if let Err(error) = state.prefs.set_theme_mode(mode) {
+                let message = state.text.theme_preference_not_saved(&error.to_string());
+                state.push_log(LogLevel::Warn, message);
+            }
+            // Probing the operating system costs a helper process; only do it
+            // while the panel actually follows the system.
+            if let Some(watcher) = theme_watcher.borrow().as_ref() {
+                watcher.set_enabled(mode == ThemeMode::System);
+            }
+            apply_theme(&app, &state);
+            app.set_theme_mode(mode.slint_value());
+            refresh_models(&app, &mut state);
+        });
+    }
     // Window controls of the frameless title bar. Use the window API rather
     // than the Slint window properties so the OS state stays authoritative.
     {
@@ -1210,13 +1343,17 @@ fn install_callbacks(
     }
 }
 
-fn read_config(app: &AppWindow, fallback: &ServerConfig) -> Result<ServerConfig, String> {
+fn read_config(
+    app: &AppWindow,
+    fallback: &ServerConfig,
+    text: Text,
+) -> Result<ServerConfig, String> {
     let port_text = app.get_settings_port().trim().to_string();
     let port: u16 = port_text
         .parse()
-        .map_err(|_| format!("端口“{port_text}”无效，应为 1–65535。"))?;
+        .map_err(|_| text.port_invalid(&port_text))?;
     if port == 0 {
-        return Err("端口必须在 1 到 65535 之间（0 仅用于测试）。".to_string());
+        return Err(text.port_out_of_range().to_string());
     }
     let mut bind_addresses = Vec::new();
     for option in app.get_settings_address_options().iter() {
@@ -1226,18 +1363,26 @@ fn read_config(app: &AppWindow, fallback: &ServerConfig) -> Result<ServerConfig,
         let address: IpAddr = option
             .address
             .parse()
-            .map_err(|_| format!("绑定地址“{}”无效。", option.address))?;
+            .map_err(|_| text.bind_address_invalid(&option.address))?;
         if !bind_addresses.contains(&address) {
             bind_addresses.push(address);
         }
     }
     if bind_addresses.is_empty() {
-        return Err("请至少选择一个绑定地址。".to_string());
+        return Err(text.select_bind_address().to_string());
     }
-    let root_dir = root_from_text(&app.get_settings_root())?;
-    let block_size: u16 = parse_setting(&app.get_settings_block_size(), "最大块大小")?;
-    let timeout_secs: u64 = parse_setting(&app.get_settings_timeout(), "超时")?;
-    let max_sessions: usize = parse_setting(&app.get_settings_max_sessions(), "最大并发会话")?;
+    let root_dir = root_from_text(&app.get_settings_root(), text)?;
+    let block_size: u16 = parse_setting(
+        &app.get_settings_block_size(),
+        text.label_block_size(),
+        text,
+    )?;
+    let timeout_secs: u64 = parse_setting(&app.get_settings_timeout(), text.label_timeout(), text)?;
+    let max_sessions: usize = parse_setting(
+        &app.get_settings_max_sessions(),
+        text.label_max_sessions(),
+        text,
+    )?;
     let config = ServerConfig {
         port,
         bind_addresses,
@@ -1249,7 +1394,7 @@ fn read_config(app: &AppWindow, fallback: &ServerConfig) -> Result<ServerConfig,
     };
     config
         .validate()
-        .map_err(|error| format!("配置校验失败：{error}"))?;
+        .map_err(|error| text.config_validation_failed(&error.to_string()))?;
     Ok(config)
 }
 
@@ -1258,18 +1403,22 @@ fn read_config(app: &AppWindow, fallback: &ServerConfig) -> Result<ServerConfig,
 /// An empty field means the operator has not selected a root directory at all;
 /// starting the server must ask for one instead of trying to resolve an empty
 /// path (or a dummy placeholder directory).
-fn root_from_text(text: &str) -> Result<PathBuf, String> {
+fn root_from_text(text: &str, messages: Text) -> Result<PathBuf, String> {
     let text = text.trim();
     if text.is_empty() {
-        return Err("请先选择根目录。".to_string());
+        return Err(messages.choose_root_first().to_string());
     }
     Ok(PathBuf::from(text))
 }
 
-fn parse_setting<T: std::str::FromStr>(text: &str, label: &str) -> Result<T, String> {
+fn parse_setting<T: std::str::FromStr>(
+    text: &str,
+    label: &str,
+    messages: Text,
+) -> Result<T, String> {
     let text = text.trim();
     text.parse::<T>()
-        .map_err(|_| format!("{label}“{text}”不是有效的数字。"))
+        .map_err(|_| messages.number_invalid(label, text))
 }
 
 fn apply_config_to_settings(app: &AppWindow, state: &mut UiState) {
@@ -1299,43 +1448,83 @@ fn apply_address_options(app: &AppWindow, state: &UiState) {
     app.set_settings_bind_summary(state.bind_summary().into());
 }
 
-fn address_label(ip: IpAddr) -> String {
+fn address_label(ip: IpAddr, text: Text) -> String {
     match ip {
-        IpAddr::V4(ip) if ip.is_unspecified() => "全部网络 (0.0.0.0)".to_string(),
-        IpAddr::V4(ip) if ip == Ipv4Addr::LOCALHOST => "本地回环 (127.0.0.1)".to_string(),
-        IpAddr::V6(ip) if ip.is_unspecified() => "全部 IPv6 网络 (::)".to_string(),
-        IpAddr::V6(ip) if ip == Ipv6Addr::LOCALHOST => "本地回环 IPv6 (::1)".to_string(),
+        IpAddr::V4(ip) if ip.is_unspecified() => text.all_networks().to_string(),
+        IpAddr::V4(ip) if ip == Ipv4Addr::LOCALHOST => text.loopback().to_string(),
+        IpAddr::V6(ip) if ip.is_unspecified() => text.all_networks_ipv6().to_string(),
+        IpAddr::V6(ip) if ip == Ipv6Addr::LOCALHOST => text.loopback_ipv6().to_string(),
         other => other.to_string(),
     }
 }
 
+/// Push the resolved colour scheme into the Slint window.
+///
+/// The window copies `dark-mode` into the `Theme` global and the style
+/// `Palette`, so the custom tokens and the ScrollView scrollbars follow the
+/// same choice.
+fn apply_theme(app: &AppWindow, state: &UiState) {
+    app.set_dark_mode(state.is_dark());
+    app.set_theme_mode(state.theme_mode.slint_value());
+}
+
 fn apply_status(app: &AppWindow, status: &ServerStatus, state: &UiState) {
-    let (text, kind, detail, primary_enabled, primary_is_restart, stop_enabled) = match status {
-        ServerStatus::Starting => ("启动中".to_string(), 2, String::new(), false, false, true),
-        ServerStatus::Running { .. } => ("运行中".to_string(), 1, String::new(), true, true, true),
-        ServerStatus::Stopping => ("停止中".to_string(), 3, String::new(), false, false, false),
-        ServerStatus::Stopped => match &state.failed_message {
-            Some(message) => (
-                "启动失败".to_string(),
+    let text = state.text;
+    let (status_text, kind, detail, primary_enabled, primary_is_restart, stop_enabled) =
+        match status {
+            ServerStatus::Starting => (
+                text.status_starting().to_string(),
+                2,
+                String::new(),
+                false,
+                false,
+                true,
+            ),
+            ServerStatus::Running { .. } => (
+                text.status_running().to_string(),
+                1,
+                String::new(),
+                true,
+                true,
+                true,
+            ),
+            ServerStatus::Stopping => (
+                text.status_stopping().to_string(),
+                3,
+                String::new(),
+                false,
+                false,
+                false,
+            ),
+            ServerStatus::Stopped => match &state.failed_message {
+                Some(message) => (
+                    text.status_start_failed().to_string(),
+                    4,
+                    message.clone(),
+                    true,
+                    false,
+                    false,
+                ),
+                None => (
+                    text.status_stopped().to_string(),
+                    0,
+                    String::new(),
+                    true,
+                    false,
+                    false,
+                ),
+            },
+            ServerStatus::Failed { message } => (
+                text.status_error().to_string(),
                 4,
                 message.clone(),
                 true,
                 false,
                 false,
             ),
-            None => ("已停止".to_string(), 0, String::new(), true, false, false),
-        },
-        ServerStatus::Failed { message } => (
-            "服务异常".to_string(),
-            4,
-            message.clone(),
-            true,
-            false,
-            false,
-        ),
-    };
+        };
     let bind = match status {
-        ServerStatus::Running { local_addrs } => summarize_addrs(local_addrs),
+        ServerStatus::Running { local_addrs } => summarize_addrs(local_addrs, text),
         _ => state.config.bind_summary(),
     };
     // The status bar only shows the last directory name; the full path stays in
@@ -1347,11 +1536,11 @@ fn apply_status(app: &AppWindow, status: &ServerStatus, state: &UiState) {
                 .running_root
                 .as_deref()
                 .unwrap_or(&state.config.root_dir);
-            root_status_text(path)
+            root_status_text(path, text)
         }
-        _ => root_status_text(&state.config.root_dir),
+        _ => root_status_text(&state.config.root_dir, text),
     };
-    app.set_status_text(text.into());
+    app.set_status_text(status_text.into());
     app.set_status_kind(kind);
     app.set_status_detail(detail.into());
     app.set_primary_enabled(primary_enabled);
@@ -1379,12 +1568,12 @@ fn display_root_or_empty(path: &Path) -> String {
 }
 
 /// Text for the compact status bar: the leaf directory name, or an explicit
-/// "未指定根目录" instead of a dummy path when nothing is selected.
-fn root_status_text(path: &Path) -> String {
+/// "no root directory" instead of a dummy path when nothing is selected.
+fn root_status_text(path: &Path, text: Text) -> String {
     if root_is_set(path) {
         root_display_name(path)
     } else {
-        "未指定根目录".to_string()
+        text.root_unset().to_string()
     }
 }
 
@@ -1404,15 +1593,15 @@ fn root_display_name(path: &Path) -> String {
 }
 
 /// Compact comma-separated address list for the status bar and log.
-fn summarize_addrs(addrs: &[SocketAddr]) -> String {
+fn summarize_addrs(addrs: &[SocketAddr], text: Text) -> String {
     match addrs.len() {
-        0 => "—".to_string(),
+        0 => text.dash().to_string(),
         1..=3 => addrs
             .iter()
             .map(ToString::to_string)
             .collect::<Vec<_>>()
-            .join(", "),
-        count => format!("{} 等 {count} 个地址", addrs[0]),
+            .join(text.list_separator()),
+        count => text.listener_count_summary(&addrs[0].to_string(), count),
     }
 }
 
@@ -1480,7 +1669,8 @@ fn auto_restart_if_idle(
             RestartDisposition::Restarted
         }
         Err(error) => {
-            state.push_log(LogLevel::Error, format!("自动重启失败：{error}。"));
+            let message = state.text.restart_failed(&error.to_string());
+            state.push_log(LogLevel::Error, message);
             RestartDisposition::Failed
         }
     }
@@ -1505,21 +1695,18 @@ fn log_status_transition(state: &mut UiState, status: &ServerStatus) {
                 .as_deref()
                 .unwrap_or(&state.config.root_dir);
             let root = display_root_path(root);
-            state.push_log(
-                LogLevel::Info,
-                format!(
-                    "服务已就绪：监听 {}，根目录：{root}。",
-                    summarize_addrs(local_addrs)
-                ),
-            );
+            let bind = summarize_addrs(local_addrs, state.text);
+            let message = state.text.service_ready(&bind, &root);
+            state.push_log(LogLevel::Info, message);
         }
         ServerStatus::Stopped => {
             if state.last_status_key != 0 {
-                state.push_log(LogLevel::Info, "服务已停止。");
+                state.push_log(LogLevel::Info, state.text.service_stopped());
             }
         }
         ServerStatus::Failed { message } => {
-            state.push_log(LogLevel::Error, format!("服务异常：{message}。"));
+            let message = state.text.service_error(message);
+            state.push_log(LogLevel::Error, message);
         }
         ServerStatus::Starting | ServerStatus::Stopping => {}
     }
@@ -1551,11 +1738,11 @@ fn handle_event(state: &mut UiState, event: TftpEvent) {
             );
             let size = event
                 .total
-                .map_or_else(|| "大小未知".to_string(), format_bytes);
-            state.push_log(
-                LogLevel::Info,
-                format!("开始传输：{}（{size}），来自 {}。", event.file, event.peer),
-            );
+                .map_or_else(|| state.text.size_unknown().to_string(), format_bytes);
+            let message = state
+                .text
+                .transfer_started(&event.file, &size, &event.peer.to_string());
+            state.push_log(LogLevel::Info, message);
         }
         EventKind::Progress => {
             if let Some(transfer) = state.transfers.get_mut(&event.session_id) {
@@ -1570,28 +1757,23 @@ fn handle_event(state: &mut UiState, event: TftpEvent) {
             let file = transfer
                 .as_ref()
                 .map_or_else(|| event.file.clone(), |transfer| transfer.file.clone());
-            let elapsed = transfer.as_ref().map(|transfer| transfer.started.elapsed());
-            let duration = elapsed.map_or_else(String::new, |elapsed| {
-                format!("，耗时 {:.1} 秒", elapsed.as_secs_f32())
-            });
-            state.push_log(
-                LogLevel::Info,
-                format!(
-                    "传输完成：{file}（{}{duration}）。",
-                    format_bytes(event.bytes)
-                ),
-            );
+            let elapsed = transfer
+                .as_ref()
+                .map(|transfer| transfer.started.elapsed().as_secs_f32());
+            let message = state
+                .text
+                .transfer_completed(&file, &format_bytes(event.bytes), elapsed);
+            state.push_log(LogLevel::Info, message);
         }
         EventKind::Failed { reason } => {
             let transfer = state.transfers.remove(&event.session_id);
             let file = transfer.map_or_else(|| event.file.clone(), |transfer| transfer.file);
-            state.push_log(LogLevel::Warn, format!("传输失败：{file}（{reason}）。"));
+            let message = state.text.transfer_failed(&file, reason);
+            state.push_log(LogLevel::Warn, message);
         }
         EventKind::Rejected { reason } => {
-            state.push_log(
-                LogLevel::Warn,
-                format!("请求被拒绝：{}（{reason}）。", event.file),
-            );
+            let message = state.text.request_rejected(&event.file, reason);
+            state.push_log(LogLevel::Warn, message);
         }
     }
 }
@@ -1624,7 +1806,7 @@ fn refresh_models(app: &AppWindow, state: &mut UiState) {
                 .into(),
                 percent: percent.into(),
                 progress,
-                status: "传输中".into(),
+                status: state.text.transfer_in_progress().into(),
             }
         })
         .collect();
@@ -1639,12 +1821,13 @@ fn refresh_models(app: &AppWindow, state: &mut UiState) {
     let now = Instant::now();
     let elapsed = now.duration_since(state.throughput_sample.0).as_secs_f32();
     let delta = total_bytes.saturating_sub(state.throughput_sample.1);
+    let dash = state.text.dash().to_string();
     let throughput = if state.transfers.is_empty() {
-        "—".to_string()
+        dash
     } else if elapsed > 0.0 {
         format!("{}/s", format_bytes((delta as f32 / elapsed) as u64))
     } else {
-        "—".to_string()
+        dash
     };
     state.throughput_sample = (now, total_bytes);
 
@@ -1657,7 +1840,7 @@ fn refresh_models(app: &AppWindow, state: &mut UiState) {
     }
     app.set_log_total_count(i32::try_from(state.logs.len()).unwrap_or(i32::MAX));
     app.set_recent_dirs(ModelRc::from(state.recent_model.clone()));
-    app.set_active_text(format!("{} 个进行中", state.transfers.len()).into());
+    app.set_active_text(state.text.active_transfers(state.transfers.len()).into());
     app.set_throughput_text(throughput.into());
 }
 
@@ -1701,6 +1884,26 @@ mod tests {
         text.parse().expect("ip address")
     }
 
+    /// English texts, the fallback language of the panel.
+    fn en() -> Text {
+        Text::new(Language::En)
+    }
+
+    /// Simplified Chinese texts.
+    fn zh() -> Text {
+        Text::new(Language::ZhCn)
+    }
+
+    fn test_state(config: ServerConfig) -> UiState {
+        UiState::new(
+            config,
+            RecentDirs::empty_for_tests(),
+            LastRoot::empty_for_tests(),
+            Arc::new(StdMutex::new(Some(Vec::new()))),
+            Appearance::for_tests(en()),
+        )
+    }
+
     fn is_selected(options: &[AddressChoice], address: &str) -> bool {
         options
             .iter()
@@ -1721,7 +1924,10 @@ mod tests {
         // The panel has no root directory before the operator selects one. The
         // core/daemon default (`tftp-root`) must stay untouched.
         assert_eq!(config.root_dir, PathBuf::new());
-        assert_eq!(root_status_text(&config.root_dir), "未指定根目录");
+        assert_eq!(
+            root_status_text(&config.root_dir, en()),
+            "No root directory"
+        );
         assert_eq!(display_root_or_empty(&config.root_dir), "");
         assert_eq!(ServerConfig::default().root_dir, PathBuf::from("tftp-root"));
     }
@@ -1752,7 +1958,7 @@ mod tests {
         let restored = InitialConfig::Missing.config(Some(&remembered));
         assert_eq!(restored.root_dir, remembered);
         // The restored root still shows its leaf name in the status bar.
-        assert_eq!(root_status_text(&restored.root_dir), "share");
+        assert_eq!(root_status_text(&restored.root_dir, en()), "share");
     }
 
     #[test]
@@ -1786,11 +1992,11 @@ mod tests {
     #[test]
     fn an_empty_root_field_is_rejected_with_an_actionable_message() {
         assert_eq!(
-            root_from_text("  \r\n"),
-            Err("请先选择根目录。".to_string())
+            root_from_text("  \r\n", en()),
+            Err("Choose a root directory first.".to_string())
         );
         assert_eq!(
-            root_from_text("  C:/srv/tftp  "),
+            root_from_text("  C:/srv/tftp  ", en()),
             Ok(PathBuf::from("C:/srv/tftp"))
         );
     }
@@ -1809,7 +2015,7 @@ mod tests {
 
     #[test]
     fn choosing_all_networks_replaces_the_specific_addresses() {
-        let mut options = build_address_choices(&[ip("127.0.0.1")], &[ip("10.0.0.7")]);
+        let mut options = build_address_choices(&[ip("127.0.0.1")], &[ip("10.0.0.7")], en());
         assert!(is_selected(&options, "127.0.0.1"));
 
         toggle_address_choice(&mut options, ip("0.0.0.0"));
@@ -1821,7 +2027,7 @@ mod tests {
 
     #[test]
     fn choosing_a_specific_address_clears_all_networks() {
-        let mut options = build_address_choices(&[ip("0.0.0.0")], &[ip("10.0.0.7")]);
+        let mut options = build_address_choices(&[ip("0.0.0.0")], &[ip("10.0.0.7")], en());
         toggle_address_choice(&mut options, ip("10.0.0.7"));
         assert!(!is_selected(&options, "0.0.0.0"));
         assert!(is_selected(&options, "10.0.0.7"));
@@ -1835,7 +2041,7 @@ mod tests {
 
     #[test]
     fn all_networks_cannot_be_unchecked() {
-        let mut options = build_address_choices(&[ip("0.0.0.0")], &[]);
+        let mut options = build_address_choices(&[ip("0.0.0.0")], &[], en());
         toggle_address_choice(&mut options, ip("0.0.0.0"));
         assert!(is_selected(&options, "0.0.0.0"));
         assert_eq!(options.iter().filter(|option| option.selected).count(), 1);
@@ -1843,7 +2049,7 @@ mod tests {
 
     #[test]
     fn clearing_the_last_address_falls_back_to_all_networks() {
-        let mut options = build_address_choices(&[ip("127.0.0.1")], &[ip("10.0.0.7")]);
+        let mut options = build_address_choices(&[ip("127.0.0.1")], &[ip("10.0.0.7")], en());
         toggle_address_choice(&mut options, ip("127.0.0.1"));
         assert!(is_selected(&options, "0.0.0.0"));
         assert!(!is_selected(&options, "127.0.0.1"));
@@ -1852,7 +2058,7 @@ mod tests {
 
     #[test]
     fn toggling_an_unknown_address_is_ignored() {
-        let mut options = build_address_choices(&[ip("0.0.0.0")], &[]);
+        let mut options = build_address_choices(&[ip("0.0.0.0")], &[], en());
         toggle_address_choice(&mut options, ip("192.0.2.1"));
         assert!(is_selected(&options, "0.0.0.0"));
         assert_eq!(options.len(), 2);
@@ -1871,12 +2077,7 @@ mod tests {
             shutdown_grace_secs: 2,
             ..ServerConfig::default()
         };
-        let mut state = UiState::new(
-            config.clone(),
-            RecentDirs::empty_for_tests(),
-            LastRoot::empty_for_tests(),
-            Arc::new(StdMutex::new(Some(Vec::new()))),
-        );
+        let mut state = test_state(config.clone());
         let controller = Rc::new(RefCell::new(EmbeddedController::new().expect("controller")));
 
         // A stopped server only stores the new configuration.
@@ -1946,10 +2147,10 @@ mod tests {
 
     #[test]
     fn address_choices_always_offer_the_two_special_entries() {
-        let options = build_address_choices(&[ip("127.0.0.1")], &[ip("192.168.1.5")]);
+        let options = build_address_choices(&[ip("127.0.0.1")], &[ip("192.168.1.5")], en());
         let labels: Vec<&str> = options.iter().map(|option| option.label.as_str()).collect();
-        assert_eq!(labels[0], "全部网络 (0.0.0.0)");
-        assert_eq!(labels[1], "本地回环 (127.0.0.1)");
+        assert_eq!(labels[0], "All networks (0.0.0.0)");
+        assert_eq!(labels[1], "Loopback (127.0.0.1)");
         assert!(labels.contains(&"192.168.1.5"));
         assert_eq!(options.iter().filter(|option| option.selected).count(), 1);
     }
@@ -1957,7 +2158,7 @@ mod tests {
     #[test]
     fn selected_addresses_missing_from_discovery_stay_visible() {
         let selected = vec![ip("::1"), ip("10.1.2.3")];
-        let options = build_address_choices(&selected, &[]);
+        let options = build_address_choices(&selected, &[], en());
         assert_eq!(options.len(), 4);
         assert!(options.iter().any(|option| option.ip == ip("::1")));
         assert_eq!(options.iter().filter(|option| option.selected).count(), 2);
@@ -1965,50 +2166,51 @@ mod tests {
 
     #[test]
     fn duplicate_selected_addresses_are_not_repeated() {
-        let options = build_address_choices(&[ip("127.0.0.1"), ip("127.0.0.1")], &[]);
+        let options = build_address_choices(&[ip("127.0.0.1"), ip("127.0.0.1")], &[], en());
         assert_eq!(options.len(), 2);
         assert_eq!(options.iter().filter(|option| option.selected).count(), 1);
     }
 
     #[test]
     fn address_labels_cover_the_special_entries() {
-        assert_eq!(address_label(ip("0.0.0.0")), "全部网络 (0.0.0.0)");
-        assert_eq!(address_label(ip("127.0.0.1")), "本地回环 (127.0.0.1)");
-        assert_eq!(address_label(ip("::")), "全部 IPv6 网络 (::)");
-        assert_eq!(address_label(ip("::1")), "本地回环 IPv6 (::1)");
-        assert_eq!(address_label(ip("192.168.1.5")), "192.168.1.5");
+        assert_eq!(address_label(ip("0.0.0.0"), en()), "All networks (0.0.0.0)");
+        assert_eq!(address_label(ip("127.0.0.1"), en()), "Loopback (127.0.0.1)");
+        assert_eq!(address_label(ip("::"), en()), "All IPv6 networks (::)");
+        assert_eq!(address_label(ip("::1"), en()), "Loopback IPv6 (::1)");
+        assert_eq!(address_label(ip("192.168.1.5"), en()), "192.168.1.5");
     }
 
     #[test]
     fn summary_is_short_for_many_addresses() {
-        let options = build_address_choices(&[ip("0.0.0.0")], &[]);
-        assert_eq!(bind_summary_text(&options), "全部网络 (0.0.0.0)");
-        assert_eq!(bind_summary_text(&[]), "未选择地址");
+        let options = build_address_choices(&[ip("0.0.0.0")], &[], en());
+        assert_eq!(bind_summary_text(&options, en()), "All networks (0.0.0.0)");
+        assert_eq!(bind_summary_text(&[], en()), "No address selected");
 
-        let many = build_address_choices(&[ip("0.0.0.0"), ip("10.0.0.1"), ip("10.0.0.2")], &[]);
+        let many =
+            build_address_choices(&[ip("0.0.0.0"), ip("10.0.0.1"), ip("10.0.0.2")], &[], en());
         assert_eq!(
-            bind_summary_text(&many),
-            "全部网络 (0.0.0.0)、10.0.0.1 等 3 个地址"
+            bind_summary_text(&many, en()),
+            "All networks (0.0.0.0), 10.0.0.1 and 3 addresses"
         );
     }
 
     #[test]
     fn status_bar_summarises_many_listeners() {
         let one: Vec<SocketAddr> = vec!["127.0.0.1:69".parse().expect("addr")];
-        assert_eq!(summarize_addrs(&one), "127.0.0.1:69");
+        assert_eq!(summarize_addrs(&one, en()), "127.0.0.1:69");
         let four: Vec<SocketAddr> = (1..=4)
             .map(|last| format!("127.0.0.{last}:69").parse().expect("addr"))
             .collect();
-        assert_eq!(summarize_addrs(&four), "127.0.0.1:69 等 4 个地址");
-        assert_eq!(summarize_addrs(&[]), "—");
+        assert_eq!(summarize_addrs(&four, en()), "127.0.0.1:69 and 4 addresses");
+        assert_eq!(summarize_addrs(&[], en()), "—");
     }
 
     #[test]
     fn status_bar_root_shows_the_leaf_directory_name() {
         assert_eq!(root_display_name(Path::new("tftp-root")), "tftp-root");
         assert_eq!(root_display_name(Path::new("C:/srv/tftp")), "tftp");
-        assert_eq!(root_status_text(Path::new("C:/srv/tftp")), "tftp");
-        assert_eq!(root_status_text(Path::new("")), "未指定根目录");
+        assert_eq!(root_status_text(Path::new("C:/srv/tftp"), en()), "tftp");
+        assert_eq!(root_status_text(Path::new(""), en()), "No root directory");
     }
 
     #[test]
@@ -2018,12 +2220,7 @@ mod tests {
             root_dir: dir.path().to_path_buf(),
             ..ServerConfig::default()
         };
-        let mut state = UiState::new(
-            config,
-            RecentDirs::empty_for_tests(),
-            LastRoot::empty_for_tests(),
-            Arc::new(StdMutex::new(Some(Vec::new()))),
-        );
+        let mut state = test_state(config);
         state.remember_root();
         let expected = std::fs::canonicalize(dir.path()).expect("canonical");
         assert_eq!(state.last_root.path(), Some(expected.as_path()));
@@ -2041,12 +2238,7 @@ mod tests {
         std::fs::create_dir(&share).expect("share dir");
         let canonical = std::fs::canonicalize(&share).expect("canonical");
 
-        let mut state = UiState::new(
-            gui_default_config(),
-            RecentDirs::empty_for_tests(),
-            LastRoot::empty_for_tests(),
-            Arc::new(StdMutex::new(Some(Vec::new()))),
-        );
+        let mut state = test_state(gui_default_config());
         let display = store_root(&mut state, share.clone());
         assert_eq!(state.config.root_dir, share);
         assert_eq!(display, display_path(&canonical));
@@ -2056,12 +2248,7 @@ mod tests {
 
     #[test]
     fn pending_dialogs_are_polled_with_their_target_and_snapshot() {
-        let mut state = UiState::new(
-            gui_default_config(),
-            RecentDirs::empty_for_tests(),
-            LastRoot::empty_for_tests(),
-            Arc::new(StdMutex::new(Some(Vec::new()))),
-        );
+        let mut state = test_state(gui_default_config());
         let (sender, receiver) = std::sync::mpsc::channel();
         state.pending_pick = Some(PendingFolderPick {
             target: FolderPickTarget::Root,
@@ -2096,12 +2283,7 @@ mod tests {
 
     #[test]
     fn log_model_stays_bounded_and_keeps_newest_entries_first() {
-        let mut state = UiState::new(
-            gui_default_config(),
-            RecentDirs::empty_for_tests(),
-            LastRoot::empty_for_tests(),
-            Arc::new(StdMutex::new(Some(Vec::new()))),
-        );
+        let mut state = test_state(gui_default_config());
 
         for index in 0..=MAX_LOG_ROWS {
             state.push_log(LogLevel::Info, format!("entry-{index}"));
@@ -2127,12 +2309,7 @@ mod tests {
 
     #[test]
     fn log_filter_only_hides_rows_and_never_drops_entries() {
-        let mut state = UiState::new(
-            gui_default_config(),
-            RecentDirs::empty_for_tests(),
-            LastRoot::empty_for_tests(),
-            Arc::new(StdMutex::new(Some(Vec::new()))),
-        );
+        let mut state = test_state(gui_default_config());
         state.push_log(LogLevel::Info, "info");
         state.push_log(LogLevel::Warn, "warn");
         state.push_log(LogLevel::Error, "error");
@@ -2199,5 +2376,77 @@ mod tests {
             );
         }
         assert_eq!(pixel(APP_ICON_SIZE / 2, 44), &[0xfa, 0xfa, 0xfa, 255]);
+    }
+
+    #[test]
+    fn address_labels_and_summaries_follow_the_startup_language() {
+        // The same helpers drive the picker, the settings summary and the status
+        // bar, so a Chinese startup must not leak English labels (or the ASCII
+        // comma that reads wrong in Chinese).
+        assert_eq!(address_label(ip("0.0.0.0"), zh()), "全部网络 (0.0.0.0)");
+        assert_eq!(address_label(ip("127.0.0.1"), zh()), "本地回环 (127.0.0.1)");
+        assert_eq!(address_label(ip("::"), zh()), "全部 IPv6 网络 (::)");
+        assert_eq!(address_label(ip("::1"), zh()), "本地回环 IPv6 (::1)");
+
+        let options = build_address_choices(&[ip("0.0.0.0")], &[], zh());
+        assert_eq!(bind_summary_text(&options, zh()), "全部网络 (0.0.0.0)");
+        assert_eq!(bind_summary_text(&[], zh()), "未选择地址");
+
+        let many =
+            build_address_choices(&[ip("0.0.0.0"), ip("10.0.0.1"), ip("10.0.0.2")], &[], zh());
+        assert_eq!(
+            bind_summary_text(&many, zh()),
+            "全部网络 (0.0.0.0)、10.0.0.1 等 3 个地址"
+        );
+
+        let four: Vec<SocketAddr> = (1..=4)
+            .map(|last| format!("127.0.0.{last}:69").parse().expect("addr"))
+            .collect();
+        assert_eq!(summarize_addrs(&four, zh()), "127.0.0.1:69 等 4 个地址");
+        assert_eq!(root_status_text(Path::new(""), zh()), "未指定根目录");
+    }
+
+    #[test]
+    fn the_theme_mode_decides_the_resolved_palette() {
+        let mut state = test_state(gui_default_config());
+        // Following the system with a dark system yields a dark panel.
+        state.theme_mode = ThemeMode::System;
+        state.system_dark = true;
+        assert!(state.is_dark());
+        state.system_dark = false;
+        assert!(!state.is_dark());
+
+        // Explicit choices ignore the system value.
+        state.theme_mode = ThemeMode::Light;
+        state.system_dark = true;
+        assert!(!state.is_dark());
+        state.theme_mode = ThemeMode::Dark;
+        state.system_dark = false;
+        assert!(state.is_dark());
+
+        // The default preference follows the system.
+        assert_eq!(state.prefs.theme_mode(), ThemeMode::System);
+    }
+
+    #[test]
+    fn the_startup_language_of_the_state_is_used_for_new_log_lines() {
+        let mut state = test_state(gui_default_config());
+        assert_eq!(state.text, en());
+        let mut chinese = test_state(gui_default_config());
+        chinese.text = zh();
+        let message = chinese.text.first_start();
+        assert_eq!(message, "首次启动：请选择根目录和绑定地址，然后保存设置。");
+        chinese.push_log(LogLevel::Info, message);
+        assert_eq!(
+            chinese.logs.front().expect("startup line").message,
+            "首次启动：请选择根目录和绑定地址，然后保存设置。"
+        );
+
+        // English is the default for an unsupported locale.
+        state.push_log(LogLevel::Info, state.text.size_unknown());
+        assert_eq!(
+            state.logs.front().expect("english line").message,
+            "unknown size"
+        );
     }
 }

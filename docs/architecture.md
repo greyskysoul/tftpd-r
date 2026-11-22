@@ -164,32 +164,59 @@ The GUI crate stays deliberately small:
   each row.
 - `ui/widgets.slint` holds the icon-over-label toolbar button, compact buttons,
   the drop-down trigger, the text field and panel primitives; `ui/theme.slint`
-  centralises the palette; `ui/icons.slint` embeds Material Design icon path
-  data, so no image decoder or extra image files are needed at runtime.
+  centralises the palette (both schemes, every colour token); `ui/icons.slint`
+  embeds Material Design icon path data, so no image decoder or extra image
+  files are needed at runtime.
+- **Language.** Static UI text is written in English and wrapped in `@tr(...)`;
+  `translations/zh_CN/LC_MESSAGES/tftpd-r-gui-slint.po` is bundled by
+  `build.rs` (`slint_build::CompilerConfiguration::with_bundled_translations`
+  plus `with_default_translation_context(DefaultTranslationContext::None)`, so
+  the catalogue has no `msgctxt`). `src/i18n.rs` maps the system locale to
+  `Language::En` or `Language::ZhCn` before the window is created and calls
+  `slint::select_bundled_translation` afterwards, which also overrides Slint's
+  own (language-part-only) locale guess. The same module's `Text` renders every
+  string the Rust side builds (log lines, validation errors, status text,
+  address labels, export header, native dialog titles), so both halves of the
+  panel always use one language. See
+  [ADR 0015](adr/0015-gui-language-and-theme.md).
+- **Theme.** `src/theme.rs` owns `ThemeMode` (follow the system / light / dark),
+  the persisted choice and the platform probe: Windows reads
+  `HKCU\...\Themes\Personalize\AppsUseLightTheme` through `reg.exe`, Unix asks
+  `gsettings` and then `GTK_THEME`. `SystemThemeWatcher` reads the value once on
+  the UI thread at startup (so the first frame is correct) and then every 30 s on
+  a worker thread; the probe is disabled while light/dark is forced and stopped
+  at shutdown. The resolved boolean is pushed into the Slint window, which copies
+  it into the `Theme` global and into `Palette.color-scheme` (the standard
+  widgets the panel embeds are `ScrollView`s, whose scrollbars follow that
+  palette). Every colour in `ui/theme.slint` is a function of that flag, so the
+  two schemes cannot drift apart per component.
 - The service status is a dedicated chip at the far left of the toolbar; the
   status bar keeps the read-only hint or the last error, the bound address(es)
   and the clickable root selector (last path component, full path in the
   settings dialog and recent-directory menu). A panel without a selected root
-  shows `未指定根目录`; there is no placeholder path. The recent-root drop-down
-  also offers 选择…, which opens the native folder dialog and applies the chosen
-  directory immediately.
+  shows `No root directory` (`未指定根目录` in Chinese); there is no placeholder
+  path. The recent-root drop-down also offers Select…, which opens the native
+  folder dialog and applies the chosen directory immediately.
 - The settings dialog edits `port`, the multi-select bind address list, the
-  root, the block size, the timeout and the maximum session count. The address
-  picker always offers `0.0.0.0` ("全部网络") and `127.0.0.1` ("本地回环"), merges
+  root, the block size, the timeout, the maximum session count and the
+  appearance. The address picker always offers `0.0.0.0` ("All networks") and
+  `127.0.0.1` ("Loopback"), merges
   the discovered interface addresses and never drops a selected address that
-  discovery did not report. "全部网络" is exclusive and sticky: selecting it
+  discovery did not report. "All networks" is exclusive and sticky: selecting it
   clears the other addresses, selecting another address clears it, and it cannot
   be unchecked (unchecking the last specific address selects it again), so the
-  bind list is never empty. The root field has a 浏览… button backed by a native
-  directory dialog; the helper behind it is pre-warmed when the settings dialog
-  (or the recent-root menu) opens, so the click does not pay for PowerShell
-  startup (see [ADR 0014](adr/0014-prewarmed-folder-picker-helper.md)). Picking a
-  directory only edits the form (取消 must be able to restore the active value),
-  so the form shows an inline "点击“保存设置”后生效" reminder; 保存设置 applies
-  and remembers it. When no valid `config.toml` exists,
-  the panel preselects `0.0.0.0`; the core and daemon defaults stay loopback. On
-  the first start of a profile without a valid configuration the dialog opens
-  automatically, once (see `src/user_state.rs`).
+  bind list is never empty. The root field has a Browse… button backed by a
+  native directory dialog; the helper behind it is pre-warmed when the settings
+  dialog (or the recent-root menu) opens, so the click does not pay for
+  PowerShell startup (see [ADR 0014](adr/0014-prewarmed-folder-picker-helper.md)).
+  Picking a directory only edits the form (Cancel must be able to restore the
+  active value), so the form shows an inline "click Save settings to apply"
+  reminder; Save settings applies and remembers it. The appearance row is the
+  only control that applies immediately: it is a display preference, not server
+  configuration, and it never restarts the server. When no valid `config.toml`
+  exists, the panel preselects `0.0.0.0`; the core and daemon defaults stay
+  loopback. On the first start of a profile without a valid configuration the
+  dialog opens automatically, once (see `src/user_state.rs`).
 - The GUI uses an **empty root path** as its "no root selected" state (a
   GUI-only convention; `ServerConfig::default()` and the daemon keep
   `tftp-root`). The status bar then shows `未指定根目录` and the settings field is
@@ -244,8 +271,12 @@ The GUI crate stays deliberately small:
   picker's initial directory and selected path travel over stdin/stdout as
   UTF-8 — a Windows path cannot contain a line break — so a non-ASCII directory
   name survives the round trip; the save dialog receives its default file name
-  through `TFTPD_R_LOG_NAME`. The directory is accepted only if it still is an
-  existing directory; the save path does not have to exist yet.
+  through `TFTPD_R_LOG_NAME`. Their titles and the save dialog's file-type
+  filter are translated and travel the same way (`TFTPD_R_PICKER_TITLE`,
+  `TFTPD_R_SAVE_TITLE`, `TFTPD_R_SAVE_FILTER`, or fixed `--title` arguments on
+  Unix), so no message text ever becomes script text. The directory is accepted
+  only if it still is an existing directory; the save path does not have to
+  exist yet.
 - `src/netif.rs` discovers interface addresses on a background thread; the UI
   timer merges the result into the picker. It asks the platform runtime for the
   list (Windows PowerShell + .NET `NetworkInterface`, `hostname -I` on Unix) and
@@ -256,18 +287,22 @@ The GUI crate stays deliberately small:
   state, not part of `ServerConfig`, and write failures are ignored so a
   read-only profile still runs the panel.
 - `src/user_state.rs` selects the state directory and stores the one-time setup
-  flag (`ui-state.txt`) and the remembered root (`last-root.txt`, one canonical
-  path written on a successful start or an explicit selection). The recent-root
-  file uses the same directory helper. The per-user configuration directory is
+  flag (`ui-state.txt`), the remembered root (`last-root.txt`, one canonical
+  path written on a successful start or an explicit selection) and the
+  appearance choice (`ui-prefs.txt`, `theme-mode=system|light|dark`). The
+  recent-root file uses the same directory helper. The per-user configuration
+  directory is
   preferred; if it cannot be created (restricted profile or a
   low-integrity/sandboxed launch), a portable `.tftpd-r` directory beside the
   executable, then in the working directory, is used instead and the panel logs
-  a WARN. All three files are advisory: a missing or unwritable profile only
+  a WARN. All four files are advisory: a missing or unwritable profile only
   means the panel asks for setup again / keeps no history / forgets the last
-  root. The `last-root.txt` path is the exception to "write failures are
-  ignored": `LastRoot::record` returns a `Result` and the panel logs a WARN,
-  because silently losing the remembered root is indistinguishable from a
-  broken setting.
+  root / falls back to following the system theme. A UTF-8 BOM a text editor may
+  add is stripped before parsing. The `last-root.txt` path is the exception to
+  "write failures are ignored": `LastRoot::record` returns a `Result` and the
+  panel logs a WARN, because silently losing the remembered root is
+  indistinguishable from a broken setting; a failed `UiPrefs` write logs a WARN
+  as well.
 - Selecting a recent root, or choosing 选择… in the same menu, while the server
   runs either restarts it automatically (no active transfer) or updates the
   configuration for the next manual restart; the status bar keeps showing the
@@ -303,7 +338,12 @@ renderer.
   a half-started server.
 - Log rows are capped at 500 in the model; the event ring is independently
   bounded. Logs are displayed newest-first so the latest event stays visible
-  without programmatic scrolling.
+  without programmatic scrolling. Log text is rendered in the startup language,
+  which is why the language is fixed for the process lifetime.
+- `SystemThemeWatcher` runs one worker thread that re-reads the operating-system
+  theme every 30 s while the panel follows the system; the UI timer copies the
+  newest value into the state and re-applies the palette on the UI thread. The
+  worker is detached on shutdown and never blocks the event loop.
 - The title-bar maximize icon follows `Window::is_maximized()` on the UI timer;
   the OS window state is authoritative rather than a UI-side toggle. Minimize,
   maximize and close are plain UI-thread calls and never wait for the server.
@@ -329,8 +369,13 @@ write `config.toml`.
 
 - Library code logs operational events at `debug`/`warn` through `tracing`; it
   does not print to stdout.
-- The daemon initialises a global `tracing-subscriber` (filter from `--log` or
-  `TFTPD_R_LOG`, default `info`) and logs lifecycle events.
+- The daemon initialises a global `tracing-subscriber` and logs lifecycle
+  events. The filter comes from `--log` or `TFTPD_R_LOG` and defaults to `info`;
+  `logging.rs` parses the level-based subset itself (a level, `target=level`, or
+  a bare `target` meaning `trace`) into a `Targets` filter instead of enabling
+  `env-filter`, which would link the `regex` engine into the daemon (ADR 0016).
+  A target-only filter keeps the `info` default for other targets, and invalid
+  directives are reported and ignored rather than aborting startup.
 - Error text sent to clients is a fixed, sanitised string per error class; local
   paths and OS error messages stay in local logs (and even there only the file
   name and error kind are used for client-visible paths).

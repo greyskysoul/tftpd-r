@@ -11,19 +11,30 @@ members = [
 authors = ["TftpdR contributors"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
-version = "0.2.2"
+version = "0.3.0"
 
 [workspace.dependencies]
 tftpd-r-build-support = { path = "crates/tftpd-r-build-support" }
 tftpd-r-core = { path = "crates/tftpd-r-core" }
 chrono = "0.4.45"
+# System locale for the startup language decision. Already a transitive
+# dependency of Slint (used for bundled-translation selection), so this adds no
+# crate to Cargo.lock; it is declared directly so the panel does not depend on
+# Slint internals for the locale.
+sys-locale = "0.3"
 tokio = { version = "1.54", features = ["rt", "rt-multi-thread", "net", "time", "sync", "fs", "io-util", "macros", "signal"] }
 tokio-util = { version = "0.7.20", features = ["rt"] }
 thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 toml = "1.2"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+# `env-filter` is deliberately not enabled: it pulls the `regex` engine (about
+# 290 KiB of the stripped daemon on the GNU x64 build) for a filter syntax the
+# daemon does not need. `tracing-log` is not enabled either; nothing in the
+# daemon's dependency graph logs through the `log` crate, and `logging` parses
+# the level-based directive subset itself. See
+# docs/adr/0016-log-filter-without-env-filter.md.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi"] }
 clap = { version = "4.6", features = ["derive"] }
 anyhow = "1.0"
 tempfile = "3.27"

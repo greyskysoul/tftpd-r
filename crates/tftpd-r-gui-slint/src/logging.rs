@@ -12,6 +12,8 @@ use std::path::Path;
 
 use chrono::{DateTime, FixedOffset, Local};
 
+use crate::i18n::Text;
+
 /// Maximum number of log entries retained in memory.
 pub const MAX_LOG_ROWS: usize = 500;
 
@@ -153,38 +155,37 @@ pub fn export_file_name(at: DateTime<FixedOffset>) -> String {
 ///
 /// Entries are kept newest-first in memory but written oldest-first so the file
 /// reads chronologically. The header records the product version, the export
-/// time and the retained row count.
+/// time and the retained row count, in the language the panel started in: the
+/// log lines themselves were written in that language, so a translated header
+/// must not claim otherwise.
 #[must_use]
 pub fn format_export(
     entries: &VecDeque<LogEntry>,
     app_version: &str,
     exported_at: DateTime<FixedOffset>,
+    text: Text,
 ) -> String {
-    let mut text = String::new();
-    let _ = writeln!(text, "TftpdR 运行日志");
-    let _ = writeln!(text, "版本：{app_version}");
+    let mut out = String::new();
+    let _ = writeln!(out, "{}", text.export_title());
+    let _ = writeln!(out, "{}", text.export_version(app_version));
     let _ = writeln!(
-        text,
-        "导出时间：{}",
-        exported_at.format("%Y-%m-%d %H:%M:%S %:z")
+        out,
+        "{}",
+        text.export_time(&exported_at.format("%Y-%m-%d %H:%M:%S %:z").to_string())
     );
-    let _ = writeln!(
-        text,
-        "日志条数：{}（最多保留 {MAX_LOG_ROWS} 条）",
-        entries.len()
-    );
-    let _ = writeln!(text, "说明：导出包含全部保留日志，不受界面筛选影响。");
-    let _ = writeln!(text, "----------------------------------------");
+    let _ = writeln!(out, "{}", text.export_rows(entries.len(), MAX_LOG_ROWS));
+    let _ = writeln!(out, "{}", text.export_note());
+    let _ = writeln!(out, "----------------------------------------");
     for entry in entries.iter().rev() {
         let _ = writeln!(
-            text,
+            out,
             "{} {} {}",
             entry.at.format("%Y-%m-%d %H:%M:%S"),
             entry.level.as_str(),
             entry.message
         );
     }
-    text
+    out
 }
 
 /// Write an exported log to the path the operator chose.
@@ -203,6 +204,7 @@ pub fn write_export(path: &Path, text: &str) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i18n::Language;
     use chrono::TimeZone;
 
     fn at(hour: u32, minute: u32, second: u32) -> DateTime<FixedOffset> {
@@ -271,7 +273,7 @@ mod tests {
         entries.push_front(entry(at(9, 0, 2), LogLevel::Warn, "second"));
         entries.push_front(entry(at(9, 0, 3), LogLevel::Error, "third"));
 
-        let text = format_export(&entries, "0.2.1", at(9, 5, 0));
+        let text = format_export(&entries, "0.2.1", at(9, 5, 0), Text::new(Language::ZhCn));
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines[0], "TftpdR 运行日志");
         assert_eq!(lines[1], "版本：0.2.1");
@@ -323,7 +325,7 @@ mod tests {
         let path = dir.path().join("tftpd-r-log-20261121-090507.txt");
         let mut entries = VecDeque::new();
         entries.push_front(entry(at(9, 0, 1), LogLevel::Warn, "warning"));
-        let text = format_export(&entries, "0.2.1", at(9, 5, 7));
+        let text = format_export(&entries, "0.2.1", at(9, 5, 7), Text::new(Language::ZhCn));
 
         write_export(&path, &text).expect("write export");
         assert_eq!(std::fs::read_to_string(&path).expect("read export"), text);

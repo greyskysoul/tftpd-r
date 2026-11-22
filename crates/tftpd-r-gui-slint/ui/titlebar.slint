@@ -15,15 +15,15 @@ component WindowControl inherits Rectangle {
     height: 30px;
     border-radius: 4px;
     background: touchArea.pressed
-        ? (root.danger ? #b91c1c : Theme.toolbar-pressed)
+        ? (root.danger ? Theme.window-close-pressed : Theme.toolbar-pressed)
         : touchArea.has-hover
-            ? (root.danger ? #e81123 : Theme.toolbar-hover)
+            ? (root.danger ? Theme.window-close-hover : Theme.toolbar-hover)
             : transparent;
 
     MaterialIcon {
         path-data: root.icon-data;
         tint: root.danger && (touchArea.has-hover || touchArea.pressed)
-            ? #ffffff
+            ? Theme.on-accent
             : Theme.toolbar-icon;
         icon-size: 14px;
         x: (root.width - self.width) / 2;
@@ -38,6 +38,9 @@ component WindowControl inherits Rectangle {
 
 export component TitleBar inherits Rectangle {
     in property <bool> maximized: false;
+    // Product tagline next to the brand name; the window passes the translated
+    // text so the literal lives in one place (and can be read back in tests).
+    in property <string> tagline: "";
 
     callback minimize-requested();
     callback maximize-requested();
@@ -71,7 +74,7 @@ export component TitleBar inherits Rectangle {
         BrandMark { mark-size: 22px; }
         Text {
             text: "TftpdR";
-            color: #f8fafc;
+            color: Theme.toolbar-label;
             font-size: 12px;
             font-weight: 600;
             vertical-alignment: center;
@@ -82,7 +85,7 @@ export component TitleBar inherits Rectangle {
             background: Theme.toolbar-divider;
         }
         Text {
-            text: "Rust TFTP 服务端";
+            text: root.tagline;
             color: Theme.text-faint;
             font-size: 10px;
             vertical-alignment: center;

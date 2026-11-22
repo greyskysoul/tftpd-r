@@ -25,10 +25,10 @@ export component LogsPanel inherits Panel {
     // Label shown in the trigger and in the option list. The key itself stays
     // stable because the Rust side parses it back into `LogFilter`.
     pure function filter-label(key: string) -> string {
-        key == "INFO" ? "仅 INFO"
-            : key == "WARN" ? "仅 WARN"
-            : key == "ERROR" ? "仅 ERROR"
-            : "全部级别"
+        key == "INFO" ? @tr("INFO only")
+            : key == "WARN" ? @tr("WARN only")
+            : key == "ERROR" ? @tr("ERROR only")
+            : @tr("All levels")
     }
 
     // The option list is an overlay anchored to the laid-out trigger: its right
@@ -58,14 +58,14 @@ export component LogsPanel inherits Panel {
                 icon-size: 17px;
             }
             Text {
-                text: "运行日志";
+                text: @tr("Activity log");
                 color: Theme.text-strong;
                 font-size: 14px;
                 font-weight: 600;
                 vertical-alignment: center;
             }
             Text {
-                text: "最新在上";
+                text: @tr("Newest first");
                 color: Theme.text-faint;
                 font-size: 11px;
                 vertical-alignment: center;
@@ -82,14 +82,14 @@ export component LogsPanel inherits Panel {
                 clicked => { root.filter-open = !root.filter-open; }
             }
             SmallButton {
-                label: "导出";
+                label: @tr("Export");
                 icon-data: Icons.file-download;
                 button-width: 72px;
                 available: root.total-count > 0;
                 clicked => { root.export-requested(); }
             }
             SmallButton {
-                label: "清空";
+                label: @tr("Clear");
                 icon-data: Icons.delete-sweep;
                 tint: Theme.text-muted;
                 button-width: 72px;
@@ -116,8 +116,8 @@ export component LogsPanel inherits Panel {
                         }
                         Text {
                             text: root.total-count == 0
-                                ? "尚无日志。启动服务后，连接与传输事件会显示在这里。"
-                                : "当前筛选级别下没有日志。";
+                                ? @tr("No log entries yet. Connection and transfer events appear here once the server starts.")
+                                : @tr("No entries at the selected level.");
                             color: Theme.text-faint;
                             font-size: 12px;
                             horizontal-alignment: center;
@@ -144,14 +144,14 @@ export component LogsPanel inherits Panel {
                                 width: 48px;
                                 height: 17px;
                                 border-radius: 4px;
-                                background: row.level == "ERROR" ? #fef2f2
-                                    : row.level == "WARN" ? #fffbeb
-                                    : #eff6ff;
+                                background: row.level == "ERROR" ? Theme.danger-soft
+                                    : row.level == "WARN" ? Theme.warn-soft
+                                    : Theme.info-soft;
                                 Text {
                                     text: row.level;
-                                    color: row.level == "ERROR" ? #b91c1c
-                                        : row.level == "WARN" ? #b45309
-                                        : #1d4ed8;
+                                    color: row.level == "ERROR" ? Theme.danger-text
+                                        : row.level == "WARN" ? Theme.warn-text
+                                        : Theme.info-text;
                                     font-size: 10px;
                                     font-weight: 700;
                                     horizontal-alignment: center;
@@ -211,7 +211,7 @@ export component LogsPanel inherits Panel {
                     height: 28px;
                     border-radius: 5px;
                     background: level-touch.has-hover ? Theme.row-hover
-                        : level == root.filter ? #eff6ff
+                        : level == root.filter ? Theme.info-soft
                         : transparent;
                     HorizontalLayout {
                         cross-axis-alignment: center;

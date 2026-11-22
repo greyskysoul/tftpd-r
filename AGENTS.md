@@ -11,19 +11,21 @@
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
 | Phase 0–5 | ✅ 已完成 | workspace、codec/沙箱、RRQ 引擎、daemon、GUI 面板（无边框标题栏、工具栏、状态栏、日志/传输列表、设置/关于、最近根目录）、文档/ADR/CI |
-| Phase 6 目标机验证/发布收尾 | 🟡 部分完成 | 0.1.0、0.2.0、0.2.1、0.2.2 已发布（Windows/Linux × x64/arm64）；Windows/Linux CI 已通过；真实/老式客户端、LAN/防火墙、Linux GUI、RDP、IME、其他 DPI、目标机运行仍待完成 |
+| Phase 6 目标机验证/发布收尾 | 🟡 部分完成 | 0.1.0、0.2.0、0.2.1、0.2.2 已发布（Windows/Linux × x64/arm64）；0.3.0 候选已整理、版本号为 0.3.0，发布验证尚待完成；Windows/Linux CI 已通过；真实/老式客户端、LAN/防火墙、Linux GUI、RDP、IME、其他 DPI、目标机运行仍待完成 |
 | Phase 7 IPC | ⏳ 未开始 | GUI 仅 Embedded 模式，无 named pipe/daemon 控制 |
 | Phase 8 WRQ 上传 | ⏳ 未开始 | 只读是默认且唯一行为，`allow_upload=true` 被校验拒绝 |
 | 0.2.0 R1/R2 | ✅ 已发布（2026-11-20） | 默认端口 69（ADR 0007）；`port` + `bind_addresses` 多监听、GUI 多选地址与目录选择器（ADR 0008）；首次启动自动设置、空闲时自动重启（ADR 0009） |
 | release 体积优化 | ✅ 已完成（GNU x64） | `opt-level="z"` + fat LTO + `panic="abort"` + strip（ADR 0010） |
+| daemon 日志过滤体积 | ✅ 已纳入 0.3.0 候选 | 去掉 `env-filter`/`tracing-log`，daemon 1,357,824 → 1,063,936 B（−21.6%）；ADR 0016 |
 | Windows exe 图标 | ✅ 已完成（GNU/MSVC x64） | `tftpd-r-build-support` 生成 `.res`；7 帧图标（ADR 0011） |
 | 0.2.1 发布 | ✅ 已发布 | release workflow 44882456726；MSVC/Linux 测试门与四目标构建全绿 |
 | 0.2.2 发布 | ✅ 已发布（2026-11-22） | release workflow 44976411968；测试门与四目标构建全绿；MSVC x64 归档 SHA-256 与 `SHA256SUMS`/GitHub digest 一致 |
 | GUI 根目录未指定/记忆 | ✅ 已发布（0.2.2） | 空根目录、`last-root.txt`、`config.toml` 优先（ADR 0012） |
 | 根目录菜单 + 日志 | ✅ 已发布（0.2.2） | 菜单「选择…」立即应用；日志本地时钟/单行/级别下拉筛选/导出（ADR 0012 修订、ADR 0013 及其 2026-11-22 更新） |
 | 保存提示/诊断/便携状态 | ✅ 已发布（0.2.2） | 设置页内联提示；`LastRoot` 写入失败/失效/覆盖 WARN/INFO；per-user 目录不可写时回退 `.tftpd-r` |
+| 多语言 + 深浅主题 | ✅ 已纳入 0.3.0 候选 | 启动时按系统语言选简中/英文（其余语言与繁体中文→英文）；设置页「跟随系统/浅色/深色」，系统值每 30 s 复检（ADR 0015） |
 
-已验证环境：Windows 11（10.0.26300）+ Rust 1.100.0 `x86_64-pc-windows-gnu` + MinGW-w64 GCC 15.3 + Slint 1.19.0；CI 另在 `windows-latest`（MSVC x64）与 `ubuntu-latest`（GNU x64）跑 fmt/clippy/test，并在原生 arm64 runner 构建。**未验证**：MSVC 交互式 GUI/长期服务、Linux/arm64 产物运行、Linux 桌面 GUI、真实/外部 TFTP 客户端、Windows Service、RDP、69 端口权限、真实键盘/IME、其他 DPI/语言渲染与无障碍。不要把未验证项写成已通过。
+已验证环境：Windows 11（10.0.26300）+ Rust 1.100.0 `x86_64-pc-windows-gnu` + MinGW-w64 GCC 15.3 + Slint 1.19.0；CI 另在 `windows-latest`（MSVC x64）与 `ubuntu-latest`（GNU x64）跑 fmt/clippy/test，并在原生 arm64 runner 构建。**未验证**：MSVC 交互式 GUI/长期服务、Linux/arm64 产物运行、Linux 桌面 GUI、真实/外部 TFTP 客户端、Windows Service、RDP、69 端口权限、真实键盘/IME、其他 DPI/语言渲染与无障碍、运行中系统主题切换、Linux 主题探测（`gsettings`/`GTK_THEME`）。不要把未验证项写成已通过。
 
 ## 2. 仓库地图
 
@@ -39,7 +41,7 @@
 │   ├── security.md                # 威胁模型、沙箱、残余风险
 │   ├── testing.md                 # 实际执行记录与未验证项
 │   ├── roadmap.md                 # 已发布项与后续未实现项
-│   └── adr/0001–0014              # 已接受决策
+│   └── adr/0001–0016              # 已接受决策
 ├── crates/
 │   ├── tftpd-r-build-support/    # 构建期图标资源，不链接进产物
 │   ├── tftpd-r-core/             # 无 GUI/daemon/IPC 依赖
@@ -51,11 +53,12 @@
 │   │   ├── build.rs               # exe 图标
 │   │   └── tests/cli.rs
 │   └── tftpd-r-gui-slint/        # Slint 面板 + EmbeddedController
-│       ├── src/{main,controller,recent,netif,folder_picker,user_state,logging,log_export}.rs
+│       ├── src/{main,controller,recent,netif,folder_picker,user_state,logging,log_export,i18n,theme}.rs
 │       ├── ui/{app,titlebar,toolbar,statusbar,logs,transfers,settings,about,
 │       │       root-menu,widgets,theme,icons,models}.slint
+│       ├── translations/zh_CN/LC_MESSAGES/tftpd-r-gui-slint.po  # 内嵌简中翻译
 │       ├── ui/icons/              # Material 图标来源、产品图标
-│       └── build.rs               # Slint 编译 + exe 图标
+│       └── build.rs               # Slint 编译（含 bundled translations）+ exe 图标
 ├── .github/workflows/{ci,release}.yml
 ├── .github/release-notes/
 └── （未跟踪）本地计划文档 .md      # 禁止提交
@@ -94,7 +97,7 @@
 - `allow_upload=true`、`overwrite=true` 当前必须是**配置错误**（上传未实现，不能给运维错误暗示）。
 - 监听配置是 `port` + `bind_addresses`（1..=16 个）。默认 `127.0.0.1:69`（Linux 需 root/CAP_NET_BIND_SERVICE；Windows 低端口通常允许但可能保留）；端口 0 仅测试；重复地址去重；同族通配 `0.0.0.0`/`::` 折叠；多播/广播拒绝（ADR 0008）。绑定**全有或全无**，不得静默只服务部分地址。GUI 无有效 `config.toml` 时表单默认选中 `0.0.0.0`（ADR 0009），核心/daemon 默认仍是回环；不要把 GUI 表单默认写进 `ServerConfig::default()`。
 - GUI 根目录默认**未指定**（空 `PathBuf`，仅 GUI 内部约定）：状态栏「未指定根目录」、设置页留空、启动/保存提示「请先选择根目录。」。`last-root.txt` 记录上次成功启动或显式保存的根目录，启动时在无有效 `config.toml` 时恢复；`config.toml` 的 `root_dir` 永远优先。设置页「浏览…」只改表单，选中后必须在表单内显示「点击保存设置后生效」，不能只写进被模态框遮挡的日志；`last-root.txt` 写入失败、启动时失效条目、`config.toml` 覆盖记忆值都必须有可见日志。
-- 三个状态文件优先写入 per-user 配置目录（Windows `%APPDATA%\TftpdR`，Unix `$XDG_CONFIG_HOME/tftpd-r` 或 `~/.config/tftpd-r`）。该目录不可创建/不可写（受限 profile、Low 完整性、沙箱）时，依次回退到 exe 旁 `.tftpd-r`、工作目录 `.tftpd-r`，启动日志 WARN 说明实际目录；不得因 `%APPDATA%` 写入失败放弃根目录记忆/最近历史/首次启动标记。
+- 四个状态文件优先写入 per-user 配置目录（Windows `%APPDATA%\TftpdR`，Unix `$XDG_CONFIG_HOME/tftpd-r` 或 `~/.config/tftpd-r`）：`recent-dirs.txt`、`last-root.txt`、`ui-state.txt`、`ui-prefs.txt`（外观选择，ADR 0015）。该目录不可创建/不可写（受限 profile、Low 完整性、沙箱）时，依次回退到 exe 旁 `.tftpd-r`、工作目录 `.tftpd-r`，启动日志 WARN 说明实际目录；不得因 `%APPDATA%` 写入失败放弃根目录记忆/最近历史/首次启动标记/外观偏好。状态文件读取必须先剥掉 UTF-8 BOM（编辑器可能加上，否则首行 key 永远匹配不上）。
 - 不要把空根目录写进 `ServerConfig::default()`/daemon；不要把 `tftp-root` 当作 GUI 占位值显示或写入（ADR 0012）。
 - 绑定特权端口失败必须给出可操作提示，**不得**静默回退、提权或改写配置（ADR 0007）。
 - GUI 网卡枚举与目录/保存对话框通过固定绝对路径的 PowerShell/.NET（Unix 为 `hostname`/`zenity`/`kdialog`）辅助进程完成，后台线程执行；不得引入 shell、用户可控参数、提权或手写 unsafe。辅助失败时必须降级或给出可操作错误，不得崩溃。Windows 目录选择器使用**按需预热的常驻 helper**（ADR 0014）：设置页或最近目录菜单打开后预热，路径经 UTF-8 stdin/stdout 传递（不得用 `[Console]::Out` 输出路径，OEM 代码页会破坏非 ASCII 名称）；helper 启动失败或退出时回退一次性 helper；面板关闭时必须 kill helper（包括仍打开的对话框），不得遗留 PowerShell 进程。预热只在用户实际打开相关对话框时发生，不要在启动时无条件常驻。
@@ -109,8 +112,21 @@
 - GUI `stop()` 必须异步/轮询，不能阻塞 UI 线程等待宽限期；关闭窗口后 `EmbeddedController::shutdown()` 负责最终清理。
 - GUI 配置/根目录变更自动重启只在 `Starting`/`Running`、配置确实变化且 `state.transfers` 为空时发生；有传输时只保存并 WARN，不得中断传输或排队自动重启。`Stopping` 绝不能被变更改回启动。`poll_status` 在 handle 被 `stop()` 取走后不得继续报告陈旧的 `Running`。
 - GUI 活动日志只驻留内存（≤500 行，最新在前），时间用本地 `HH:MM:SS`；级别筛选只影响显示，不得删除条目；消息入库前必须折叠为单行；打开/取消目录选择器和保存对话框不得写日志；导出必须由用户显式点击并通过原生保存对话框选择路径，Rust 侧只写文本文件，不自动落盘。状态目录回退到便携 `.tftpd-r` 时必须在启动日志 WARN 并给出实际目录。详见 ADR 0013。
+- daemon 日志过滤只支持级别 / `target=level` / 裸 `target` 这套语法（`logging::parse_filter` + `Targets`）；不得重新启用 `tracing-subscriber` 的 `env-filter`（会把 `regex` 链入 daemon，约 +290 KiB）或 `tracing-log`（当前依赖图无 `log` 使用者）。没有裸级别指令时默认级别保持 `info`，目标指令只收窄该目标；非法指令告警并忽略，不得让启动失败。见 ADR 0016。
 
-### 3.5 代码与依赖
+### 3.5 语言与主题（ADR 0015）
+
+- 语言**只在启动时决定一次**：`src/i18n.rs` 读取系统 locale，简体中文（`zh`/`zh-CN`/`zh_CN`/`zh-Hans*`/`zh-SG`）→ 简中，其余语言（含 `zh-TW`/`zh-HK`/`zh-Hant*`）与读取失败 → **英文**。没有语言选择器，日志因此只存渲染后的字符串。
+- `.slint` 里的用户可见文案必须是**英文源文案 + `@tr(...)`**，不得再写中文（`i18n.rs` 的单测会失败）。翻译放 `translations/zh_CN/LC_MESSAGES/tftpd-r-gui-slint.po`，无 `msgctxt`；新增/修改文案后必须同步 `.po`，否则「catalogue 覆盖/无冗余条目/占位符一致」三项测试失败。
+- Rust 侧所有面向操作者的文案（日志、校验错误、状态文本、地址标签、导出头、原生对话框标题）必须走 `i18n::Text`，不得硬编码中文或英文；Slint 翻译与 `Text` 必须使用同一个 `Language`。
+- 原生对话框标题/文件类型通过环境变量或固定参数传给 helper（`TFTPD_R_PICKER_TITLE`、`TFTPD_R_SAVE_TITLE`、`TFTPD_R_SAVE_FILTER`），**不得**把译文拼进 PowerShell 脚本。
+- 主题只有三个值：跟随系统（默认）/ 浅色 / 深色，持久化在 `ui-prefs.txt`。外观是显示偏好，**立即生效但绝不重启服务**，也不写进 `config.toml`。
+- 颜色只能来自 `ui/theme.slint` 的 token；新增组件不得写死颜色，否则深浅色必然不一致。深/浅两套值都写在同一个 token 表达式里。
+- 系统主题值由 `src/theme.rs` 通过 `reg.exe`（Windows）或 `gsettings`/`GTK_THEME`（Unix）读取；启动时同步读一次，之后仅在「跟随系统」模式下每 30 s 复检，禁止在 UI 线程里做探测，禁止在 200 ms UI timer 里直接起进程。
+- Slint 的 `Palette.color-scheme` 由窗口的 `init`/`changed` 处理器设置（组件作用域直接赋值是语法错误），目的是让 `ScrollView` 滚动条跟随；不要假设 Rust 能直接访问 `Theme` 全局（该全局没有导出到生成的 Rust 类型）。
+- `TFTPD_R_GUI_LANGUAGE` 只是开发用覆盖项，不得在界面上暴露；`--smoke-test` 会打印实际选中的语言、译文 tagline、主题模式与最终明暗，可作为无界面验证手段。
+
+### 3.6 代码与依赖
 
 - 全 workspace `unsafe_code = "deny"`；手写代码禁止新增 `unsafe`。Slint 生成代码的 `#[allow(unsafe_code)]` 是生成器例外，不要借此放宽手写代码。
 - 不新增无必要依赖；新增依赖需核对许可证、维护状态、MSRV、Windows 支持、features 与传递依赖，并提交更新后的 `Cargo.lock`。
@@ -145,11 +161,11 @@ cargo test --workspace
 cargo build --workspace --release
 ```
 
-当前自动化基线是 **177 tests passed**：build-support 3、core 单元 61、RRQ UDP 集成 29、daemon 单元 9、daemon CLI 集成 5、GUI 单元 69（控制器 5 + 最近目录 7 + 网卡枚举 4 + 目录选择 4 + 用户状态 12 + 日志 9 + 保存对话框 2 + 根目录/地址模型/首次启动/自动重启/产品图标/日志模型/轮询 26）、doctest 1；另有 1 个 ignored 的 Windows 集成测试（`the_warm_helper_closes_its_dialog_on_shutdown`，需桌面会话，手动运行）。
+当前自动化基线是 **211 tests passed**：build-support 3、core 单元 61、RRQ UDP 集成 29、daemon 单元 15、daemon CLI 集成 5、GUI 单元 97、doctest 1；另有 1 个 ignored 的 Windows 集成测试（`the_warm_helper_closes_its_dialog_on_shutdown`，需桌面会话，手动运行）。daemon 单元新增的 6 项是 ADR 0016 的日志过滤解析（默认级别、裸级别、`target=level`、裸 target、数字/大写级别、非法指令）；GUI 97 项在原有 69 项之上新增多语言与主题 28 项：locale 归一化（简中/繁体/其他/缺失）、`Text` 各语言的文案、`.po` 目录一致性（覆盖/无冗余/占位符）、`.slint` 英文源文案约束、`ThemeMode` 解析与 `ui-prefs.txt` 持久化/损坏回退/写失败、BOM 容错、Windows/gsettings/GTK 主题解析、watcher 生命周期。
 
 其中 build-support 覆盖 ICO 解析（7 帧、截断/非法/越界拒绝）与 `.res` 的 null 资源、`RT_ICON`/`RT_GROUP_ICON`、帧字节与对齐；GUI 根目录相关 13 项覆盖 `LastRoot` 持久化/失效/只读降级、状态目录选择/便携回退、启动优先级（`config.toml` > 记忆根目录 > 未指定）、空根目录拒绝与「未指定根目录」；日志相关 14 项覆盖级别/筛选/单行化/500 行上限/导出格式与写文件/轮询目标；目录选择 4 项覆盖目录校验、非 ASCII 目录名与 `PICK:` 协议解析，ignored 集成测试覆盖预热 helper 的启动、真实弹窗与关闭。最新复验见 `docs/testing.md`。
 
-release 体积基线（GNU x64，2026-11-22，含 112,640 B 图标资源、日志级别下拉框与无分隔线表头；ADR 0010/0011/0012/0013/0014）：`target/release/tftpd-r.exe` **1,357,824 B（1.29 MiB）**、`target/release/tftpd-r-gui.exe` **8,980,480 B（8.56 MiB）**。最近一次增量 release 构建 59.04 s（0.2.2 版本号变更后的完整重建；此前 GUI 增量 51.43 s）；首次完整 size-profile 构建约 116.4 s。`v0.2.2` 的 MSVC x64 归档为 daemon 1,193,984 B、GUI 8,641,024 B；GNU 与 MSVC 体积不可直接比较。换工具链/平台必须重测，这不是对其他平台的承诺。
+release 体积基线（GNU x64，2026-11-22；ADR 0010/0011/0012/0013/0014/0015/0016）：0.3.0 候选 `target/release/tftpd-r.exe` **1,063,936 B（1.01 MiB）**、`target/release/tftpd-r-gui.exe` **9,036,288 B（8.62 MiB）**。ADR 0016 去掉 daemon 的 `env-filter` 后 daemon 由 1,357,824 B 降到 1,063,936 B（−293,888 B，−21.6%）；多语言 `.po` + 双主题此前使 GUI 增加 55,808 B（+0.62%），GUI 本次未变。0.3.0 候选 locked release 构建 66.65 s；此前预发布日志过滤构建 57.16 s、语言/主题构建 84 s、0.2.2 版本号变更构建 59.04 s、GUI 增量 51.43 s；首次完整 size-profile 构建约 116.4 s。`v0.2.2` 的 MSVC x64 归档为 daemon 1,193,984 B、GUI 8,641,024 B；GNU 与 MSVC 体积不可直接比较。换工具链/平台必须重测，这不是对其他平台的承诺。
 
 其他有用命令：
 
@@ -208,7 +224,12 @@ cargo run -p tftpd-r-gui-slint -- --smoke-test
 - 未经 ADR 与安全审查新增 `unsafe`、上传、IPC、服务注册或公网默认监听。
 - 提交 `.res`/`.o` 等图标生成物、手改 build-support 输出，或在非 Windows 目标强行调用 `windres`；GNU 构建失败时不得静默跳过图标。
 - 未重新测量、未更新 ADR 0010 与 `docs/testing.md` 就改 release profile（恢复 unwind、换 `opt-level=3` 等），或为减体积引入 UPX、nightly `build-std`/`panic_immediate_abort`。
+- 重新启用 `tracing-subscriber` 的 `env-filter`（把 `regex` 链回 daemon，约 +290 KiB）或 `tracing-log` 却不重测体积；或在 daemon 里让非法日志过滤指令导致启动失败（ADR 0016）。
 - 提交本地计划文档、便携工具链、构建产物；或在 CI/README 中宣称未验证的平台/客户端已通过。
+- 在 `.slint` 里直接写界面文案而不加 `@tr(...)`，或在 `.slint` 中留下中文字面量（英文是源语言，中文只能进 `.po`）；只翻译 Slint 而让 Rust 侧日志/错误仍是中文；改文案后不更新 `.po`。
+- 把译文拼进 PowerShell 脚本正文（必须走环境变量/固定参数）；把任何 `zh` 前缀都当简中（`zh-TW`/`zh-Hant` 必须回落到英文）；在运行期切换语言（当前设计只允许启动时决定）。
+- 在组件里写死颜色而不是用 `ui/theme.slint` 的 token；只在浅色下检查界面；让「外观」改动触发服务重启或写入 `config.toml`。
+- 在 UI 线程或 200 ms timer 里运行主题探测进程；忘记在退出时停止 `SystemThemeWatcher`。
 
 ## 8. 交付格式
 

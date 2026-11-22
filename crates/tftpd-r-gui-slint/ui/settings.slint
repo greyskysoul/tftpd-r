@@ -4,9 +4,14 @@
 //
 // The bind address is a multi-select list: the compact field opens an in-dialog
 // picker (a drop-down style panel anchored under the field) that always offers
-// "全部网络 (0.0.0.0)" and "本地回环 (127.0.0.1)" plus the addresses discovered
-// on this machine. "全部网络" is exclusive and cannot be unchecked; the Rust
-// side applies the toggle rules (see `toggle_address_choice` in src/main.rs).
+// "All networks (0.0.0.0)" and "Loopback (127.0.0.1)" plus the addresses
+// discovered on this machine. "All networks" is exclusive and cannot be
+// unchecked; the Rust side applies the toggle rules (see `toggle_address_choice`
+// in src/main.rs).
+//
+// The appearance row is the only setting that applies immediately instead of on
+// 保存设置: a theme is a display preference, not server configuration, so it is
+// applied and persisted by its own callback.
 import { ScrollView } from "std-widgets.slint";
 import { Icons, MaterialIcon } from "icons.slint";
 import { AddressOption } from "models.slint";
@@ -26,10 +31,12 @@ export component SettingsDialog inherits Rectangle {
     in-out property <string> block-size: "512";
     in-out property <string> timeout-secs: "3";
     in-out property <string> max-sessions: "16";
+    // 0 = follow the system, 1 = light, 2 = dark.
+    in-out property <int> theme-mode: 0;
     in property <string> error-text: "";
     in property <string> hint-text: "";
     in-out property <bool> picker-open: false;
-    property <length> card-height: 492px
+    property <length> card-height: 531px
         + (root.error-text == "" ? 0px : 52px)
         + (root.hint-text == "" ? 0px : 26px);
 
@@ -37,6 +44,7 @@ export component SettingsDialog inherits Rectangle {
     callback cancel-requested();
     callback address-toggled(string);
     callback browse-requested();
+    callback theme-changed(int);
 
     width: 100%;
     height: 100%;
@@ -79,7 +87,7 @@ export component SettingsDialog inherits Rectangle {
                     icon-size: 19px;
                 }
                 Text {
-                    text: "服务设置";
+                    text: @tr("Service settings");
                     color: Theme.text-strong;
                     font-size: 16px;
                     font-weight: 700;
@@ -95,7 +103,7 @@ export component SettingsDialog inherits Rectangle {
             }
 
             Text {
-                text: "与守护进程使用同一套 TOML 校验规则。保存后，运行中且无传输时自动重启；否则请稍后手动重启。";
+                text: @tr("Uses the same TOML validation rules as the daemon. Saving restarts a running server automatically when no transfer is active; otherwise restart it manually later.");
                 color: Theme.text-muted;
                 font-size: 11px;
                 wrap: word-wrap;
@@ -109,7 +117,7 @@ export component SettingsDialog inherits Rectangle {
                 HorizontalLayout {
                     cross-axis-alignment: center;
                     spacing: 10px;
-                    Text { text: "绑定地址"; width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                    Text { text: @tr("Bind addresses"); width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
                     Rectangle {
                         horizontal-stretch: 1;
                         height: 30px;
@@ -149,10 +157,10 @@ export component SettingsDialog inherits Rectangle {
                 HorizontalLayout {
                     cross-axis-alignment: center;
                     spacing: 10px;
-                    Text { text: "端口"; width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                    Text { text: @tr("Port"); width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
                     TextField { text <=> root.port; placeholder: "69"; width: 120px; }
                     Text {
-                        text: "标准端口 69 需要管理员/root；无权限时请改用 6969 等非特权端口。";
+                        text: @tr("The standard port 69 needs administrator/root; without permission use an unprivileged port such as 6969.");
                         color: Theme.text-faint;
                         font-size: 10px;
                         horizontal-stretch: 1;
@@ -164,11 +172,11 @@ export component SettingsDialog inherits Rectangle {
                 HorizontalLayout {
                     cross-axis-alignment: center;
                     spacing: 10px;
-                    Text { text: "根目录"; width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
-                    TextField { text <=> root.root-dir; placeholder: "请选择根目录"; horizontal-stretch: 1; }
+                    Text { text: @tr("Root directory"); width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                    TextField { text <=> root.root-dir; placeholder: @tr("Select a root directory"); horizontal-stretch: 1; }
                     SmallButton {
-                        label: "浏览…";
-                        button-width: 70px;
+                        label: @tr("Browse…");
+                        button-width: 76px;
                         clicked => { root.browse-requested(); }
                     }
                 }
@@ -187,34 +195,71 @@ export component SettingsDialog inherits Rectangle {
                 HorizontalLayout {
                     cross-axis-alignment: center;
                     spacing: 10px;
-                    Text { text: "最大块大小"; width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                    Text { text: @tr("Max block size"); width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
                     TextField { text <=> root.block-size; placeholder: "512"; horizontal-stretch: 1; }
                 }
 
                 HorizontalLayout {
                     cross-axis-alignment: center;
                     spacing: 10px;
-                    Text { text: "超时（秒）"; width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                    Text { text: @tr("Timeout (s)"); width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
                     TextField { text <=> root.timeout-secs; placeholder: "3"; horizontal-stretch: 1; }
                 }
 
                 HorizontalLayout {
                     cross-axis-alignment: center;
                     spacing: 10px;
-                    Text { text: "最大并发会话"; width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                    Text { text: @tr("Max concurrent sessions"); width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
                     TextField { text <=> root.max-sessions; placeholder: "16"; horizontal-stretch: 1; }
+                }
+
+                // Appearance applies immediately; it is a local display
+                // preference and never restarts the server.
+                HorizontalLayout {
+                    cross-axis-alignment: center;
+                    spacing: 10px;
+                    Text { text: @tr("Appearance"); width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        SmallButton {
+                            label: @tr("Follow system");
+                            primary: root.theme-mode == 0;
+                            button-width: 104px;
+                            clicked => { root.theme-changed(0); }
+                        }
+                        SmallButton {
+                            label: @tr("Light");
+                            primary: root.theme-mode == 1;
+                            button-width: 72px;
+                            clicked => { root.theme-changed(1); }
+                        }
+                        SmallButton {
+                            label: @tr("Dark");
+                            primary: root.theme-mode == 2;
+                            button-width: 72px;
+                            clicked => { root.theme-changed(2); }
+                        }
+                    }
+                    Text {
+                        text: @tr("Applies immediately and is remembered.");
+                        color: Theme.text-faint;
+                        font-size: 10px;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                    }
                 }
             }
 
             DisabledCheckRow {
-                label: "允许上传（WRQ）— 本版本尚未实现";
+                label: @tr("Allow uploads (WRQ) — not implemented in this release");
             }
 
             if root.error-text != "" : Rectangle {
-                background: #fef2f2;
+                background: Theme.danger-soft;
                 border-radius: 6px;
                 border-width: 1px;
-                border-color: #fecaca;
+                border-color: Theme.danger-border;
                 height: 34px;
                 HorizontalLayout {
                     cross-axis-alignment: center;
@@ -228,7 +273,7 @@ export component SettingsDialog inherits Rectangle {
                     }
                     Text {
                         text: root.error-text;
-                        color: #b91c1c;
+                        color: Theme.danger-text;
                         font-size: 11px;
                         horizontal-stretch: 1;
                         wrap: word-wrap;
@@ -244,23 +289,23 @@ export component SettingsDialog inherits Rectangle {
                 cross-axis-alignment: center;
                 spacing: 8px;
                 Text {
-                    text: "只读模式：上传已在协议层禁用。";
+                    text: @tr("Read-only: uploads are disabled in the protocol layer.");
                     color: Theme.text-faint;
                     font-size: 10px;
                     vertical-alignment: center;
                 }
                 Rectangle { horizontal-stretch: 1; background: transparent; }
                 SmallButton {
-                    label: "取消";
+                    label: @tr("Cancel");
                     tint: Theme.text-muted;
-                    button-width: 72px;
+                    button-width: 80px;
                     clicked => { root.cancel-requested(); }
                 }
                 SmallButton {
-                    label: "保存设置";
+                    label: @tr("Save settings");
                     icon-data: Icons.check;
                     primary: true;
-                    button-width: 96px;
+                    button-width: 116px;
                     clicked => { root.apply-requested(); }
                 }
             }
@@ -314,7 +359,7 @@ export component SettingsDialog inherits Rectangle {
                         icon-size: 17px;
                     }
                     Text {
-                        text: "选择绑定地址";
+                        text: @tr("Select bind addresses");
                         color: Theme.text-strong;
                         font-size: 13px;
                         font-weight: 600;
@@ -330,7 +375,7 @@ export component SettingsDialog inherits Rectangle {
                 }
 
                 Text {
-                    text: "可多选。选中具体地址会自动取消「全部网络」；选中「全部网络」会清空其他地址。端口对所有地址生效。";
+                    text: @tr("Multi-select. Choosing a specific address clears “All networks”; choosing “All networks” clears the other addresses. The port applies to every address.");
                     color: Theme.text-muted;
                     font-size: 10px;
                     wrap: word-wrap;
@@ -362,7 +407,7 @@ export component SettingsDialog inherits Rectangle {
                                     background: option.selected ? Theme.accent : Theme.panel-bg;
                                     if option.selected : MaterialIcon {
                                         path-data: Icons.check;
-                                        tint: #ffffff;
+                                        tint: Theme.on-accent;
                                         icon-size: 11px;
                                         x: 2.5px;
                                         y: 2.5px;
@@ -392,14 +437,14 @@ export component SettingsDialog inherits Rectangle {
                     cross-axis-alignment: center;
                     spacing: 8px;
                     Text {
-                        text: "显示的是本机网卡地址，权限不足的端口会在启动时给出提示。";
+                        text: @tr("These are this machine's interface addresses. A port without permission is reported when the server starts.");
                         color: Theme.text-faint;
                         font-size: 10px;
                         vertical-alignment: center;
                     }
                     Rectangle { horizontal-stretch: 1; background: transparent; }
                     SmallButton {
-                        label: "完成";
+                        label: @tr("Done");
                         primary: true;
                         button-width: 72px;
                         clicked => { root.picker-open = false; }

@@ -50,8 +50,8 @@ export component ToolButton inherits Rectangle {
     height: 62px;
     border-radius: 10px;
     background: !self.available ? transparent
-        : touchArea.pressed ? rgba(255, 255, 255, 0.14)
-        : touchArea.has-hover || self.active ? rgba(255, 255, 255, 0.08)
+        : touchArea.pressed ? Theme.toolbar-pressed
+        : touchArea.has-hover || self.active ? Theme.toolbar-hover
         : transparent;
 
     VerticalLayout {
@@ -95,9 +95,9 @@ export component SmallButton inherits Rectangle {
     border-radius: 7px;
     border-width: 1px;
     border-color: self.primary ? Theme.accent : Theme.panel-border-strong;
-    background: !self.available ? #f1f5f9
-        : touchArea.pressed ? (self.primary ? Theme.accent-strong : #e2e8f0)
-        : touchArea.has-hover ? (self.primary ? #3b82f6 : Theme.row-hover)
+    background: !self.available ? Theme.disabled-bg
+        : touchArea.pressed ? (self.primary ? Theme.accent-strong : Theme.pressed-bg)
+        : touchArea.has-hover ? (self.primary ? Theme.primary-hover : Theme.row-hover)
         : (self.primary ? Theme.accent : Theme.panel-bg);
 
     HorizontalLayout {
@@ -108,12 +108,12 @@ export component SmallButton inherits Rectangle {
         spacing: 5px;
         if root.icon-data != "" : MaterialIcon {
             path-data: root.icon-data;
-            tint: root.primary ? #ffffff : root.tint;
+            tint: root.primary ? Theme.on-accent : root.tint;
             icon-size: 15px;
         }
         Text {
             text: root.label;
-            color: !root.available ? Theme.text-faint : root.primary ? #ffffff : root.tint;
+            color: !root.available ? Theme.text-faint : root.primary ? Theme.on-accent : root.tint;
             font-size: 12px;
             font-weight: 600;
             vertical-alignment: center;
@@ -142,8 +142,8 @@ export component SelectButton inherits Rectangle {
     border-radius: 7px;
     border-width: 1px;
     border-color: self.open ? Theme.accent : Theme.panel-border-strong;
-    background: self.open ? #eff6ff
-        : touchArea.pressed ? #e2e8f0
+    background: self.open ? Theme.info-soft
+        : touchArea.pressed ? Theme.pressed-bg
         : touchArea.has-hover ? Theme.row-hover
         : Theme.panel-bg;
 
@@ -189,7 +189,7 @@ export component TextField inherits Rectangle {
     border-radius: 6px;
     border-width: 1px;
     border-color: input.has-focus ? Theme.accent : Theme.panel-border-strong;
-    background: root.available ? Theme.panel-bg : #f8fafc;
+    background: root.available ? Theme.panel-bg : Theme.field-disabled-bg;
     clip: true;
 
     Text {
@@ -214,8 +214,8 @@ export component TextField inherits Rectangle {
         single-line: true;
         enabled: root.available;
         vertical-alignment: center;
-        selection-background-color: #bfdbfe;
-        selection-foreground-color: #0f172a;
+        selection-background-color: Theme.selection-bg;
+        selection-foreground-color: Theme.selection-fg;
     }
 }
 
@@ -234,7 +234,7 @@ export component DisabledCheckRow inherits Rectangle {
             border-radius: 3px;
             border-width: 1px;
             border-color: Theme.panel-border-strong;
-            background: #f8fafc;
+            background: Theme.field-disabled-bg;
             MaterialIcon {
                 path-data: Icons.check;
                 tint: Theme.panel-border-strong;
@@ -265,8 +265,8 @@ export component IconButton inherits Rectangle {
     height: self.button-size;
     border-radius: 7px;
     background: !self.available ? transparent
-        : touchArea.pressed ? #e2e8f0
-        : touchArea.has-hover ? #f1f5f9
+        : touchArea.pressed ? Theme.pressed-bg
+        : touchArea.has-hover ? Theme.hover-bg
         : transparent;
 
     MaterialIcon {

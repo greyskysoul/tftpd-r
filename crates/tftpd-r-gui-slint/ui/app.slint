@@ -3,6 +3,7 @@
 //   main     (activity log on top, transfer table below)
 //   status   (service state left; bind address + current root right)
 // Settings, About and the recent-root drop-down are in-window overlays.
+import { Palette } from "std-widgets.slint";
 import { AddressOption, LogRow, RecentDir, TransferRow } from "models.slint";
 import { Theme } from "theme.slint";
 import { TitleBar } from "titlebar.slint";
@@ -15,7 +16,7 @@ import { SettingsDialog } from "settings.slint";
 import { AboutDialog } from "about.slint";
 
 export component AppWindow inherits Window {
-    title: "TftpdR · TFTP 服务端";
+    title: @tr("TftpdR · TFTP server");
     // Product icon (ui/icons/app-icon.svg) for the window and task-bar icon.
     // The panel build has no runtime image decoder, so the decoded pixels are
     // passed in from Rust (see `app_icon()` in src/main.rs) instead of using
@@ -28,6 +29,26 @@ export component AppWindow inherits Window {
     min-height: 600px;
     background: Theme.app-bg;
 
+    // The panel draws its own header and window buttons, but the standard
+    // widgets it embeds (the ScrollView scrollbars) take their colours from the
+    // style's Palette. Mirror the resolved scheme into that palette: the
+    // initial `init` covers startup and the `changed` handler covers a runtime
+    // switch, including a change of the system theme.
+    //
+    // `dark-mode` is set from Rust (`apply_theme` in src/main.rs); the palette
+    // global cannot be assigned from a component scope, so both the `Theme`
+    // global and the style palette are driven from these handlers.
+    in-out property <bool> dark-mode: false;
+    property <ColorScheme> resolved-scheme: Theme.dark ? ColorScheme.dark : ColorScheme.light;
+    init => {
+        Theme.dark = self.dark-mode;
+        Palette.color-scheme = self.resolved-scheme;
+    }
+    changed dark-mode => {
+        Theme.dark = self.dark-mode;
+        Palette.color-scheme = self.resolved-scheme;
+    }
+
     // Frameless window: the title bar and window buttons are drawn by
     // `titlebar.slint`, while winit still provides edge/corner resizing for
     // this many pixels around the client area.
@@ -35,15 +56,15 @@ export component AppWindow inherits Window {
     resize-border-width: 6px;
 
     in-out property <int> status-kind: 0;
-    in-out property <string> status-text: "已停止";
+    in-out property <string> status-text: "Stopped";
     in-out property <string> status-detail: "";
     in-out property <bool> primary-enabled: true;
     in-out property <bool> primary-is-restart: false;
     in-out property <bool> stop-enabled: false;
     in-out property <string> bind-text: "127.0.0.1:6969";
-    in-out property <string> root-text: "未指定根目录";
+    in-out property <string> root-text: "No root directory";
     in-out property <string> throughput-text: "—";
-    in-out property <string> active-text: "0 个进行中";
+    in-out property <string> active-text: "0 active";
 
     in-out property <bool> window-maximized: false;
     in-out property <bool> settings-open: false;
@@ -52,7 +73,13 @@ export component AppWindow inherits Window {
     in-out property <bool> settings-picker-open: false;
     in-out property <bool> about-open: false;
     in-out property <bool> recent-menu-open: false;
-    in-out property <string> app-version: "0.2.1";
+    in-out property <string> app-version: "0.0.0";
+    // Name of the language the panel started in (see `i18n::Language`).
+    in-out property <string> language: "English";
+    // Translated product tagline shown in the title bar. It is a property rather
+    // than a literal so the development smoke test can read it back and show
+    // which catalogue was applied.
+    out property <string> tagline: @tr("Rust TFTP server");
 
     in-out property <[RecentDir]> recent-dirs: [];
     in-out property <[TransferRow]> transfers: [];
@@ -74,6 +101,8 @@ export component AppWindow inherits Window {
     in-out property <string> settings-max-sessions: "16";
     in-out property <string> settings-error: "";
     in-out property <string> settings-hint: "";
+    // 0 = follow the system, 1 = light, 2 = dark.
+    in-out property <int> theme-mode: 0;
 
     callback primary-requested();
     callback stop-requested();
@@ -82,6 +111,7 @@ export component AppWindow inherits Window {
     callback address-toggled(string);
     callback browse-root();
     callback browse-root-menu();
+    callback theme-mode-changed(int);
     callback clear-logs();
     callback export-logs();
     callback log-filter-changed(string);
@@ -94,6 +124,7 @@ export component AppWindow inherits Window {
     VerticalLayout {
         TitleBar {
             maximized: root.window-maximized;
+            tagline: root.tagline;
             minimize-requested => { root.minimize-requested(); }
             maximize-requested => { root.maximize-requested(); }
             close-requested => { root.close-requested(); }
@@ -181,6 +212,7 @@ export component AppWindow inherits Window {
         block-size <=> root.settings-block-size;
         timeout-secs <=> root.settings-timeout;
         max-sessions <=> root.settings-max-sessions;
+        theme-mode <=> root.theme-mode;
         picker-open <=> root.settings-picker-open;
         error-text: root.settings-error;
         hint-text: root.settings-hint;
@@ -188,10 +220,15 @@ export component AppWindow inherits Window {
         cancel-requested => { root.cancel-settings(); }
         address-toggled(address) => { root.address-toggled(address); }
         browse-requested => { root.browse-root(); }
+        theme-changed(mode) => {
+            root.theme-mode = mode;
+            root.theme-mode-changed(mode);
+        }
     }
 
     if root.about-open : AboutDialog {
         app-version: root.app-version;
+        language: root.language;
         close-requested => { root.about-open = false; }
     }
 

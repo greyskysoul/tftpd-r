@@ -5,10 +5,12 @@
 TftpdR is a read-only TFTP (RFC 1350) server written in Rust, with a headless
 daemon and a native [Slint](https://slint.dev/) desktop panel.
 
-> **Status: MVP (Phase 0–5 vertical slice).** RRQ downloads, option negotiation,
-> the path sandbox, the daemon CLI and the embedded-mode GUI are implemented and
-> tested. WRQ uploads, daemon IPC and Windows Service packaging are explicitly
-> **not** part of this release. See [Scope](#scope-and-non-goals).
+> **Status: 0.3.0 release candidate.** RRQ downloads, option negotiation, the
+> path sandbox, the daemon CLI and the embedded-mode GUI are implemented and
+> tested. The panel supports English/Simplified Chinese and light/dark themes.
+> WRQ uploads, daemon IPC and Windows Service packaging are explicitly **not**
+> part of this release. See [Scope](#scope-and-non-goals) and
+> [0.3.0 release notes](.github/release-notes/0.3.0.md).
 
 ## Downloads
 
@@ -52,10 +54,13 @@ Implemented:
   window controls; toolbar with a prominent service-status chip plus
   start/restart, stop, settings and about; status bar with bind address and a
   clickable recently-used root selector; activity log and active transfers;
-  settings validation. The panel starts with no root directory until one is
-  chosen (the status bar says 未指定根目录 and the settings field is empty) and
-  restores the root of the previous start on the next launch. The header is one
-  flat `#37474f` block carrying the product mark; the same artwork
+  settings validation. The panel is available in English and Simplified Chinese
+  (chosen from the system locale at startup, English otherwise) and offers a
+  follow-system/light/dark appearance choice with a complete dark palette. It
+  starts with no root directory until one is chosen (the status bar says
+  `No root directory` and the settings field is empty) and restores the root of
+  the previous start on the next launch. The header is one flat block carrying
+  the product mark; the same artwork
   (`crates/tftpd-r-gui-slint/ui/icons/app-icon.svg`, Material `dns` glyph) is the
   window and task-bar icon and is embedded in both Windows executables as their
   PE icon. Layout and icons are in `crates/tftpd-r-gui-slint/ui/`.
@@ -112,12 +117,15 @@ cargo build --workspace --release  # release binaries in target\release
 
 Release builds use a size-first profile (`opt-level = "z"`, fat LTO,
 `panic = "abort"` and symbol stripping). On the GNU x64 verification build this
-gives about 1.29 MiB for the daemon and 8.50 MiB for the GUI, including the
+gives about 1.01 MiB for the daemon and 8.62 MiB for the GUI, including the
 ~110 KiB Windows icon resource. `panic = "abort"` is a deliberate fail-fast
 choice: a panic in a spawned task terminates the process instead of being
-contained by Tokio. Debug and test builds keep the default unwind strategy. See
-[ADR 0010](docs/adr/0010-size-first-release-profile.md) and
-[ADR 0011](docs/adr/0011-windows-executable-icon.md).
+contained by Tokio. Debug and test builds keep the default unwind strategy. The
+daemon's level-based log filter avoids the `regex` engine; see
+[ADR 0016](docs/adr/0016-log-filter-without-env-filter.md). See also
+[ADR 0010](docs/adr/0010-size-first-release-profile.md),
+[ADR 0011](docs/adr/0011-windows-executable-icon.md) and
+[ADR 0016](docs/adr/0016-log-filter-without-env-filter.md).
 
 The workspace contains three runtime crates and one build-time helper:
 
@@ -161,8 +169,16 @@ tftpd-r print-default-config
 
 Exit codes: `0` success, `2` configuration/CLI validation failure, `1` runtime
 startup or server failure. `--bind`/`--root` override the file and are validated
-again. `TFTPD_R_LOG` (or `--log`) selects the `tracing` filter, e.g.
-`TFTPD_R_LOG=debug`.
+again. `TFTPD_R_LOG` (or `--log`) selects the log level, e.g.
+`TFTPD_R_LOG=debug`. The accepted syntax is a level
+(`off`/`error`/`warn`/`info`/`debug`/`trace`, or `0`–`5`) plus comma-separated
+`target=level` directives such as `TFTPD_R_LOG=tftpd_r_core=debug,info`; a bare
+`target` means `target=trace`, and a directive matches every target whose name
+starts with that prefix. Span- or field-scoped directives are not supported.
+Without a bare level the default level stays `info`, so a target-only filter
+narrows one target instead of silencing every other one. Invalid directives are
+reported on stderr and ignored. See
+[ADR 0016](docs/adr/0016-log-filter-without-env-filter.md).
 
 Old clients that request `get /hello.txt` are supported: a leading `/` (or `\`)
 is mapped to the configured root instead of being rejected as an absolute host
@@ -177,73 +193,104 @@ cargo run -p tftpd-r-gui-slint
 The GUI loads `config.toml` from the current directory when present and never
 rewrites it. On the first start without a usable configuration it opens the
 settings dialog automatically (once per user profile) so the root directory and
-bind addresses can be filled in; the form preselects "全部网络 (0.0.0.0)". The
-daemon and `ServerConfig::default()` keep their conservative loopback default.
+bind addresses can be filled in; the form preselects the "All networks"
+(`0.0.0.0`) entry. The daemon and `ServerConfig::default()` keep their
+conservative loopback default.
 
 The panel has **no default root directory**. Until one is chosen, the status bar
-says `未指定根目录` and the settings field is empty; 启动/保存 asks for a
-directory instead of trying a placeholder such as `tftp-root`. The root of the
-last successful start (or the last root saved in the dialog) is remembered in
-`%APPDATA%\TftpdR\last-root.txt` (XDG config directory elsewhere) and restored
-on the next launch when no valid `config.toml` provides one. A valid
-`config.toml` always wins, so the file remains the authoritative way to pin the
-root for a deployment. The panel is in Chinese and is organized as follows:
+says `No root directory` / `未指定根目录` and the settings field is empty; Start
+and Save ask for a directory instead of trying a placeholder such as
+`tftp-root`. The root of the last successful start (or the last root saved in
+the dialog) is remembered in `%APPDATA%\TftpdR\last-root.txt` (XDG config
+directory elsewhere) and restored on the next launch when no valid `config.toml`
+provides one. A valid `config.toml` always wins, so the file remains the
+authoritative way to pin the root for a deployment.
+
+### Language
+
+The panel ships **English and Simplified Chinese** and picks one at startup from
+the system locale: a Simplified Chinese locale (`zh`, `zh-CN`, `zh_CN`,
+`zh-Hans*`, `zh-SG`) shows Chinese, and every other language — including
+Traditional Chinese (`zh-TW`, `zh-HK`, `zh-MO`, `zh-Hant*`) and a locale that
+cannot be read — shows **English**. There is no language picker; changing the
+language requires restarting the panel. English is the source language of the
+`@tr(...)` strings and Simplified Chinese is bundled as a `.po` catalogue, so no
+translation files are deployed next to the executable. The About dialog shows
+which language is active. (`TFTPD_R_GUI_LANGUAGE=en|zh-CN` is a development
+override for looking at the other layout; it is not reachable from the UI.)
+
+### Appearance
+
+Settings → **Appearance** offers *Follow system*, *Light* and *Dark*. The default
+is *Follow system*: the panel reads the operating system preference (Windows
+`AppsUseLightTheme`, GNOME `color-scheme`, then `GTK_THEME`) at startup and every
+30 seconds while that mode is active, and applies a change without a restart. A
+light or dark choice is applied immediately, ignored by the system setting, and
+remembered in `ui-prefs.txt`. It is a display preference only: it never changes
+the server configuration and never restarts the server. If the preference cannot
+be written, the panel logs a WARN and still honours the choice for the session.
+
+The panel is organized as follows (labels below are English; the Chinese
+translation shows the equivalent wording):
 
 - **Window**: frameless, with a custom title bar on the same dark background as
   the toolbar. The title bar holds the app name, a drag area
   (`WindowMoveArea`) and minimize / maximize-restore / close controls; the
-  window keeps a resize border (`resize-border-width`) and a one-pixel dark
-  frame so it stays visually contained.
-- **Toolbar**: the service status chip (服务状态: 已停止 / 启动中 / 运行中 /
-  停止中 / 启动失败) is at the far left, followed by 启动 / 停止 / 设置 / 关于,
-  each with a large icon above its label. 停止 is disabled until the server
-  starts. While the server is running, 启动 turns into 重启; it stops the
-  current instance and starts a new one with the saved settings (the stop is
-  asynchronous, so the UI never blocks).
+  window keeps a resize border (`resize-border-width`) and a one-pixel frame so
+  it stays visually contained.
+- **Toolbar**: the service status chip (Service status: Stopped / Starting /
+  Running / Stopping / Start failed) is at the far left, followed by Start /
+  Stop / Settings / About, each with a large icon above its label. Stop is
+  disabled until the server starts. While the server is running, Start turns
+  into Restart; it stops the current instance and starts a new one with the
+  saved settings (the stop is asynchronous, so the UI never blocks).
 - **Main area**: the activity log (newest event first) above the active transfer
   table (file, client, progress, size, state).
 - **Status bar**: a read-only hint, or the last error when there is one, on the
   left; the bind address(es) and the current root directory (last path
-  component, or `未指定根目录`) on the right. Click the root name to choose
-  another directory from the recently used list; the drop-down has a 选择…
+  component, or `No root directory`) on the right. Click the root name to choose
+  another directory from the recently used list; the drop-down has a Select…
   button that opens the native folder dialog and applies the chosen directory
-  immediately (restarting an idle running server), and a 清空 button that forgets
-  the history (the configured/running root is not affected).
+  immediately (restarting an idle running server), and a Clear button that
+  forgets the history (the configured/running root is not affected).
 - **Settings dialog**: validated with the same `ServerConfig::validate` rules as
   the daemon. A port field plus a multi-select address picker (always offering
-  "全部网络 (0.0.0.0)" and "本地回环 (127.0.0.1)" and the addresses discovered on
-  this machine), a directory picker button for the root, and the transfer
-  limits. The root field is empty when no directory has been selected and must
-  not be left empty when saving. Choosing a directory with 浏览… only fills the
-  field; the form then shows an inline reminder and the selection is applied and
-  remembered by 保存设置. (The recent-root menu's 选择… applies immediately
-  instead.) Every selected address shares the single port field. The wildcard is
-  exclusive: selecting "全部网络" clears the specific addresses, selecting a
-  specific address clears the wildcard, and the wildcard cannot be unchecked
-  (unchecking the last specific address selects 全部网络 again), so at least one
-  bind address is always selected. **About** shows the
-  version, feature summary and third-party icon attribution.
+  "All networks (0.0.0.0)" and "Loopback (127.0.0.1)" and the addresses
+  discovered on this machine), a directory picker button for the root, the
+  transfer limits, and the Appearance choice. The root field is empty when no
+  directory has been selected and must not be left empty when saving. Choosing a
+  directory with Browse… only fills the field; the form then shows an inline
+  reminder and the selection is applied and remembered by Save settings. (The
+  recent-root menu's Select… applies immediately instead.) Every selected
+  address shares the single port field. The wildcard is exclusive: selecting
+  "All networks" clears the specific addresses, selecting a specific address
+  clears the wildcard, and the wildcard cannot be unchecked (unchecking the last
+  specific address selects "All networks" again), so at least one bind address
+  is always selected. **About** shows the version, the active language, the
+  feature summary and third-party icon attribution.
 - **Automatic restart**: saving settings, or switching the root while the server
   is running, restarts it automatically when no transfer is active. With active
   transfers the new values are stored and a warning explains that a manual
   restart is required; the running downloads are never interrupted for a
-  configuration change.
+  configuration change. Changing the appearance never restarts anything.
 - **Activity log**: every transfer logs a start line and a completion or failure
   line (file, peer, size and duration), even when the start event was already
   evicted from the bounded event ring. Lines carry the local wall-clock time and
-  are single-line. A level drop-down in the header filters the table by exact
-  level (全部级别 / 仅 INFO / 仅 WARN / 仅 ERROR); the filter only hides rows, so
-  全部级别 restores them and the export stays complete. 导出 opens a native save
-  dialog and writes all retained entries (up to 500, oldest first) with the
-  version, export time and row count. Opening a picker is not logged; exported
-  files contain local paths and peer addresses and are only created by this
-  explicit action.
+  are single-line, and they are written in the startup language. A level
+  drop-down in the header filters the table by exact level (All levels / INFO
+  only / WARN only / ERROR only); the filter only hides rows, so "All levels"
+  restores them and the export stays complete. Export opens a native save dialog
+  and writes all retained entries (up to 500, oldest first) with the version,
+  export time and row count. Opening a picker is not logged; exported files
+  contain local paths and peer addresses and are only created by this explicit
+  action.
 
 Recently used roots are kept (most recent first, at most 8) in
 `%APPDATA%\TftpdR\recent-dirs.txt` on Windows and
 `$XDG_CONFIG_HOME/tftpd-r/recent-dirs.txt` (or `~/.config/tftpd-r/`) elsewhere.
 The root of the last successful start is stored next to it in `last-root.txt`,
-and the one-time first-run flag in `ui-state.txt`. If the per-user directory
+the one-time first-run flag in `ui-state.txt`, and the appearance choice in
+`ui-prefs.txt`. If the per-user directory
 cannot be created (restricted profile or a low-integrity/sandboxed launch), the
 panel uses `.tftpd-r` beside `tftpd-r-gui.exe`, then `.tftpd-r` in the working
 directory, and logs a WARN naming the location. This is a Windows integrity-level
@@ -357,7 +404,10 @@ for the embedded controller (start/stop, asynchronous restart, failed restart),
 the recent-root persistence and clearing, the one-time setup flag,
 interface-address parsing, folder-selection validation and the pre-warmed
 folder-picker protocol/UTF-8 handling, the exclusive address-picker model and the
-idle/deferred auto-restart decision. See [docs/testing.md](docs/testing.md) for
+idle/deferred auto-restart decision, the startup language decision and its
+translation catalogue (every `@tr()` string is translated, no unused entries,
+matching `{}` placeholders, English-only `.slint` sources) and the theme
+preference/system detection. See [docs/testing.md](docs/testing.md) for
 what was actually executed and what still needs manual/target-machine
 verification.
 
