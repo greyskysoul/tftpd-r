@@ -11,19 +11,20 @@
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
 | Phase 0–5 | ✅ 已完成 | workspace、codec/沙箱、RRQ 引擎、daemon、GUI 面板（无边框标题栏、工具栏、状态栏、日志/传输列表、设置/关于、最近根目录）、文档/ADR/CI |
-| Phase 6 目标机验证/发布收尾 | 🟡 部分完成 | 0.1.0、0.2.0、0.2.1、0.2.2 已发布（Windows/Linux × x64/arm64）；0.3.0 候选已整理、版本号为 0.3.0，发布验证尚待完成；Windows/Linux CI 已通过；真实/老式客户端、LAN/防火墙、Linux GUI、RDP、IME、其他 DPI、目标机运行仍待完成 |
+| Phase 6 目标机验证/发布收尾 | 🟡 部分完成 | 0.1.0、0.2.0、0.2.1、0.2.2、0.3.0 已发布（Windows/Linux × x64/arm64）；Windows/Linux CI 已通过；真实/老式客户端、LAN/防火墙、Linux GUI、RDP、IME、其他 DPI、目标机运行仍待完成 |
 | Phase 7 IPC | ⏳ 未开始 | GUI 仅 Embedded 模式，无 named pipe/daemon 控制 |
 | Phase 8 WRQ 上传 | ⏳ 未开始 | 只读是默认且唯一行为，`allow_upload=true` 被校验拒绝 |
 | 0.2.0 R1/R2 | ✅ 已发布（2026-11-20） | 默认端口 69（ADR 0007）；`port` + `bind_addresses` 多监听、GUI 多选地址与目录选择器（ADR 0008）；首次启动自动设置、空闲时自动重启（ADR 0009） |
 | release 体积优化 | ✅ 已完成（GNU x64） | `opt-level="z"` + fat LTO + `panic="abort"` + strip（ADR 0010） |
-| daemon 日志过滤体积 | ✅ 已纳入 0.3.0 候选 | 去掉 `env-filter`/`tracing-log`，daemon 1,357,824 → 1,063,936 B（−21.6%）；ADR 0016 |
+| daemon 日志过滤体积 | ✅ 已发布（0.3.0） | 去掉 `env-filter`/`tracing-log`；GNU x64 1,357,824 → 1,063,936 B，MSVC x64 1,193,984 → 911,872 B；ADR 0016 |
 | Windows exe 图标 | ✅ 已完成（GNU/MSVC x64） | `tftpd-r-build-support` 生成 `.res`；7 帧图标（ADR 0011） |
 | 0.2.1 发布 | ✅ 已发布 | release workflow 44882456726；MSVC/Linux 测试门与四目标构建全绿 |
 | 0.2.2 发布 | ✅ 已发布（2026-11-22） | release workflow 44976411968；测试门与四目标构建全绿；MSVC x64 归档 SHA-256 与 `SHA256SUMS`/GitHub digest 一致 |
 | GUI 根目录未指定/记忆 | ✅ 已发布（0.2.2） | 空根目录、`last-root.txt`、`config.toml` 优先（ADR 0012） |
 | 根目录菜单 + 日志 | ✅ 已发布（0.2.2） | 菜单「选择…」立即应用；日志本地时钟/单行/级别下拉筛选/导出（ADR 0012 修订、ADR 0013 及其 2026-11-22 更新） |
 | 保存提示/诊断/便携状态 | ✅ 已发布（0.2.2） | 设置页内联提示；`LastRoot` 写入失败/失效/覆盖 WARN/INFO；per-user 目录不可写时回退 `.tftpd-r` |
-| 多语言 + 深浅主题 | ✅ 已纳入 0.3.0 候选 | 启动时按系统语言选简中/英文（其余语言与繁体中文→英文）；设置页「跟随系统/浅色/深色」，系统值每 30 s 复检（ADR 0015） |
+| 多语言 + 深浅主题 | ✅ 已发布（0.3.0） | 启动时按系统语言选简中/英文（其余语言与繁体中文→英文）；设置页「跟随系统/浅色/深色」，系统值每 30 s 复检（ADR 0015） |
+| 0.3.0 发布 | ✅ 已发布（2026-11-22） | release workflow 44996694989；四目标构建与 publish 全绿；x64 MSVC 归档 SHA-256 与 `SHA256SUMS`/GitHub digest 一致 |
 
 已验证环境：Windows 11（10.0.26300）+ Rust 1.100.0 `x86_64-pc-windows-gnu` + MinGW-w64 GCC 15.3 + Slint 1.19.0；CI 另在 `windows-latest`（MSVC x64）与 `ubuntu-latest`（GNU x64）跑 fmt/clippy/test，并在原生 arm64 runner 构建。**未验证**：MSVC 交互式 GUI/长期服务、Linux/arm64 产物运行、Linux 桌面 GUI、真实/外部 TFTP 客户端、Windows Service、RDP、69 端口权限、真实键盘/IME、其他 DPI/语言渲染与无障碍、运行中系统主题切换、Linux 主题探测（`gsettings`/`GTK_THEME`）。不要把未验证项写成已通过。
 
@@ -165,7 +166,7 @@ cargo build --workspace --release
 
 其中 build-support 覆盖 ICO 解析（7 帧、截断/非法/越界拒绝）与 `.res` 的 null 资源、`RT_ICON`/`RT_GROUP_ICON`、帧字节与对齐；GUI 根目录相关 13 项覆盖 `LastRoot` 持久化/失效/只读降级、状态目录选择/便携回退、启动优先级（`config.toml` > 记忆根目录 > 未指定）、空根目录拒绝与「未指定根目录」；日志相关 14 项覆盖级别/筛选/单行化/500 行上限/导出格式与写文件/轮询目标；目录选择 4 项覆盖目录校验、非 ASCII 目录名与 `PICK:` 协议解析，ignored 集成测试覆盖预热 helper 的启动、真实弹窗与关闭。最新复验见 `docs/testing.md`。
 
-release 体积基线（GNU x64，2026-11-22；ADR 0010/0011/0012/0013/0014/0015/0016）：0.3.0 候选 `target/release/tftpd-r.exe` **1,063,936 B（1.01 MiB）**、`target/release/tftpd-r-gui.exe` **9,036,288 B（8.62 MiB）**。ADR 0016 去掉 daemon 的 `env-filter` 后 daemon 由 1,357,824 B 降到 1,063,936 B（−293,888 B，−21.6%）；多语言 `.po` + 双主题此前使 GUI 增加 55,808 B（+0.62%），GUI 本次未变。0.3.0 候选 locked release 构建 66.65 s；此前预发布日志过滤构建 57.16 s、语言/主题构建 84 s、0.2.2 版本号变更构建 59.04 s、GUI 增量 51.43 s；首次完整 size-profile 构建约 116.4 s。`v0.2.2` 的 MSVC x64 归档为 daemon 1,193,984 B、GUI 8,641,024 B；GNU 与 MSVC 体积不可直接比较。换工具链/平台必须重测，这不是对其他平台的承诺。
+release 体积基线（2026-11-22；ADR 0010/0011/0012/0013/0014/0015/0016）：GNU x64 `target/release/tftpd-r.exe` **1,063,936 B（1.01 MiB）**、`tftpd-r-gui.exe` **9,036,288 B（8.62 MiB）**；已发布的 MSVC x64 归档内 `tftpd-r.exe` **911,872 B**、`tftpd-r-gui.exe` **8,694,272 B**（0.2.2 为 1,193,984 / 8,641,024 B）。ADR 0016 去掉 daemon 的 `env-filter` 后 GNU daemon 减少 293,888 B（−21.6%）、MSVC daemon 减少 282,112 B（−23.6%）；多语言 `.po` + 双主题使 MSVC GUI 增加 53,248 B（+0.6%）。0.3.0 候选 locked release 构建 66.65 s；此前预发布日志过滤构建 57.16 s、语言/主题构建 84 s、0.2.2 版本号变更构建 59.04 s、GUI 增量 51.43 s；首次完整 size-profile 构建约 116.4 s。GNU 与 MSVC 体积不可直接比较。换工具链/平台必须重测，这不是对其他平台的承诺。
 
 其他有用命令：
 

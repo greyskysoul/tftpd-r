@@ -795,6 +795,50 @@ filter subset itself instead of linking `tracing-subscriber`'s `env-filter`.
   no daemon dependency uses `log` today), and a real transfer against the new
   binary (the RRQ path is untouched and covered by the existing suite).
 
+### v0.3.0 preflight and release (2026-11-22, sixteenth and seventeenth runs)
+
+The 0.3.0 candidate was committed as `012f950` and pushed to `main`. The first
+`workflow_dispatch` preflight
+([44993676823](https://github.com/greyskysoul/tftpd-r/actions/runs/44993676823))
+failed the Linux test gate: `cargo clippy ... -D warnings` reported
+`Text::save_dialog_filter` as dead code on Linux, where only the `kdialog`
+filter is used. `d52a7ac` added `#[cfg_attr(not(windows), allow(dead_code))]`,
+re-ran the local Windows gates (211 passed, 1 ignored), and the second preflight
+([44994066575](https://github.com/greyskysoul/tftpd-r/actions/runs/44994066575))
+passed the MSVC/Linux test gate and all four native builds; its `publish` job was
+skipped as expected for a dispatch run.
+
+`v0.3.0` was then tagged on the verified commit `d52a7ac` and pushed; the release
+workflow
+([44996694989](https://github.com/greyskysoul/tftpd-r/actions/runs/44996694989))
+passed the test gate, four native builds and `publish GitHub Release`. The
+[GitHub Release](https://github.com/greyskysoul/tftpd-r/releases/tag/v0.3.0) is
+published (not draft, not prerelease) with these assets:
+
+| Asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `tftpd-r-0.3.0-x86_64-pc-windows-msvc.zip` | 5,054,334 | `bc4d6337e73110f5df885a646fafde7ae10f6101787f309ffd0876295edd41d7` |
+| `tftpd-r-0.3.0-aarch64-pc-windows-msvc.zip` | 4,874,072 | `aa6a465f44ecefc719c621f1d2e162c9f1303337fe720446875c5f881b92490c` |
+| `tftpd-r-0.3.0-x86_64-unknown-linux-gnu.tar.gz` | 6,510,856 | `1c7d082f636c4aab76ca186752e9d86438734d58e325eece0254e50218241da6` |
+| `tftpd-r-0.3.0-aarch64-unknown-linux-gnu.tar.gz` | 6,379,162 | `f1fcd341360e4d5ac000cdd3ae926707fff5c02f4d7698322f166c5ec2a93f00` |
+| `SHA256SUMS` | 440 | `1e8bf676f4acc8d94beedf3fb026c73a7e7417e12930788165bb947c5e573b48` |
+
+- **Checksum.** The x64 MSVC zip was downloaded again from the published release;
+  its local SHA-256 equals both the `SHA256SUMS` line and the GitHub asset
+  digest.
+- **Contents and execution (x64 MSVC).** `tftpd-r.exe` 911,872 B,
+  `tftpd-r-gui.exe` 8,694,272 B, `tftpd-r-gui.ico` 112,094 B plus
+  `config.example.toml`, `README.md` and both licenses. `tftpd-r.exe --version`
+  and `tftpd-r-gui.exe --help` report `0.3.0`; the GUI `--smoke-test` exited 0
+  with `language=zh_CN translation=ok ... theme=system`.
+- **Size change (MSVC x64).** The daemon drops from 1,193,984 B (0.2.2) to
+  911,872 B (−282,112 B, −23.6 %); the GUI grows from 8,641,024 B to
+  8,694,272 B (+53,248 B, +0.6 %) for the bundled catalogue and palette.
+- **Not verified here.** The arm64 Windows and both Linux archives were not
+  downloaded or executed; the interactive MSVC GUI, Linux desktop GUI, real
+  TFTP clients, LAN/firewall behaviour, RDP, IME and other DPIs remain open as
+  listed below.
+
 ## Not verified (and therefore not claimed)
 - **External TFTP client interoperability** (tftp-hpa, Tftpd64, PXE firmware,
   U-Boot, etc.). Only the in-repo test client and the raw Python client were

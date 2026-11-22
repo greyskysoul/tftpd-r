@@ -5,17 +5,17 @@ implemented. A phase is complete only when its code (where applicable), tests,
 documentation, and acceptance evidence satisfy the stated Definition of Done.
 A checklist item marked **not verified** must not be described as passed.
 
-## Current baseline: `0.3.0` (release candidate)
+## Current baseline: `0.3.0`
 
 `0.3.0` is a feature release on `0.2.2`. In addition to the GUI workflow from
 0.2.2 (remembered root, recent-root menu, exportable activity log, pre-warmed
-folder picker and unified header), this release candidate adds bilingual English
-and Simplified Chinese UI, follow-system/light/dark themes, and a smaller daemon
+folder picker and unified header), this release adds bilingual English and
+Simplified Chinese UI, follow-system/light/dark themes, and a smaller daemon
 log-filter implementation. The protocol, TOML format, read-only behavior, and
 server security defaults remain unchanged. Release gates and target-machine gaps
 are recorded in [testing.md](testing.md).
 
-### Included in 0.3.0: panel language and appearance (ADR 0015)
+### In 0.3.0: panel language and appearance (ADR 0015)
 
 The panel is now bilingual and themed. It ships **English and Simplified
 Chinese**, chosen once at startup from the system locale (Simplified Chinese
@@ -29,7 +29,7 @@ remembered in `ui-prefs.txt`. The window is English-by-default in source form,
 so the `.slint` files no longer contain Chinese literals. No protocol,
 configuration-format, daemon or security-default change.
 
-### Included in 0.3.0: daemon log filter size (ADR 0016)
+### In 0.3.0: daemon log filter size (ADR 0016)
 
 The daemon no longer links `tracing-subscriber`'s `env-filter` (and with it the
 `regex` engine) or `tracing-log`; `logging.rs` parses the level-based filter
@@ -77,9 +77,10 @@ from its working directory and does not write that file.
 - **0.3.0 — UI language/theme and daemon size.** English + Simplified Chinese
   selected from the system locale at startup; follow-system/light/dark appearance;
   level-based daemon filter that removes `env-filter` and the `regex` engine
-  (GNU x64 daemon 1,357,824 → 1,063,936 B). No protocol, configuration or
-  security-default change. See [ADR 0015](adr/0015-gui-language-and-theme.md)
-  and [ADR 0016](adr/0016-log-filter-without-env-filter.md).
+  (GNU x64 daemon 1,357,824 → 1,063,936 B; MSVC x64 daemon 1,193,984 →
+  911,872 B). No protocol, configuration or security-default change. See
+  [ADR 0015](adr/0015-gui-language-and-theme.md) and
+  [ADR 0016](adr/0016-log-filter-without-env-filter.md).
 - **0.2.2 — GUI workflow release.** Remembered root directory and recent-root
   menu, activity log with an exact-level drop-down filter and explicit export,
   pre-warmed native folder picker, and one continuous title-bar/toolbar header.

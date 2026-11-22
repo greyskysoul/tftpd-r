@@ -5,7 +5,7 @@
 TftpdR is a read-only TFTP (RFC 1350) server written in Rust, with a headless
 daemon and a native [Slint](https://slint.dev/) desktop panel.
 
-> **Status: 0.3.0 release candidate.** RRQ downloads, option negotiation, the
+> **Status: 0.3.0.** RRQ downloads, option negotiation, the
 > path sandbox, the daemon CLI and the embedded-mode GUI are implemented and
 > tested. The panel supports English/Simplified Chinese and light/dark themes.
 > WRQ uploads, daemon IPC and Windows Service packaging are explicitly **not**
