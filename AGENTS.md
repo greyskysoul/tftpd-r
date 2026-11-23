@@ -11,7 +11,7 @@
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
 | Phase 0–5 | ✅ 已完成 | workspace、codec/沙箱、RRQ 引擎、daemon、GUI 面板（无边框标题栏、工具栏、状态栏、日志/传输列表、设置/关于、最近根目录）、文档/ADR/CI |
-| Phase 6 目标机验证/发布收尾 | 🟡 部分完成 | 0.1.0、0.2.0、0.2.1、0.2.2、0.3.0 已发布（Windows/Linux × x64/arm64）；Windows/Linux CI 已通过；真实/老式客户端、LAN/防火墙、Linux GUI、RDP、IME、其他 DPI、目标机运行仍待完成 |
+| Phase 6 目标机验证/发布收尾 | 🟡 部分完成 | 0.1.0、0.2.0、0.2.1、0.2.2、0.3.0、0.3.1 已发布（Windows/Linux × x64/arm64）；Windows/Linux CI 已通过；真实/老式客户端、LAN/防火墙、Linux GUI、RDP、IME、其他 DPI、目标机运行仍待完成 |
 | Phase 7 IPC | ⏳ 未开始 | GUI 仅 Embedded 模式，无 named pipe/daemon 控制 |
 | Phase 8 WRQ 上传 | ⏳ 未开始 | 只读是默认且唯一行为，`allow_upload=true` 被校验拒绝 |
 | 0.2.0 R1/R2 | ✅ 已发布（2026-11-20） | 默认端口 69（ADR 0007）；`port` + `bind_addresses` 多监听、GUI 多选地址与目录选择器（ADR 0008）；首次启动自动设置、空闲时自动重启（ADR 0009） |
@@ -25,7 +25,7 @@
 | 保存提示/诊断/便携状态 | ✅ 已发布（0.2.2） | 设置页内联提示；`LastRoot` 写入失败/失效/覆盖 WARN/INFO；per-user 目录不可写时回退 `.tftpd-r` |
 | 多语言 + 深浅主题 | ✅ 已发布（0.3.0） | 启动时按系统语言选简中/英文（其余语言与繁体中文→英文）；设置页「跟随系统/浅色/深色」，系统值每 30 s 复检（ADR 0015） |
 | 0.3.0 发布 | ✅ 已发布（2026-11-22） | release workflow 44996694989；四目标构建与 publish 全绿；x64 MSVC 归档 SHA-256 与 `SHA256SUMS`/GitHub digest 一致 |
-| 0.3.1 二进制重命名 | 🟡 候选（未发布） | daemon 发布名为 `tftpd-r-server`，GUI 为 `tftpd-r`；压缩包不再附带 `.ico`；TFTP 协议/配置/安全默认值不变 |
+| 0.3.1 发布 | ✅ 已发布（2026-11-23） | release workflow 45104766450；四目标构建与 publish 全绿；四个归档 SHA-256 与 `SHA256SUMS`/GitHub digest 一致；x86_64 MSVC 归档运行检查通过 |
 
 已验证环境：Windows 11（10.0.26300）+ Rust 1.100.0 `x86_64-pc-windows-gnu` + MinGW-w64 GCC 15.3 + Slint 1.19.0；CI 另在 `windows-latest`（MSVC x64）与 `ubuntu-latest`（GNU x64）跑 fmt/clippy/test，并在原生 arm64 runner 构建。**未验证**：MSVC 交互式 GUI/长期服务、Linux/arm64 产物运行、Linux 桌面 GUI、真实/外部 TFTP 客户端、Windows Service、RDP、69 端口权限、真实键盘/IME、其他 DPI/语言渲染与无障碍、运行中系统主题切换、Linux 主题探测（`gsettings`/`GTK_THEME`）。不要把未验证项写成已通过。
 
@@ -168,7 +168,7 @@ cargo build --workspace --release
 
 其中 build-support 覆盖 ICO 解析（7 帧、截断/非法/越界拒绝）与 `.res` 的 null 资源、`RT_ICON`/`RT_GROUP_ICON`、帧字节与对齐；GUI 根目录相关 13 项覆盖 `LastRoot` 持久化/失效/只读降级、状态目录选择/便携回退、启动优先级（`config.toml` > 记忆根目录 > 未指定）、空根目录拒绝与「未指定根目录」；日志相关 14 项覆盖级别/筛选/单行化/500 行上限/导出格式与写文件/轮询目标；根目录菜单 2 项覆盖未变化行不重建模型、当前标记/新条目/清空仍重建，以及 `recent-dirs.txt` 的 UTF-8 BOM 容错；目录选择 4 项覆盖目录校验、非 ASCII 目录名与 `PICK:` 协议解析，ignored 集成测试覆盖预热 helper 的启动、真实弹窗与关闭。最新复验见 `docs/testing.md`。
 
-release 体积基线（2026-11-23，0.3.1 候选；ADR 0010/0011/0012/0013/0014/0015/0016）：GNU x64 `target/release/tftpd-r-server.exe` **1,063,936 B（1.01 MiB）**、`tftpd-r.exe` **9,036,800 B（8.62 MiB）**（最近根目录菜单修复 +512 B；daemon 未变）；0.3.0 及更早的历史数据使用旧名 `tftpd-r.exe`（daemon）/ `tftpd-r-gui.exe`（GUI），已发布的 MSVC x64 归档为 911,872 / 8,694,272 B（0.2.2 为 1,193,984 / 8,641,024 B）。ADR 0016 去掉 daemon 的 `env-filter` 后 GNU daemon 减少 293,888 B（−21.6%）、MSVC daemon 减少 282,112 B（−23.6%）；多语言 `.po` + 双主题使 MSVC GUI 增加 53,248 B（+0.6%）。0.3.1 候选 locked release 构建在本机为 117 s（含重命名后的完整重编）；0.3.0 候选为 66.65 s；此前预发布日志过滤构建 57.16 s、语言/主题构建 84 s、0.2.2 版本号变更构建 59.04 s、GUI 增量 51.43 s；首次完整 size-profile 构建约 116.4 s。GNU 与 MSVC 体积不可直接比较。换工具链/平台必须重测，这不是对其他平台的承诺。
+release 体积基线（2026-11-23，0.3.1 发布；ADR 0010/0011/0012/0013/0014/0015/0016）：GNU x64 `target/release/tftpd-r-server.exe` **1,063,936 B（1.01 MiB）**、`tftpd-r.exe` **9,036,800 B（8.62 MiB）**（最近根目录菜单修复 +512 B；daemon 未变）；0.3.0 及更早的历史数据使用旧名 `tftpd-r.exe`（daemon）/ `tftpd-r-gui.exe`（GUI），已发布的 MSVC x64 归档为 911,872 / 8,694,272 B（0.2.2 为 1,193,984 / 8,641,024 B）。ADR 0016 去掉 daemon 的 `env-filter` 后 GNU daemon 减少 293,888 B（−21.6%）、MSVC daemon 减少 282,112 B（−23.6%）；多语言 `.po` + 双主题使 MSVC GUI 增加 53,248 B（+0.6%）。0.3.1 候选 locked release 构建在本机为 117 s（含重命名后的完整重编）；0.3.0 候选为 66.65 s；此前预发布日志过滤构建 57.16 s、语言/主题构建 84 s、0.2.2 版本号变更构建 59.04 s、GUI 增量 51.43 s；首次完整 size-profile 构建约 116.4 s。GNU 与 MSVC 体积不可直接比较。换工具链/平台必须重测，这不是对其他平台的承诺。
 
 其他有用命令：
 

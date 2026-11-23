@@ -848,9 +848,9 @@ published (not draft, not prerelease) with these assets:
 The 0.3.1 candidate renames the published executables (daemon
 `tftpd-r-server`, GUI `tftpd-r`) and stops staging a standalone `.ico` file in
 the release archives. No protocol, configuration or security-default code was
-changed. This section records only the local checks; the 0.3.1 workflow, tag,
-four-target builds and published checksums have **not** been run and the release
-is not published.
+changed. This section records the local checks made before tagging; the tag was
+later pushed and the workflow published the release (see
+[v0.3.1 release artifacts](#v031-release-artifacts-2026-11-23-twentieth-run)).
 
 - **Build gate (GNU x64).** `cargo fmt --all -- --check` passed; `cargo clippy
   --workspace --all-targets --locked --offline -- -D warnings` passed;
@@ -925,6 +925,48 @@ path now uses the shared BOM-stripping state-file reader, so a hand-edited
   compared in a live window. A real-mouse check (hover an entry, hold the left
   button for more than 0.5 s, release, then repeat after the history changes) is
   still required on a target desktop.
+
+### v0.3.1 release artifacts (2026-11-23, twentieth run)
+
+Tag `v0.3.1` (commit `e41d8df`) was pushed to `origin/main`; release workflow
+[45104766450](https://github.com/greyskysoul/tftpd-r/actions/runs/45104766450)
+completed successfully. Both test jobs passed (Windows 2m18s, Linux 1m46s), all
+four target builds passed (x86_64 MSVC 3m15s, aarch64 MSVC 4m26s, x86_64 Linux
+1m52s, aarch64 Linux 2m15s), and `publish GitHub Release` took 17s. The only
+annotations were the GitHub Actions Node.js 20 deprecation warnings for
+`actions/checkout@v4` and `actions/upload-artifact@v4`; they did not fail a job.
+The release is public, not a draft or prerelease:
+<https://github.com/greyskysoul/tftpd-r/releases/tag/v0.3.1> (`TftpdR v0.3.1`,
+published 2026-11-23T03:21:22Z).
+
+| Asset | Bytes | SHA-256 (matches both `SHA256SUMS` and the GitHub asset digest) |
+| --- | ---: | --- |
+| `tftpd-r-0.3.1-aarch64-pc-windows-msvc.zip` | 4,852,457 | `2e10d20dc8b52ae0ec65f3482e3709a988efb835fb19e2af7344c1d932bfdc0b` |
+| `tftpd-r-0.3.1-aarch64-unknown-linux-gnu.tar.gz` | 6,378,760 | `9e2bcf10f2630213b8dce209780caee8a569a0a201c762f578f1c1b1e3e32a30` |
+| `tftpd-r-0.3.1-x86_64-pc-windows-msvc.zip` | 5,033,364 | `0945563330e54544d914029a8a9269253a0f0488a1dc0821deb8aad0cd79b1ea` |
+| `tftpd-r-0.3.1-x86_64-unknown-linux-gnu.tar.gz` | 6,511,006 | `f6db189ca6d962edeb618f1e4680e3806bba37e9426dd3dceddf6eda812aee7b` |
+| `SHA256SUMS` | 440 | `5c465765c4ff7ace0ba01b5425d0030f87c5b3bc0db8f5e23dac2e8e51d4b16f` |
+
+- **Local asset verification.** All five assets were downloaded with `gh
+  release download v0.3.1`; `Get-FileHash` matched every line of `SHA256SUMS`,
+  and the GitHub API asset digests matched the same values. Extracting all four
+  archives produced exactly `tftpd-r-server`, `tftpd-r`, `config.example.toml`,
+  `README.md`, `LICENSE-MIT` and `LICENSE-APACHE` per archive, with **zero**
+  `.ico` files. Binary sizes: x86_64 MSVC 912,384 B / 8,694,784 B, aarch64 MSVC
+  868,352 B / 8,163,840 B, x86_64 Linux 1,055,496 B / 11,975,384 B, aarch64
+  Linux 988,960 B / 10,429,840 B.
+- **x86_64 MSVC executable check.** The downloaded binaries report
+  `tftpd-r-server 0.3.1` and `tftpd-r 0.3.1`; the daemon usage text names
+  `tftpd-r-server.exe` while the GUI usage is `tftpd-r [OPTIONS]`.
+  `print-default-config` is byte-identical to the shipped `config.example.toml`
+  (2,549 B). The GUI `--smoke-test` with an isolated `APPDATA` printed
+  `smoke-test: language=en translation=ok tagline=Rust TFTP server theme=system dark=true`
+  and exited; no `tftpd` process remained afterwards.
+- **Not verified at release time.** The aarch64 and Linux binaries were only
+  unpacked and hashed, not executed; the MSVC GUI was smoke-tested but not
+  interacted with (real mouse/IME, settings, transfers, restart/close); real
+  TFTP clients, LAN/firewall/TID traffic, privileged ports and RDP remain target
+  machine checks. CI build success is not runtime evidence for those platforms.
 
 ## Not verified (and therefore not claimed)
 - **External TFTP client interoperability** (tftp-hpa, Tftpd64, PXE firmware,
