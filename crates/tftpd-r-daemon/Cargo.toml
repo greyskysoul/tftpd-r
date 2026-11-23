@@ -7,7 +7,7 @@ license.workspace = true
 description = "TftpdR headless daemon: CLI, TOML configuration and graceful shutdown"
 
 [[bin]]
-name = "tftpd-r"
+name = "tftpd-r-server"
 path = "src/main.rs"
 
 [dependencies]

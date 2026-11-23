@@ -13,11 +13,25 @@
 
 TftpdR 是一个**只读** TFTP（RFC 1350）服务器，使用 Rust 编写，包含无头 daemon 和原生 [Slint](https://slint.dev/) 桌面面板。
 
-> **当前版本：0.3.0。** 已实现并测试 RRQ 下载、选项协商、路径沙箱、daemon CLI 与嵌入式 GUI。桌面面板支持英文/简体中文及浅色/深色主题。WRQ 上传、daemon IPC 和 Windows Service 打包明确**不在**此版本范围内。详见[功能范围](#功能范围与非目标)和 [0.3.0 发布说明](.github/release-notes/0.3.0.md)。
+> **当前版本：0.3.1。** 已实现并测试 RRQ 下载、选项协商、路径沙箱、daemon CLI 与嵌入式 GUI。桌面面板支持英文/简体中文及浅色/深色主题。WRQ 上传、daemon IPC 和 Windows Service 打包明确**不在**此版本范围内。0.3.1 起 daemon 可执行文件为 `tftpd-r-server`、面板为 `tftpd-r`，发布压缩包不再附带独立的 `.ico` 文件；TFTP 协议、TOML 配置和安全默认值不变。详见[功能范围](#功能范围与非目标)和 [0.3.1 发布说明](.github/release-notes/0.3.1.md)。
+
+## 界面截图
+
+<p align="center">
+  <img src="docs/screenshots/main-window-zh-light.png" alt="主界面（简体中文、浅色主题）：服务运行中，显示监听地址、根目录、活动日志和传输列表" width="880">
+  <br>
+  <sub>主界面（简体中文、浅色主题）：服务运行中，显示监听地址、根目录、活动日志和传输列表</sub>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/settings-zh-light.png" alt="服务设置（简体中文、浅色主题）：绑定地址、端口、根目录、传输限制和外观" width="644">
+  <br>
+  <sub>服务设置（简体中文、浅色主题）：绑定地址、端口、根目录、传输限制和外观</sub>
+</p>
 
 ## 下载
 
-Windows 和 Linux 的 x64、arm64 预编译压缩包可在[最新 Release](https://github.com/greyskysoul/tftpd-r/releases/latest)中获取。每个压缩包包含 `tftpd-r` daemon、`tftpd-r-gui` 面板、`config.example.toml`、`README.md` 和两个许可证文件。Windows 可执行文件内嵌产品图标，Windows 压缩包还附带 `tftpd-r-gui.ico`；`SHA256SUMS` 覆盖全部发布文件。
+Windows 和 Linux 的 x64、arm64 预编译压缩包可在[最新 Release](https://github.com/greyskysoul/tftpd-r/releases/latest)中获取。每个压缩包包含 `tftpd-r-server` daemon、`tftpd-r` 面板、`config.example.toml`、`README.md` 和两个许可证文件，不包含独立的 `.ico` 文件。`SHA256SUMS` 覆盖全部发布文件。
 
 协议引擎和 daemon 可跨平台运行；桌面面板需要图形会话（Linux 下为 X11 或 Wayland）。
 
@@ -33,7 +47,7 @@ Windows 和 Linux 的 x64、arm64 预编译压缩包可在[最新 Release](https
 - 会话总数及单 peer 并发数、传输时长、文件大小和事件环均有上限。
 - 无头 daemon：TOML 配置、`check-config`、`print-default-config`、结构化日志以及 Ctrl-C / Ctrl-Break / SIGTERM 优雅关闭。
 - 原生 Slint GUI：服务状态、启动/停止、设置、活动日志、传输列表和最近目录选择；使用相同配置校验规则。面板支持英文和简体中文（启动时按系统语言选择），并提供跟随系统/浅色/深色主题；GUI 默认不预设根目录，并记忆最近成功启动或保存的根目录。
-- 产品图标采用 Material `dns` 图形；用于面板、任务栏及 Windows 可执行文件。图标来源与许可说明见 [`ui/icons/README.md`](crates/tftpd-r-gui-slint/ui/icons/README.md)。
+- 产品图标采用 Material `dns` 图形，用于面板与任务栏。图标来源与许可说明见 [`ui/icons/README.md`](crates/tftpd-r-gui-slint/ui/icons/README.md)。
 
 本版本刻意不实现（详见 `docs/adr/`）：
 
@@ -48,7 +62,7 @@ Windows 和 Linux 的 x64、arm64 预编译压缩包可在[最新 Release](https
 
 - Rust **1.100.0** 是本工作区开发与验证使用的工具链；尚未声明 MSRV，未测试更旧的编译器。
 - Windows 10/11 为主要目标。协议引擎跨平台，完整测试也在 CI 的 Linux 环境运行；桌面面板目前仅在 Windows 手动运行验证。
-- Windows 构建需要 linker：默认 `x86_64-pc-windows-msvc` 工具链使用 MSVC Build Tools（`link.exe`），`x86_64-pc-windows-gnu` 使用 MinGW-w64。GNU 构建还需要 MinGW-w64 binutils 的 `windres` 来编译图标资源。验证记录见[测试文档](docs/testing.md)。
+- Windows 构建需要 linker：默认 `x86_64-pc-windows-msvc` 工具链使用 MSVC Build Tools（`link.exe`），`x86_64-pc-windows-gnu` 使用 MinGW-w64。GNU 构建还需要 MinGW-w64 binutils 的 `windres`。验证记录见[测试文档](docs/testing.md)。
 
 ## 构建
 
@@ -57,7 +71,9 @@ cargo build --workspace            # debug
 cargo build --workspace --release  # release binaries in target\release
 ```
 
-Release 使用优先减小体积的配置（`opt-level = "z"`、fat LTO、`panic = "abort"` 和符号剥离）。GNU x64 验证构建的 daemon 约 1.01 MiB、GUI 约 8.62 MiB（含约 110 KiB Windows 图标资源）。Release 中 panic 会终止进程，Debug 和测试构建仍使用默认 unwind。daemon 的日志过滤避免引入 `regex` 引擎，详见 [ADR 0010](docs/adr/0010-size-first-release-profile.md)、[ADR 0011](docs/adr/0011-windows-executable-icon.md) 和 [ADR 0016](docs/adr/0016-log-filter-without-env-filter.md)。
+`target\release` 下生成 `tftpd-r-server`（daemon）和 `tftpd-r`（面板）；Windows 上带 `.exe` 后缀。
+
+Release 使用优先减小体积的配置（`opt-level = "z"`、fat LTO、`panic = "abort"` 和符号剥离）。GNU x64 验证构建的 daemon 约 1.01 MiB、GUI 约 8.62 MiB。Release 中 panic 会终止进程，Debug 和测试构建仍使用默认 unwind。daemon 的日志过滤避免引入 `regex` 引擎，详见 [ADR 0010](docs/adr/0010-size-first-release-profile.md) 和 [ADR 0016](docs/adr/0016-log-filter-without-env-filter.md)。
 
 工作区包含三个运行时 crate 和一个构建期辅助 crate：
 
@@ -66,7 +82,7 @@ Release 使用优先减小体积的配置（`opt-level = "z"`、fat LTO、`panic
 | `tftpd-r-core` | 协议、会话引擎、沙箱、配置、事件；不依赖 GUI/daemon/IPC。 |
 | `tftpd-r-daemon` | 无头服务端程序：CLI、TOML 配置、日志、优雅关闭。 |
 | `tftpd-r-gui-slint` | 原生 Slint 桌面面板；嵌入 `tftpd-r-core`，无需 daemon。 |
-| `tftpd-r-build-support` | 构建期生成 Windows 图标资源，不链接进可执行文件。 |
+| `tftpd-r-build-support` | 构建期生成 Windows 资源，不链接进产物。 |
 
 ## 快速开始：daemon
 
@@ -90,9 +106,9 @@ cargo run -p tftpd-r-daemon -- serve --config config.toml --bind 127.0.0.1:6969
 CLI 命令概览：
 
 ```text
-tftpd-r serve --config config.toml [--bind 0.0.0.0:6969] [--root DIR]
-tftpd-r check-config --config config.toml
-tftpd-r print-default-config
+tftpd-r-server serve --config config.toml [--bind 0.0.0.0:6969] [--root DIR]
+tftpd-r-server check-config --config config.toml
+tftpd-r-server print-default-config
 ```
 
 退出码：`0` 成功，`2` 配置/CLI 校验失败，`1` 启动或运行时服务失败。`--bind`、`--root` 可覆盖配置文件并会再次校验。`TFTPD_R_LOG`（或 `--log`）设置日志级别，例如 `TFTPD_R_LOG=debug`。支持级别（`off`/`error`/`warn`/`info`/`debug`/`trace` 或 `0`–`5`）以及逗号分隔的 `target=level` 指令，例如 `TFTPD_R_LOG=tftpd_r_core=debug,info`；裸 `target` 表示 `target=trace`，目标前缀匹配其下级名称。不支持 span/field 级指令。若未指定裸级别，默认级别仍为 `info`，因此仅有目标指令时会收窄对应目标，不会静默其他日志。非法指令会报告到 stderr 并忽略。详见 [ADR 0016](docs/adr/0016-log-filter-without-env-filter.md)。
@@ -105,7 +121,7 @@ tftpd-r print-default-config
 cargo run -p tftpd-r-gui-slint
 ```
 
-如果当前目录存在 `config.toml`，GUI 会加载但不会改写它。首次启动且没有可用配置时，设置面板会自动打开一次，供用户选择根目录和监听地址；表单默认选中“所有网络”（`0.0.0.0`）。daemon 和 `ServerConfig::default()` 仍采用更保守的回环地址默认值。
+GUI 的可执行文件名为 `tftpd-r`。如果当前目录存在 `config.toml`，GUI 会加载但不会改写它。首次启动且没有可用配置时，设置面板会自动打开一次，供用户选择根目录和监听地址；表单默认选中“所有网络”（`0.0.0.0`）。daemon 和 `ServerConfig::default()` 仍采用更保守的回环地址默认值。
 
 GUI **没有默认根目录**。选择目录前，状态栏显示 `No root directory` / `未指定根目录`，设置栏位保持空白；启动或保存时会要求先选择目录，而不是使用 `tftp-root` 之类占位目录。最近一次成功启动或在设置中保存的根目录，会记录到 Windows `%APPDATA%\TftpdR\last-root.txt`（其他系统使用 XDG 配置目录），下次启动时在没有有效 `config.toml` 根目录配置的情况下恢复。有效 `config.toml` 始终优先，适合部署时固定根目录。
 

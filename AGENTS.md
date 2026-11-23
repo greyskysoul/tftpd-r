@@ -25,6 +25,7 @@
 | 保存提示/诊断/便携状态 | ✅ 已发布（0.2.2） | 设置页内联提示；`LastRoot` 写入失败/失效/覆盖 WARN/INFO；per-user 目录不可写时回退 `.tftpd-r` |
 | 多语言 + 深浅主题 | ✅ 已发布（0.3.0） | 启动时按系统语言选简中/英文（其余语言与繁体中文→英文）；设置页「跟随系统/浅色/深色」，系统值每 30 s 复检（ADR 0015） |
 | 0.3.0 发布 | ✅ 已发布（2026-11-22） | release workflow 44996694989；四目标构建与 publish 全绿；x64 MSVC 归档 SHA-256 与 `SHA256SUMS`/GitHub digest 一致 |
+| 0.3.1 二进制重命名 | 🟡 候选（未发布） | daemon 发布名为 `tftpd-r-server`，GUI 为 `tftpd-r`；压缩包不再附带 `.ico`；TFTP 协议/配置/安全默认值不变 |
 
 已验证环境：Windows 11（10.0.26300）+ Rust 1.100.0 `x86_64-pc-windows-gnu` + MinGW-w64 GCC 15.3 + Slint 1.19.0；CI 另在 `windows-latest`（MSVC x64）与 `ubuntu-latest`（GNU x64）跑 fmt/clippy/test，并在原生 arm64 runner 构建。**未验证**：MSVC 交互式 GUI/长期服务、Linux/arm64 产物运行、Linux 桌面 GUI、真实/外部 TFTP 客户端、Windows Service、RDP、69 端口权限、真实键盘/IME、其他 DPI/语言渲染与无障碍、运行中系统主题切换、Linux 主题探测（`gsettings`/`GTK_THEME`）。不要把未验证项写成已通过。
 
@@ -49,11 +50,11 @@
 │   │   ├── src/{lib,config,error,events,filesystem,server,session}.rs
 │   │   ├── src/protocol/{mod,packet,codec,options}.rs
 │   │   └── tests/rrq.rs           # 真实 loopback UDP 集成测试
-│   ├── tftpd-r-daemon/           # CLI + TOML + tracing + 信号处理
+│   ├── tftpd-r-daemon/           # CLI + TOML + tracing + 信号处理；二进制 tftpd-r-server
 │   │   ├── src/{main,cli,config_file,logging,shutdown}.rs
 │   │   ├── build.rs               # exe 图标
 │   │   └── tests/cli.rs
-│   └── tftpd-r-gui-slint/        # Slint 面板 + EmbeddedController
+│   └── tftpd-r-gui-slint/        # Slint 面板 + EmbeddedController；二进制 tftpd-r
 │       ├── src/{main,controller,recent,netif,folder_picker,user_state,logging,log_export,i18n,theme}.rs
 │       ├── ui/{app,titlebar,toolbar,statusbar,logs,transfers,settings,about,
 │       │       root-menu,widgets,theme,icons,models}.slint
@@ -133,6 +134,7 @@
 - 不新增无必要依赖；新增依赖需核对许可证、维护状态、MSRV、Windows 支持、features 与传递依赖，并提交更新后的 `Cargo.lock`。
 - 不引入 WebView；GUI 保持 Slint + software renderer（除非有 ADR 和实测依据）。
 - release profile 体积优先：`opt-level="z"`、`lto="fat"`、`codegen-units=1`、`panic="abort"`、`strip="symbols"`（ADR 0010）。release 中 panic 终止进程，debug/test 仍 unwind；改 profile 必须先重测并同步 ADR/`docs/testing.md`。
+- 发布二进制名固定为 `tftpd-r-server`（daemon）和 `tftpd-r`（GUI）；Cargo 包名仍是 `tftpd-r-daemon` / `tftpd-r-gui-slint`。`cargo run -p` 用包名，发布归档、服务定义和脚本用二进制名。发布压缩包只含两个二进制、`config.example.toml`、`README.md` 和两个许可证，不得附带独立 `.ico`；两个 Windows exe 仍可内嵌产品图标作为 PE 资源。
 - Windows exe 图标由 [`tftpd-r-build-support`](crates/tftpd-r-build-support/src/lib.rs) 从 `app-icon.ico` 生成 `.res`：MSVC 交给 `link.exe`，GNU 用 `windres` 转 COFF，非 Windows no-op。不要提交 `.res`/`.o` 生成物，不要手改生成内容；GNU 缺少 `windres` 必须明确报错。更换图标时同步更新 build-support 单测中的固定帧尺寸/字节数。
 - `Cargo.lock` 属于应用 workspace，必须提交。不要提交 `target/`、`.dsh-toolchain/`、`.bootstrap/`、本地计划文档。
 
@@ -162,11 +164,11 @@ cargo test --workspace
 cargo build --workspace --release
 ```
 
-当前自动化基线是 **211 tests passed**：build-support 3、core 单元 61、RRQ UDP 集成 29、daemon 单元 15、daemon CLI 集成 5、GUI 单元 97、doctest 1；另有 1 个 ignored 的 Windows 集成测试（`the_warm_helper_closes_its_dialog_on_shutdown`，需桌面会话，手动运行）。daemon 单元新增的 6 项是 ADR 0016 的日志过滤解析（默认级别、裸级别、`target=level`、裸 target、数字/大写级别、非法指令）；GUI 97 项在原有 69 项之上新增多语言与主题 28 项：locale 归一化（简中/繁体/其他/缺失）、`Text` 各语言的文案、`.po` 目录一致性（覆盖/无冗余/占位符）、`.slint` 英文源文案约束、`ThemeMode` 解析与 `ui-prefs.txt` 持久化/损坏回退/写失败、BOM 容错、Windows/gsettings/GTK 主题解析、watcher 生命周期。
+当前自动化基线是 **213 tests passed**：build-support 3、core 单元 61、RRQ UDP 集成 29、daemon 单元 15、daemon CLI 集成 5、GUI 单元 99、doctest 1；另有 1 个 ignored 的 Windows 集成测试（`the_warm_helper_closes_its_dialog_on_shutdown`，需桌面会话，手动运行）。daemon 单元新增的 6 项是 ADR 0016 的日志过滤解析（默认级别、裸级别、`target=level`、裸 target、数字/大写级别、非法指令）；GUI 99 项在原有 69 项之上新增多语言与主题 28 项：locale 归一化（简中/繁体/其他/缺失）、`Text` 各语言的文案、`.po` 目录一致性（覆盖/无冗余/占位符）、`.slint` 英文源文案约束、`ThemeMode` 解析与 `ui-prefs.txt` 持久化/损坏回退/写失败、BOM 容错、Windows/gsettings/GTK 主题解析、watcher 生命周期；最近根目录菜单的模型重置回归 1 项（`the_recent_menu_model_is_only_rebuilt_when_its_rows_change`）与 `recent-dirs.txt` 的 BOM 容错回归 1 项（`a_byte_order_mark_does_not_hide_the_first_directory`）。
 
-其中 build-support 覆盖 ICO 解析（7 帧、截断/非法/越界拒绝）与 `.res` 的 null 资源、`RT_ICON`/`RT_GROUP_ICON`、帧字节与对齐；GUI 根目录相关 13 项覆盖 `LastRoot` 持久化/失效/只读降级、状态目录选择/便携回退、启动优先级（`config.toml` > 记忆根目录 > 未指定）、空根目录拒绝与「未指定根目录」；日志相关 14 项覆盖级别/筛选/单行化/500 行上限/导出格式与写文件/轮询目标；目录选择 4 项覆盖目录校验、非 ASCII 目录名与 `PICK:` 协议解析，ignored 集成测试覆盖预热 helper 的启动、真实弹窗与关闭。最新复验见 `docs/testing.md`。
+其中 build-support 覆盖 ICO 解析（7 帧、截断/非法/越界拒绝）与 `.res` 的 null 资源、`RT_ICON`/`RT_GROUP_ICON`、帧字节与对齐；GUI 根目录相关 13 项覆盖 `LastRoot` 持久化/失效/只读降级、状态目录选择/便携回退、启动优先级（`config.toml` > 记忆根目录 > 未指定）、空根目录拒绝与「未指定根目录」；日志相关 14 项覆盖级别/筛选/单行化/500 行上限/导出格式与写文件/轮询目标；根目录菜单 2 项覆盖未变化行不重建模型、当前标记/新条目/清空仍重建，以及 `recent-dirs.txt` 的 UTF-8 BOM 容错；目录选择 4 项覆盖目录校验、非 ASCII 目录名与 `PICK:` 协议解析，ignored 集成测试覆盖预热 helper 的启动、真实弹窗与关闭。最新复验见 `docs/testing.md`。
 
-release 体积基线（2026-11-22；ADR 0010/0011/0012/0013/0014/0015/0016）：GNU x64 `target/release/tftpd-r.exe` **1,063,936 B（1.01 MiB）**、`tftpd-r-gui.exe` **9,036,288 B（8.62 MiB）**；已发布的 MSVC x64 归档内 `tftpd-r.exe` **911,872 B**、`tftpd-r-gui.exe` **8,694,272 B**（0.2.2 为 1,193,984 / 8,641,024 B）。ADR 0016 去掉 daemon 的 `env-filter` 后 GNU daemon 减少 293,888 B（−21.6%）、MSVC daemon 减少 282,112 B（−23.6%）；多语言 `.po` + 双主题使 MSVC GUI 增加 53,248 B（+0.6%）。0.3.0 候选 locked release 构建 66.65 s；此前预发布日志过滤构建 57.16 s、语言/主题构建 84 s、0.2.2 版本号变更构建 59.04 s、GUI 增量 51.43 s；首次完整 size-profile 构建约 116.4 s。GNU 与 MSVC 体积不可直接比较。换工具链/平台必须重测，这不是对其他平台的承诺。
+release 体积基线（2026-11-23，0.3.1 候选；ADR 0010/0011/0012/0013/0014/0015/0016）：GNU x64 `target/release/tftpd-r-server.exe` **1,063,936 B（1.01 MiB）**、`tftpd-r.exe` **9,036,800 B（8.62 MiB）**（最近根目录菜单修复 +512 B；daemon 未变）；0.3.0 及更早的历史数据使用旧名 `tftpd-r.exe`（daemon）/ `tftpd-r-gui.exe`（GUI），已发布的 MSVC x64 归档为 911,872 / 8,694,272 B（0.2.2 为 1,193,984 / 8,641,024 B）。ADR 0016 去掉 daemon 的 `env-filter` 后 GNU daemon 减少 293,888 B（−21.6%）、MSVC daemon 减少 282,112 B（−23.6%）；多语言 `.po` + 双主题使 MSVC GUI 增加 53,248 B（+0.6%）。0.3.1 候选 locked release 构建在本机为 117 s（含重命名后的完整重编）；0.3.0 候选为 66.65 s；此前预发布日志过滤构建 57.16 s、语言/主题构建 84 s、0.2.2 版本号变更构建 59.04 s、GUI 增量 51.43 s；首次完整 size-profile 构建约 116.4 s。GNU 与 MSVC 体积不可直接比较。换工具链/平台必须重测，这不是对其他平台的承诺。
 
 其他有用命令：
 
@@ -213,6 +215,7 @@ cargo run -p tftpd-r-gui-slint -- --smoke-test
 - UI 线程同步等待 stop/grace；或让后台任务直接改 Slint 属性。
 - 自定义无边框标题栏时让 `WindowMoveArea` 覆盖窗口按钮；最小化/最大化/关闭必须走 `slint::Window` API（`set_minimized`/`set_maximized`/`quit_event_loop`），不要只依赖 Slint 的 `minimized`/`maximized` window property。
 - 无上限的事件/日志/会话/请求缓冲。
+- 在每个 200 ms tick 里对未变化的列表模型调用 `VecModel::set_vec`：Slint 会按模型 reset 销毁并重建全部重复项，丢失 `has-hover`，并使跨 tick 的按下/释放无法组成点击（最近根目录菜单就因此坏过）。只在行数据真正变化时重建；可启动时 attach 一次。
 - 在仍有进行中的传输时自动重启，或在传输结束后排队自动重启；配置变更应保存并提示手动重启（ADR 0009）。
 - 把 `Stopping` 因配置变更改回启动，或在 `stop()` 取走 handle 后仍报告陈旧的 `Running`。
 - 把 GUI 无配置时的「全部网络」表单默认写进 `ServerConfig::default()` 或 daemon 默认值。
@@ -224,6 +227,7 @@ cargo run -p tftpd-r-gui-slint -- --smoke-test
 - 把 `slint_build` 的 `embed_resources` 改成 `EmbedResourcesKind::EmbedForSoftwareRenderer`（该模式会预烘焙字形，使中文文案/运行时日志空白）；窗口图标走 `include_bytes!` + `Window.icon`（见 `src/main.rs` 的 `app_icon()`），不要为此开启 `image-default-formats` 或改用该嵌入模式。
 - 未经 ADR 与安全审查新增 `unsafe`、上传、IPC、服务注册或公网默认监听。
 - 提交 `.res`/`.o` 等图标生成物、手改 build-support 输出，或在非 Windows 目标强行调用 `windres`；GNU 构建失败时不得静默跳过图标。
+- 在发布压缩包里附带独立 `.ico`；或把发布二进制名改回/互换（daemon 必须是 `tftpd-r-server`，GUI 必须是 `tftpd-r`）；Cargo 包名不等于发布文件名，不要把两者混用。
 - 未重新测量、未更新 ADR 0010 与 `docs/testing.md` 就改 release profile（恢复 unwind、换 `opt-level=3` 等），或为减体积引入 UPX、nightly `build-std`/`panic_immediate_abort`。
 - 重新启用 `tracing-subscriber` 的 `env-filter`（把 `regex` 链回 daemon，约 +290 KiB）或 `tracing-log` 却不重测体积；或在 daemon 里让非法日志过滤指令导致启动失败（ADR 0016）。
 - 提交本地计划文档、便携工具链、构建产物；或在 CI/README 中宣称未验证的平台/客户端已通过。

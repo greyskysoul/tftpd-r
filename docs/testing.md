@@ -16,7 +16,7 @@ are defined in [roadmap.md](roadmap.md).
 | Linker | MinGW-w64 GCC 15.3.0 (winlibs, msvcrt runtime); `windres` 2.46.1 from the same binutils for the executable icon |
 | Slint | 1.19.0, features `std`, `backend-winit`, `renderer-software`, `software-renderer-systemfonts`, `compat-1-2` |
 | Release profile | `opt-level = "z"`, `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = "symbols"` (ADR 0010; measured 2026-11-21) |
-| Date | 2026-11-22 (historical runs from 2026-11-20 onward; 0.3.0 candidate preparation added 2026-11-22) |
+| Date | 2026-11-23 (historical runs from 2026-11-20 onward; 0.3.0 release was 2026-11-22; 0.3.1 candidate preparation added 2026-11-23) |
 
 The development environment used a portable toolchain stored in
 `.dsh-toolchain/` (git-ignored) because the agent sandbox could not perform
@@ -29,9 +29,9 @@ with network access; subsequent builds/tests ran with `--offline`.
 | Command | Result |
 | --- | --- |
 | `cargo fmt --all -- --check` | Pass (exit 0) |
-| `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` | Pass (exit 0, no warnings on the 0.3.0 candidate) |
-| `cargo test --workspace --offline` | **211 passed, 0 failed, 1 ignored** (the ignored test opens the native folder dialog; see the eleventh run) |
-| `cargo build --workspace --release --locked --offline` | Pass (exit 0, **66.65 s on the 0.3.0 candidate**; 57.16 s on the pre-0.3.0 daemon log-filter tree; 84 s on the language/theme tree; 59.04 s on the 0.2.2 final tree, 51.43 s for the GUI-only increment before the version bump, 49.08 s on the previous tree). The first full size-profile build was 116.4 s. |
+| `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` | Pass (exit 0, no warnings on the 0.3.1 candidate) |
+| `cargo test --workspace --offline` | **213 passed, 0 failed, 1 ignored** (the ignored test opens the native folder dialog; see the eleventh run) |
+| `cargo build --workspace --release --locked --offline` | Pass (exit 0, **117 s on the 0.3.1 candidate**; 66.65 s on the 0.3.0 candidate; 57.16 s on the pre-0.3.0 daemon log-filter tree; 84 s on the language/theme tree; 59.04 s on the 0.2.2 final tree, 51.43 s for the GUI-only increment before the version bump, 49.08 s on the previous tree). The first full size-profile build was 116.4 s. |
 
 The workspace was renamed from `rust-tftpd`/`tftp-*` to TftpdR/`tftpd-r-*` on
 2026-11-20. The original `0.2.0` verification ran on 2026-11-20 (offline, GNU toolchain)
@@ -49,11 +49,15 @@ integration test, so the suite then had **177 test functions**. The
 language/theme work added 28 GUI tests (language mapping, the `Text` messages,
 catalogue consistency, the theme preference and the system-theme parsers), so the
 suite reached 205 test functions. The daemon log-filter work added 6 daemon unit
-tests (`logging`), so the current suite has **211 test functions** (3
-build-support, 61 core unit, 29 RRQ integration, 15 daemon unit, 5 CLI
-integration, 97 GUI, 1 doctest) and one ignored test. GUI coverage includes
-`log_model_stays_bounded_and_keeps_newest_entries_first`, a deterministic
-501-entry check for the 500-row newest-first cap,
+tests (`logging`), and the recent-root menu work added two GUI tests (the model
+no-reset regression and `recent-dirs.txt` BOM tolerance), so the current suite
+has **213 test functions** (3 build-support, 61 core unit, 29 RRQ integration,
+15 daemon unit, 5 CLI integration, 99 GUI, 1 doctest) and one ignored test. GUI
+coverage includes `log_model_stays_bounded_and_keeps_newest_entries_first`, a
+deterministic 501-entry check for the 500-row newest-first cap,
+`the_recent_menu_model_is_only_rebuilt_when_its_rows_change` (repeated refreshes
+of unchanged rows, the current marker, a new history entry and clearing),
+`a_byte_order_mark_does_not_hide_the_first_directory`,
 `helper_replies_are_parsed_without_mangling_the_path` /
 `a_non_ascii_directory_is_accepted` for the picker's UTF-8 protocol, and the
 state-directory selection tests (`the_first_writable_state_directory_is_used`,
@@ -838,6 +842,89 @@ published (not draft, not prerelease) with these assets:
   downloaded or executed; the interactive MSVC GUI, Linux desktop GUI, real
   TFTP clients, LAN/firewall behaviour, RDP, IME and other DPIs remain open as
   listed below.
+
+### v0.3.1 candidate: executable rename and archive contents (2026-11-23, eighteenth run)
+
+The 0.3.1 candidate renames the published executables (daemon
+`tftpd-r-server`, GUI `tftpd-r`) and stops staging a standalone `.ico` file in
+the release archives. No protocol, configuration or security-default code was
+changed. This section records only the local checks; the 0.3.1 workflow, tag,
+four-target builds and published checksums have **not** been run and the release
+is not published.
+
+- **Build gate (GNU x64).** `cargo fmt --all -- --check` passed; `cargo clippy
+  --workspace --all-targets --locked --offline -- -D warnings` passed;
+  `cargo test --workspace --offline` reported **211 passed, 0 failed, 1 ignored**
+  (the ignored test opens the native folder dialog). The release build passed in
+  117 s after the rename.
+- **Produced binaries.** `target/release/tftpd-r-server.exe` (1,063,936 B) and
+  `target/release/tftpd-r.exe` (9,036,288 B). Sizes are unchanged from the
+  0.3.0 binaries, as expected for a rename (the PE icon resource is still
+  embedded).
+- **CLI surface.** `tftpd-r-server.exe --version` prints `tftpd-r-server 0.3.1`;
+  `--help` shows the same name and the `serve`, `check-config` and
+  `print-default-config` subcommands. `tftpd-r.exe --help` prints
+  `tftpd-r 0.3.1` and `Usage: tftpd-r [OPTIONS]`.
+- **Default configuration.** The daemon's `print-default-config` is still
+  covered by the passing `print_default_config_is_the_example_and_validates`
+  integration test, which compares it byte-for-byte with
+  `config.example.toml` after the CLI comments changed to `tftpd-r-server`.
+- **Archive staging.** A local copy of the packaging inputs produced a directory
+  containing `tftpd-r-server.exe`, `tftpd-r.exe`, `config.example.toml`,
+  `README.md`, `LICENSE-MIT` and `LICENSE-APACHE`, with **zero** `.ico` files.
+  The zip entry listing confirmed the same six files. The release workflow now
+  fails if a `.ico` appears in the staged directory.
+- **README captures.** The two README screenshots were re-captured from the
+  0.3.1 release GUI with `PrintWindow`; both show `TftpdR 0.3.1` in the activity
+  log.
+- **Not verified here.** The workflow itself (including the new `.ico` guard),
+  MSVC/Linux/arm64 builds and runtime behaviour, published archive contents and
+  checksums, and all target-machine GUI items listed below. Do not describe the
+  0.3.1 release as published or verified until the tag run completes.
+
+### Recent-root menu hover and slow-click fix (2026-11-23, nineteenth run)
+
+A user reported that the recent-root drop-down in the status bar behaved as if it
+refreshed constantly: moving the pointer over an entry lost the hover highlight
+immediately, and a left click selected a directory only when it was fast enough.
+The cause was the 200 ms UI timer. `refresh_models` rebuilt the `RecentDir` model
+with `VecModel::set_vec` on every tick even when the rows were identical, and
+`set_vec` is a Slint model **reset**: every repeated row in `root-menu.slint` was
+destroyed and recreated, which cleared `has-hover` and left a press whose release
+arrived on a later tick without a live `TouchArea`. The model is now attached once
+and replaced only when the visible rows (path, leaf name, current marker) differ;
+the `recent-dirs` property is re-assigned only on such a change. The same read
+path now uses the shared BOM-stripping state-file reader, so a hand-edited
+`recent-dirs.txt` with a UTF-8 BOM no longer loses its first (most recent) entry.
+
+- **Automated checks.** `cargo fmt --all -- --check` and
+  `cargo clippy --workspace --all-targets --locked --offline -- -D warnings`
+  passed. `cargo test --workspace --offline` reported **213 passed, 0 failed,
+  1 ignored**. The new `the_recent_menu_model_is_only_rebuilt_when_its_rows_change`
+  test asserts that repeated refreshes of unchanged rows leave the model alone,
+  while a changed current marker, a newly recorded directory and clearing the
+  history still rebuild it. `a_byte_order_mark_does_not_hide_the_first_directory`
+  fails before the reader change (only the second entry loaded) and passes after
+  it.
+- **GUI smoke test.** `target/debug/tftpd-r.exe --smoke-test` with an isolated
+  `APPDATA` and a seeded two-entry `recent-dirs.txt` printed
+  `smoke-test: language=en translation=ok tagline=Rust TFTP server theme=system dark=true`
+  and exited normally. Re-running the GUI with `TFTPD_R_GUI_PREVIEW=root-menu`
+  and a BOM-prefixed history rendered both entries (the current root marked
+  `Current`); before the reader fix the same seeded file showed only the second
+  entry. Captures were `PrintWindow` images.
+- **Release build.** `cargo build --workspace --release --offline` passed (80 s
+  incremental). `target/release/tftpd-r.exe` is 9,036,800 B, 512 bytes above the
+  9,036,288 B binary of the eighteenth run; `tftpd-r-server.exe` is unchanged at
+  1,063,936 B. The release GUI smoke test printed the same line as the debug
+  build.
+- **Not verified interactively.** This agent session could not drive the
+  hover/press path: synthetic `WM_MOUSEMOVE`, `WM_LBUTTONDOWN`/`WM_LBUTTONUP`
+  messages and `SetCursorPos`/`mouse_event` did not produce a hover state in the
+  fixed build or in the older pre-fix debug binary, so the two could not be
+  compared in a live window. A real-mouse check (hover an entry, hold the left
+  button for more than 0.5 s, release, then repeat after the history changes) is
+  still required on a target desktop.
 
 ## Not verified (and therefore not claimed)
 - **External TFTP client interoperability** (tftp-hpa, Tftpd64, PXE firmware,

@@ -7,7 +7,7 @@ license.workspace = true
 description = "TftpdR native Slint desktop panel for the embedded server"
 
 [[bin]]
-name = "tftpd-r-gui"
+name = "tftpd-r"
 path = "src/main.rs"
 
 [dependencies]

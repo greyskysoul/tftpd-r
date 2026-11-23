@@ -5,11 +5,18 @@ implemented. A phase is complete only when its code (where applicable), tests,
 documentation, and acceptance evidence satisfy the stated Definition of Done.
 A checklist item marked **not verified** must not be described as passed.
 
-## Current baseline: `0.3.0`
+## Current baseline: `0.3.1`
 
-`0.3.0` is a feature release on `0.2.2`. In addition to the GUI workflow from
+`0.3.1` is a packaging and executable-rename patch release on `0.3.0`. The CLI
+daemon now builds as `tftpd-r-server` and the desktop panel as `tftpd-r`; release
+archives no longer include a standalone `.ico` file. Scripts and service
+definitions that started the old `tftpd-r` daemon must use `tftpd-r-server`
+instead, because `tftpd-r` now launches the GUI. There is no TFTP protocol, TOML
+schema, read-only behavior or security-default change.
+
+`0.3.0` was a feature release on `0.2.2`. In addition to the GUI workflow from
 0.2.2 (remembered root, recent-root menu, exportable activity log, pre-warmed
-folder picker and unified header), this release adds bilingual English and
+folder picker and unified header), that release added bilingual English and
 Simplified Chinese UI, follow-system/light/dark themes, and a smaller daemon
 log-filter implementation. The protocol, TOML format, read-only behavior, and
 server security defaults remain unchanged. Release gates and target-machine gaps
@@ -74,6 +81,11 @@ from its working directory and does not write that file.
 
 ### Feature and patch releases
 
+- **0.3.1 — executable rename and archive cleanup.** The CLI daemon builds as
+  `tftpd-r-server` and the GUI as `tftpd-r`; release archives contain no
+  standalone `.ico`. No protocol, configuration or security-default change.
+  Existing scripts must switch from `tftpd-r` to `tftpd-r-server` for the
+  daemon.
 - **0.3.0 — UI language/theme and daemon size.** English + Simplified Chinese
   selected from the system locale at startup; follow-system/light/dark appearance;
   level-based daemon filter that removes `env-filter` and the `regex` engine

@@ -1,6 +1,6 @@
 //! Headless TFTP daemon entry point.
 //!
-//! Run `tftpd-r --help` for usage. The daemon owns its Tokio runtime; the
+//! Run `tftpd-r-server --help` for usage. The daemon owns its Tokio runtime; the
 //! core server does not create one.
 
 mod cli;

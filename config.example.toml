@@ -1,6 +1,6 @@
 # TftpdR configuration (safe defaults).
-# Validate with: tftpd-r check-config --config config.example.toml
-# Run with:      tftpd-r serve --config config.example.toml
+# Validate with: tftpd-r-server check-config --config config.example.toml
+# Run with:      tftpd-r-server serve --config config.example.toml
 #
 # The server is read-only in this release: WRQ uploads are rejected and
 # `allow_upload = true` is refused by configuration validation.

@@ -11,7 +11,7 @@ use clap::{Args, Parser, Subcommand};
 /// Headless TFTP server with configuration file and graceful shutdown.
 #[derive(Debug, Parser)]
 #[command(
-    name = "tftpd-r",
+    name = "tftpd-r-server",
     version,
     about = "TftpdR: read-only TFTP (RFC 1350) server daemon with a sandboxed root directory",
     long_about = None
@@ -66,7 +66,7 @@ mod tests {
 
     #[test]
     fn serve_defaults_to_config_toml() {
-        let cli = Cli::try_parse_from(["tftpd-r", "serve"]).expect("parse");
+        let cli = Cli::try_parse_from(["tftpd-r-server", "serve"]).expect("parse");
         let Command::Serve(args) = cli.command else {
             panic!("expected serve")
         };
@@ -77,7 +77,7 @@ mod tests {
     #[test]
     fn serve_accepts_overrides() {
         let cli = Cli::try_parse_from([
-            "tftpd-r",
+            "tftpd-r-server",
             "serve",
             "--config",
             "server.toml",
@@ -97,17 +97,18 @@ mod tests {
 
     #[test]
     fn check_config_and_print_default_config_parse() {
-        let cli = Cli::try_parse_from(["tftpd-r", "check-config", "-c", "x.toml"]).expect("parse");
+        let cli =
+            Cli::try_parse_from(["tftpd-r-server", "check-config", "-c", "x.toml"]).expect("parse");
         assert!(
             matches!(cli.command, Command::CheckConfig(args) if args.config == std::path::Path::new("x.toml"))
         );
 
-        let cli = Cli::try_parse_from(["tftpd-r", "print-default-config"]).expect("parse");
+        let cli = Cli::try_parse_from(["tftpd-r-server", "print-default-config"]).expect("parse");
         assert!(matches!(cli.command, Command::PrintDefaultConfig));
     }
 
     #[test]
     fn invalid_subcommand_is_rejected() {
-        assert!(Cli::try_parse_from(["tftpd-r", "run"]).is_err());
+        assert!(Cli::try_parse_from(["tftpd-r-server", "run"]).is_err());
     }
 }

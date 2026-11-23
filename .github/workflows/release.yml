@@ -89,15 +89,15 @@ jobs:
             *windows*) exe=".exe" ;;
           esac
           mkdir -p "dist/${name}"
+          cp "target/release/tftpd-r-server${exe}" "dist/${name}/"
           cp "target/release/tftpd-r${exe}" "dist/${name}/"
-          cp "target/release/tftpd-r-gui${exe}" "dist/${name}/"
-          if [ -n "$exe" ]; then
-            # Both executables embed the product icon as a PE resource; the
-            # .ico is also shipped for shortcuts/tools that want the file
-            # (see crates/tftpd-r-gui-slint/ui/icons/README.md).
-            cp "crates/tftpd-r-gui-slint/ui/icons/app-icon.ico" "dist/${name}/tftpd-r-gui.ico"
-          fi
+          # Archives intentionally contain only the executables and the
+          # documentation/config files; no standalone `.ico` is shipped.
           cp config.example.toml README.md LICENSE-MIT LICENSE-APACHE "dist/${name}/"
+          if [ -n "$(find "dist/${name}" -maxdepth 1 -type f -name '*.ico' -print -quit)" ]; then
+            echo "unexpected .ico file in ${name}" >&2
+            exit 1
+          fi
           if [ -n "$exe" ]; then
             (cd dist && 7z a -tzip "../${name}.zip" "${name}" >/dev/null)
           else

@@ -24,7 +24,8 @@ separate, standalone front-end.
 - The GUI is a fully functional local server panel without any IPC attack
   surface or platform transport code.
 - The GUI cannot attach to an already-running daemon; closing the GUI stops its
-  server. Operators who need a background service must run `tftpd-r`.
+  server. Operators who need a background service must run `tftpd-r-server`
+  (the daemon executable was named `tftpd-r` before 0.3.1).
 - The IPC work (current Phase 7; formerly Phase 6) remains open. When implemented,
   DTOs must live in a separate crate, the protocol must be versioned and
   length-prefixed, local clients must be authenticated (pipe ACLs / socket

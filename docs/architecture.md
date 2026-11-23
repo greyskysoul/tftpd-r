@@ -19,10 +19,12 @@ tftpd-r-daemon ────┴──> tftpd-r-build-support
   the event bus. It depends on Tokio, serde/toml, thiserror and tracing, but not
   on Slint, clap, tracing-subscriber or any IPC transport.
 - **`tftpd-r-daemon`** is a thin front-end: clap CLI, TOML file loading, tracing
-  logging, signal handling and process exit codes.
+  logging, signal handling and process exit codes. It builds the
+  `tftpd-r-server` executable.
 - **`tftpd-r-gui-slint`** is a second front-end: a Slint window plus an embedded
   controller that owns a Tokio runtime and a `tftpd-r-core` server handle. It
-  does not talk to the daemon (no IPC in this release).
+  does not talk to the daemon (no IPC in this release) and builds the `tftpd-r`
+  executable.
 - **`tftpd-r-build-support`** is build-time only and is not linked into either
   binary. It turns `crates/tftpd-r-gui-slint/ui/icons/app-icon.ico` into a
   Windows `.res` resource: MSVC links the `.res` directly, GNU targets convert
@@ -255,6 +257,13 @@ The GUI crate stays deliberately small:
   change, so the scroll position survives the 200 ms refresh. Opening a
   folder/save picker is not logged; only the chosen directory, export result and
   real errors are.
+- The recent-root drop-down model (`RecentDir`) is attached once and replaced
+  only when its visible rows (path, leaf name, current marker) actually change.
+  `VecModel::set_vec` is a model reset: Slint destroys and recreates every
+  repeated row, which clears `has-hover` and discards a press that spans a UI
+  tick. The former unconditional rebuild on every 200 ms tick made the entries
+  look like they were constantly refreshing: hover disappeared immediately and
+  only a fast click selected a directory.
 - `src/folder_picker.rs` owns the native directory dialog. On Windows one
   PowerShell + WinForms helper process is kept warm for the session: a
   background worker starts it the first time the settings dialog or the

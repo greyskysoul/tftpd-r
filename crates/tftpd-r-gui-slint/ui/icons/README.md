@@ -68,12 +68,13 @@ checks the embedded RGBA buffer (size, transparent corners, `#263238` tile,
 
 ## Windows executable icon
 
-Both Windows binaries (`tftpd-r.exe` and `tftpd-r-gui.exe`) embed `app-icon.ico`
-as an `RT_GROUP_ICON`/`RT_ICON` PE resource. `crates/tftpd-r-build-support`
-converts the ICO to a `.res` file at build time, so no generated `.res` or COFF
-object is committed. MSVC links the `.res` directly; GNU targets convert it to a
-COFF object with `windres` from MinGW-w64 binutils. Replacing `app-icon.ico` is
-enough to rebuild the resource (`rerun-if-changed` is emitted for it).
+Both Windows binaries (`tftpd-r-server.exe` and `tftpd-r.exe`) embed
+`app-icon.ico` as an `RT_GROUP_ICON`/`RT_ICON` PE resource.
+`crates/tftpd-r-build-support` converts the ICO to a `.res` file at build time, so
+no generated `.res` or COFF object is committed. MSVC links the `.res` directly;
+GNU targets convert it to a COFF object with `windres` from MinGW-w64 binutils.
+Replacing `app-icon.ico` is enough to rebuild the resource (`rerun-if-changed` is
+emitted for it). Release archives do not contain a separate `.ico` file.
 
 The running panel keeps using `app-icon-128.rgba` for its window and task-bar
 icon (see above); the PE resource is what Explorer, shortcuts and the task bar

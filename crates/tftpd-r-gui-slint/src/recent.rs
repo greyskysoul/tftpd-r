@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::user_state::{state_file, RECENT_DIRS_FILE};
+use crate::user_state::{read_state_text, state_file, RECENT_DIRS_FILE};
 
 /// Maximum number of directories kept in the drop-down.
 pub const MAX_RECENT_DIRS: usize = 8;
@@ -65,7 +65,7 @@ impl RecentDirs {
             storage,
         };
         if let Some(storage) = &recent.storage {
-            if let Ok(text) = std::fs::read_to_string(storage) {
+            if let Some(text) = read_state_text(storage) {
                 // The file is most-recent-first; insert in reverse so the
                 // order survives the front insertion. Canonicalise on load so
                 // the same directory written with a different spelling (for
@@ -251,6 +251,34 @@ mod tests {
             "clearing the history must remove the state file"
         );
         assert!(load_from(&storage).paths().is_empty());
+    }
+
+    #[test]
+    fn a_byte_order_mark_does_not_hide_the_first_directory() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let storage = temp.path().join("recent.txt");
+        let first = temp.path().join("first");
+        let second = temp.path().join("second");
+        std::fs::create_dir(&first).expect("first dir");
+        std::fs::create_dir(&second).expect("second dir");
+        let first = canonical(&first);
+        let second = canonical(&second);
+
+        // A Windows editor can add a UTF-8 BOM; without stripping it the first
+        // line would not canonicalise and the most recent directory would be
+        // silently missing from the drop-down.
+        std::fs::write(
+            &storage,
+            format!(
+                "\u{feff}{}\n{}\n",
+                first.to_string_lossy(),
+                second.to_string_lossy()
+            ),
+        )
+        .expect("write state");
+
+        let reloaded = load_from(&storage);
+        assert_eq!(reloaded.paths(), &[first, second][..]);
     }
 
     #[test]

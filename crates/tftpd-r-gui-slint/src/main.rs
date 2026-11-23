@@ -111,6 +111,11 @@ struct UiState {
     transfers: HashMap<SessionId, TransferState>,
     recent: RecentDirs,
     recent_model: Rc<VecModel<RecentDir>>,
+    /// Rows currently held by `recent_model`. Rebuilding the model resets the
+    /// Slint repeater and recreates every entry, which drops its hover state and
+    /// breaks a press that is still in progress, so the model is only replaced
+    /// when these rows differ (see `refresh_recent_model`).
+    recent_rows: Vec<RecentDir>,
     /// Root directory of the last successful start, restored on the next
     /// launch when no `config.toml` provides one.
     last_root: LastRoot,
@@ -228,6 +233,7 @@ impl UiState {
             transfers: HashMap::new(),
             recent,
             recent_model: Rc::new(VecModel::default()),
+            recent_rows: Vec::new(),
             last_root,
             config,
             running_root: None,
@@ -270,7 +276,14 @@ impl UiState {
         self.log_model.set_vec(rows);
     }
 
-    fn refresh_recent_model(&mut self) {
+    /// Rebuild the recent-root rows when they actually changed.
+    ///
+    /// `VecModel::set_vec` emits a model reset, which makes Slint destroy and
+    /// recreate every repeated row. Doing that on each 200 ms tick clears the
+    /// hover state of the row under the pointer and invalidates the press a
+    /// click is made of, so an unchanged list must not be replaced. Returns
+    /// whether the model was rebuilt (the caller then re-attaches it).
+    fn refresh_recent_model(&mut self) -> bool {
         let active_root = self
             .running_root
             .clone()
@@ -290,7 +303,12 @@ impl UiState {
                 active: same_path(path, &active_root),
             })
             .collect();
+        if rows == self.recent_rows {
+            return false;
+        }
+        self.recent_rows = rows.clone();
         self.recent_model.set_vec(rows);
+        true
     }
 
     /// Remember the selected root for the next launch.
@@ -391,11 +409,11 @@ fn bind_summary_text(options: &[AddressChoice], text: Text) -> String {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().any(|argument| argument == "--help" || argument == "-h") {
-        println!("tftpd-r-gui {}", env!("CARGO_PKG_VERSION"));
+        println!("tftpd-r {}", env!("CARGO_PKG_VERSION"));
         println!();
         println!("TftpdR native Slint panel for the embedded TFTP server (read-only RRQ).");
         println!();
-        println!("Usage: tftpd-r-gui [OPTIONS]");
+        println!("Usage: tftpd-r [OPTIONS]");
         println!();
         println!("Options:");
         println!("  -h, --help        Print this help and exit");
@@ -555,6 +573,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => {}
     }
     state.refresh_recent_model();
+    // Attach the (possibly non-empty) history once; later ticks only replace the
+    // shared `VecModel` when the rows really change, so the menu keeps the hover
+    // state and the press target of the row under the pointer.
+    app.set_recent_dirs(ModelRc::from(state.recent_model.clone()));
     state.push_log(
         LogLevel::Info,
         state.text.panel_started(env!("CARGO_PKG_VERSION")),
@@ -1831,7 +1853,6 @@ fn refresh_models(app: &AppWindow, state: &mut UiState) {
     };
     state.throughput_sample = (now, total_bytes);
 
-    state.refresh_recent_model();
     app.set_transfers(ModelRc::from(state.transfers_model.clone()));
     if state.logs_dirty {
         state.rebuild_log_model();
@@ -1839,7 +1860,9 @@ fn refresh_models(app: &AppWindow, state: &mut UiState) {
         state.logs_dirty = false;
     }
     app.set_log_total_count(i32::try_from(state.logs.len()).unwrap_or(i32::MAX));
-    app.set_recent_dirs(ModelRc::from(state.recent_model.clone()));
+    if state.refresh_recent_model() {
+        app.set_recent_dirs(ModelRc::from(state.recent_model.clone()));
+    }
     app.set_active_text(state.text.active_transfers(state.transfers.len()).into());
     app.set_throughput_text(throughput.into());
 }
@@ -2244,6 +2267,52 @@ mod tests {
         assert_eq!(display, display_path(&canonical));
         assert_eq!(state.recent.paths(), &[canonical.clone()][..]);
         assert_eq!(state.last_root.path(), Some(canonical.as_path()));
+    }
+
+    #[test]
+    fn the_recent_menu_model_is_only_rebuilt_when_its_rows_change() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let first = dir.path().join("first");
+        let second = dir.path().join("second");
+        std::fs::create_dir(&first).expect("first dir");
+        std::fs::create_dir(&second).expect("second dir");
+        let mut state = test_state(gui_default_config());
+
+        // Repeated ticks over an empty history must not reset the model.
+        assert!(!state.refresh_recent_model());
+        assert!(!state.refresh_recent_model());
+
+        assert!(state.recent.record(&first));
+        assert!(state.refresh_recent_model());
+        assert_eq!(state.recent_model.row_count(), 1);
+        // The 200 ms refresh sees the same rows and leaves the Slint repeater
+        // alone. Replacing the model here would destroy the hover state and
+        // invalidate a click press that spans two ticks.
+        assert!(!state.refresh_recent_model());
+        assert!(!state.refresh_recent_model());
+
+        // Starting or stopping the server only flips the "current" marker and
+        // still has to reach the menu.
+        let active = std::fs::canonicalize(&first).expect("canonical");
+        state.running_root = Some(active);
+        assert!(state.refresh_recent_model());
+        assert!(
+            state.recent_model.row_data(0).expect("first row").active,
+            "the running root must be marked as current"
+        );
+        assert!(!state.refresh_recent_model());
+
+        // Recording another directory changes the list itself.
+        assert!(state.recent.record(&second));
+        assert!(state.refresh_recent_model());
+        assert_eq!(state.recent_model.row_count(), 2);
+        assert!(!state.refresh_recent_model());
+
+        // Clearing the history empties the model once, not on every tick.
+        state.recent.clear();
+        assert!(state.refresh_recent_model());
+        assert_eq!(state.recent_model.row_count(), 0);
+        assert!(!state.refresh_recent_model());
     }
 
     #[test]

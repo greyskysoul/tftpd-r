@@ -125,8 +125,9 @@ pub fn state_file(name: &str) -> Option<PathBuf> {
 ///
 /// The panel writes these files without a BOM, but an operator editing them in
 /// a Windows editor can add one; without stripping it the first line would
-/// never match its key and the stored value would silently be ignored.
-fn read_state_text(path: &Path) -> Option<String> {
+/// never match its key and the stored value would silently be ignored. Shared
+/// with `recent.rs`, which stores one path per line.
+pub(crate) fn read_state_text(path: &Path) -> Option<String> {
     let text = std::fs::read_to_string(path).ok()?;
     Some(text.trim_start_matches('\u{feff}').to_string())
 }
