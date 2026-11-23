@@ -23,7 +23,7 @@
 | GUI 根目录未指定/记忆 | ✅ 已发布（0.2.2） | 空根目录、`last-root.txt`、`config.toml` 优先（ADR 0012） |
 | 根目录菜单 + 日志 | ✅ 已发布（0.2.2） | 菜单「选择…」立即应用；日志本地时钟/单行/级别下拉筛选/导出（ADR 0012 修订、ADR 0013 及其 2026-11-22 更新） |
 | 保存提示/诊断/便携状态 | ✅ 已发布（0.2.2） | 设置页内联提示；`LastRoot` 写入失败/失效/覆盖 WARN/INFO；per-user 目录不可写时回退 `.tftpd-r` |
-| 多语言 + 深浅主题 | ✅ 已发布（0.3.0） | 启动时按系统语言选简中/英文（其余语言与繁体中文→英文）；设置页「跟随系统/浅色/深色」，系统值每 30 s 复检（ADR 0015） |
+| 多语言 + 深浅主题 | ✅ 已发布（0.3.0）；设置导航/语言选择 2026-11-23 完成 | 启动时按持久化语言偏好（默认跟随系统 locale）选简中/英文（其余语言与繁体中文→英文）；设置面板左侧“服务端/外观”导航，「外观」页提供主题（跟随系统/浅色/深色）与语言选择，系统主题值每 30 s 复检（ADR 0015 修订） |
 | 0.3.0 发布 | ✅ 已发布（2026-11-22） | release workflow 44996694989；四目标构建与 publish 全绿；x64 MSVC 归档 SHA-256 与 `SHA256SUMS`/GitHub digest 一致 |
 | 0.3.1 发布 | ✅ 已发布（2026-11-23） | release workflow 45104766450；四目标构建与 publish 全绿；四个归档 SHA-256 与 `SHA256SUMS`/GitHub digest 一致；x86_64 MSVC 归档运行检查通过 |
 
@@ -99,7 +99,7 @@
 - `allow_upload=true`、`overwrite=true` 当前必须是**配置错误**（上传未实现，不能给运维错误暗示）。
 - 监听配置是 `port` + `bind_addresses`（1..=16 个）。默认 `127.0.0.1:69`（Linux 需 root/CAP_NET_BIND_SERVICE；Windows 低端口通常允许但可能保留）；端口 0 仅测试；重复地址去重；同族通配 `0.0.0.0`/`::` 折叠；多播/广播拒绝（ADR 0008）。绑定**全有或全无**，不得静默只服务部分地址。GUI 无有效 `config.toml` 时表单默认选中 `0.0.0.0`（ADR 0009），核心/daemon 默认仍是回环；不要把 GUI 表单默认写进 `ServerConfig::default()`。
 - GUI 根目录默认**未指定**（空 `PathBuf`，仅 GUI 内部约定）：状态栏「未指定根目录」、设置页留空、启动/保存提示「请先选择根目录。」。`last-root.txt` 记录上次成功启动或显式保存的根目录，启动时在无有效 `config.toml` 时恢复；`config.toml` 的 `root_dir` 永远优先。设置页「浏览…」只改表单，选中后必须在表单内显示「点击保存设置后生效」，不能只写进被模态框遮挡的日志；`last-root.txt` 写入失败、启动时失效条目、`config.toml` 覆盖记忆值都必须有可见日志。
-- 四个状态文件优先写入 per-user 配置目录（Windows `%APPDATA%\TftpdR`，Unix `$XDG_CONFIG_HOME/tftpd-r` 或 `~/.config/tftpd-r`）：`recent-dirs.txt`、`last-root.txt`、`ui-state.txt`、`ui-prefs.txt`（外观选择，ADR 0015）。该目录不可创建/不可写（受限 profile、Low 完整性、沙箱）时，依次回退到 exe 旁 `.tftpd-r`、工作目录 `.tftpd-r`，启动日志 WARN 说明实际目录；不得因 `%APPDATA%` 写入失败放弃根目录记忆/最近历史/首次启动标记/外观偏好。状态文件读取必须先剥掉 UTF-8 BOM（编辑器可能加上，否则首行 key 永远匹配不上）。
+- 四个状态文件优先写入 per-user 配置目录（Windows `%APPDATA%\TftpdR`，Unix `$XDG_CONFIG_HOME/tftpd-r` 或 `~/.config/tftpd-r`）：`recent-dirs.txt`、`last-root.txt`、`ui-state.txt`、`ui-prefs.txt`（外观与语言偏好，ADR 0015）。该目录不可创建/不可写（受限 profile、Low 完整性、沙箱）时，依次回退到 exe 旁 `.tftpd-r`、工作目录 `.tftpd-r`，启动日志 WARN 说明实际目录；不得因 `%APPDATA%` 写入失败放弃根目录记忆/最近历史/首次启动标记/外观与语言偏好。状态文件读取必须先剥掉 UTF-8 BOM（编辑器可能加上，否则首行 key 永远匹配不上）。
 - 不要把空根目录写进 `ServerConfig::default()`/daemon；不要把 `tftp-root` 当作 GUI 占位值显示或写入（ADR 0012）。
 - 绑定特权端口失败必须给出可操作提示，**不得**静默回退、提权或改写配置（ADR 0007）。
 - GUI 网卡枚举与目录/保存对话框通过固定绝对路径的 PowerShell/.NET（Unix 为 `hostname`/`zenity`/`kdialog`）辅助进程完成，后台线程执行；不得引入 shell、用户可控参数、提权或手写 unsafe。辅助失败时必须降级或给出可操作错误，不得崩溃。Windows 目录选择器使用**按需预热的常驻 helper**（ADR 0014）：设置页或最近目录菜单打开后预热，路径经 UTF-8 stdin/stdout 传递（不得用 `[Console]::Out` 输出路径，OEM 代码页会破坏非 ASCII 名称）；helper 启动失败或退出时回退一次性 helper；面板关闭时必须 kill helper（包括仍打开的对话框），不得遗留 PowerShell 进程。预热只在用户实际打开相关对话框时发生，不要在启动时无条件常驻。
@@ -118,11 +118,12 @@
 
 ### 3.5 语言与主题（ADR 0015）
 
-- 语言**只在启动时决定一次**：`src/i18n.rs` 读取系统 locale，简体中文（`zh`/`zh-CN`/`zh_CN`/`zh-Hans*`/`zh-SG`）→ 简中，其余语言（含 `zh-TW`/`zh-HK`/`zh-Hant*`）与读取失败 → **英文**。没有语言选择器，日志因此只存渲染后的字符串。
+- 语言**只在启动时决定一次**：`src/i18n.rs` 解析持久化 `LanguagePreference`（`ui-prefs.txt` 的 `language=system|en|zh-CN`，默认 `system`）；`system` 时读取系统 locale，简体中文（`zh`/`zh-CN`/`zh_CN`/`zh-Hans*`/`zh-SG`）→ 简中，其余语言（含 `zh-TW`/`zh-HK`/`zh-Hant*`）与读取失败 → **英文**。设置面板「外观」页可改该偏好，但运行中的进程**不得**切换语言（日志只存渲染后的字符串，原生对话框标题在启动时固定）；选择立即写入状态文件，重启面板后生效，界面必须明确提示。
+- 设置面板用左侧导航隔离「服务端」与「外观」：服务端页才显示「保存设置」并执行 `ServerConfig::validate`/自动重启；外观页只含主题与语言，用「关闭」，绝不改写服务配置或触发重启。根目录输入框的历史下拉只能填入表单并显示「点击保存设置后生效」，不得立即应用、记录新历史或关闭对话框。
 - `.slint` 里的用户可见文案必须是**英文源文案 + `@tr(...)`**，不得再写中文（`i18n.rs` 的单测会失败）。翻译放 `translations/zh_CN/LC_MESSAGES/tftpd-r-gui-slint.po`，无 `msgctxt`；新增/修改文案后必须同步 `.po`，否则「catalogue 覆盖/无冗余条目/占位符一致」三项测试失败。
 - Rust 侧所有面向操作者的文案（日志、校验错误、状态文本、地址标签、导出头、原生对话框标题）必须走 `i18n::Text`，不得硬编码中文或英文；Slint 翻译与 `Text` 必须使用同一个 `Language`。
 - 原生对话框标题/文件类型通过环境变量或固定参数传给 helper（`TFTPD_R_PICKER_TITLE`、`TFTPD_R_SAVE_TITLE`、`TFTPD_R_SAVE_FILTER`），**不得**把译文拼进 PowerShell 脚本。
-- 主题只有三个值：跟随系统（默认）/ 浅色 / 深色，持久化在 `ui-prefs.txt`。外观是显示偏好，**立即生效但绝不重启服务**，也不写进 `config.toml`。
+- 主题只有三个值：跟随系统（默认）/ 浅色 / 深色，持久化在 `ui-prefs.txt`。外观是显示偏好，**立即生效但绝不重启服务**，也不写进 `config.toml`；语言选择同属显示偏好，同样不写 `config.toml`、不重启服务。
 - 颜色只能来自 `ui/theme.slint` 的 token；新增组件不得写死颜色，否则深浅色必然不一致。深/浅两套值都写在同一个 token 表达式里。
 - 系统主题值由 `src/theme.rs` 通过 `reg.exe`（Windows）或 `gsettings`/`GTK_THEME`（Unix）读取；启动时同步读一次，之后仅在「跟随系统」模式下每 30 s 复检，禁止在 UI 线程里做探测，禁止在 200 ms UI timer 里直接起进程。
 - Slint 的 `Palette.color-scheme` 由窗口的 `init`/`changed` 处理器设置（组件作用域直接赋值是语法错误），目的是让 `ScrollView` 滚动条跟随；不要假设 Rust 能直接访问 `Theme` 全局（该全局没有导出到生成的 Rust 类型）。
@@ -164,11 +165,11 @@ cargo test --workspace
 cargo build --workspace --release
 ```
 
-当前自动化基线是 **213 tests passed**：build-support 3、core 单元 61、RRQ UDP 集成 29、daemon 单元 15、daemon CLI 集成 5、GUI 单元 99、doctest 1；另有 1 个 ignored 的 Windows 集成测试（`the_warm_helper_closes_its_dialog_on_shutdown`，需桌面会话，手动运行）。daemon 单元新增的 6 项是 ADR 0016 的日志过滤解析（默认级别、裸级别、`target=level`、裸 target、数字/大写级别、非法指令）；GUI 99 项在原有 69 项之上新增多语言与主题 28 项：locale 归一化（简中/繁体/其他/缺失）、`Text` 各语言的文案、`.po` 目录一致性（覆盖/无冗余/占位符）、`.slint` 英文源文案约束、`ThemeMode` 解析与 `ui-prefs.txt` 持久化/损坏回退/写失败、BOM 容错、Windows/gsettings/GTK 主题解析、watcher 生命周期；最近根目录菜单的模型重置回归 1 项（`the_recent_menu_model_is_only_rebuilt_when_its_rows_change`）与 `recent-dirs.txt` 的 BOM 容错回归 1 项（`a_byte_order_mark_does_not_hide_the_first_directory`）。
+当前自动化基线是 **219 tests passed**：build-support 3、core 单元 61、RRQ UDP 集成 29、daemon 单元 15、daemon CLI 集成 5、GUI 单元 105、doctest 1；另有 1 个 ignored 的 Windows 集成测试（`the_warm_helper_closes_its_dialog_on_shutdown`，需桌面会话，手动运行）。daemon 单元新增的 6 项是 ADR 0016 的日志过滤解析（默认级别、裸级别、`target=level`、裸 target、数字/大写级别、非法指令）；GUI 105 项在原有 99 项之上新增语言设置 6 项（`LanguagePreference` 持久化/Slint 值往返、非法值拒绝、显式覆盖系统 locale、`Text` 名称与保存/失败文案、`ui-prefs.txt` 语言键往返、写入失败保持选择）：locale 归一化（简中/繁体/其他/缺失）、`Text` 各语言的文案、`.po` 目录一致性（覆盖/无冗余/占位符）、`.slint` 英文源文案约束、`ThemeMode` 解析与 `ui-prefs.txt` 持久化/损坏回退/写失败、BOM 容错、Windows/gsettings/GTK 主题解析、watcher 生命周期；最近根目录菜单的模型重置回归 1 项（`the_recent_menu_model_is_only_rebuilt_when_its_rows_change`）与 `recent-dirs.txt` 的 BOM 容错回归 1 项（`a_byte_order_mark_does_not_hide_the_first_directory`）。
 
 其中 build-support 覆盖 ICO 解析（7 帧、截断/非法/越界拒绝）与 `.res` 的 null 资源、`RT_ICON`/`RT_GROUP_ICON`、帧字节与对齐；GUI 根目录相关 13 项覆盖 `LastRoot` 持久化/失效/只读降级、状态目录选择/便携回退、启动优先级（`config.toml` > 记忆根目录 > 未指定）、空根目录拒绝与「未指定根目录」；日志相关 14 项覆盖级别/筛选/单行化/500 行上限/导出格式与写文件/轮询目标；根目录菜单 2 项覆盖未变化行不重建模型、当前标记/新条目/清空仍重建，以及 `recent-dirs.txt` 的 UTF-8 BOM 容错；目录选择 4 项覆盖目录校验、非 ASCII 目录名与 `PICK:` 协议解析，ignored 集成测试覆盖预热 helper 的启动、真实弹窗与关闭。最新复验见 `docs/testing.md`。
 
-release 体积基线（2026-11-23，0.3.1 发布；ADR 0010/0011/0012/0013/0014/0015/0016）：GNU x64 `target/release/tftpd-r-server.exe` **1,063,936 B（1.01 MiB）**、`tftpd-r.exe` **9,036,800 B（8.62 MiB）**（最近根目录菜单修复 +512 B；daemon 未变）；0.3.0 及更早的历史数据使用旧名 `tftpd-r.exe`（daemon）/ `tftpd-r-gui.exe`（GUI），已发布的 MSVC x64 归档为 911,872 / 8,694,272 B（0.2.2 为 1,193,984 / 8,641,024 B）。ADR 0016 去掉 daemon 的 `env-filter` 后 GNU daemon 减少 293,888 B（−21.6%）、MSVC daemon 减少 282,112 B（−23.6%）；多语言 `.po` + 双主题使 MSVC GUI 增加 53,248 B（+0.6%）。0.3.1 候选 locked release 构建在本机为 117 s（含重命名后的完整重编）；0.3.0 候选为 66.65 s；此前预发布日志过滤构建 57.16 s、语言/主题构建 84 s、0.2.2 版本号变更构建 59.04 s、GUI 增量 51.43 s；首次完整 size-profile 构建约 116.4 s。GNU 与 MSVC 体积不可直接比较。换工具链/平台必须重测，这不是对其他平台的承诺。
+release 体积基线（2026-11-23，设置导航/语言选择树；ADR 0010/0011/0012/0013/0014/0015/0016）：GNU x64 `target/release/tftpd-r-server.exe` **1,063,936 B（1.01 MiB）**、`tftpd-r.exe` **9,184,256 B（8.76 MiB）**（设置导航、根目录历史下拉与语言偏好比 0.3.1 的 9,036,800 B 增加 147,456 B，+1.63%；daemon 未变）；0.3.0 及更早的历史数据使用旧名 `tftpd-r.exe`（daemon）/ `tftpd-r-gui.exe`（GUI），已发布的 MSVC x64 归档为 911,872 / 8,694,272 B（0.2.2 为 1,193,984 / 8,641,024 B）。ADR 0016 去掉 daemon 的 `env-filter` 后 GNU daemon 减少 293,888 B（−21.6%）、MSVC daemon 减少 282,112 B（−23.6%）；多语言 `.po` + 双主题使 MSVC GUI 增加 53,248 B（+0.6%）。本树 locked release 构建为 108.60 s（最终增量重建；同树较早一次 83.32 s，说明构建时间受增量/机器负载影响，体积以最终文件为准）；0.3.1 候选为 117 s（含重命名后的完整重编）；0.3.0 候选为 66.65 s；此前预发布日志过滤构建 57.16 s、语言/主题构建 84 s、0.2.2 版本号变更构建 59.04 s、GUI 增量 51.43 s；首次完整 size-profile 构建约 116.4 s。GNU 与 MSVC 体积不可直接比较。换工具链/平台必须重测，这不是对其他平台的承诺。
 
 其他有用命令：
 

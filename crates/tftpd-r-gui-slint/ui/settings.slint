@@ -1,6 +1,19 @@
-// Modal settings dialog. Values are validated by the Rust side with the same
-// `ServerConfig::validate` rules as the daemon; a successful save closes the
-// dialog, an invalid value keeps it open and shows the error inline.
+// Modal settings dialog with a left navigation bar.
+//
+// The dialog has two pages so the two very different kinds of setting do not
+// look alike:
+//   - Server: port, bind addresses, root directory and transfer limits. These
+//     values are stored in the server configuration and validated by the same
+//     `ServerConfig::validate` rules as the daemon; Save settings closes the
+//     dialog on success and keeps it open with an inline error on failure.
+//   - Appearance: theme and language. These apply to the panel only, never
+//     change the server configuration and never restart the server. The theme
+//     applies immediately; the language is stored for the next start because the
+//     running panel already rendered its log and native dialog titles.
+//
+// The root field has a history drop-down next to Browse…. Selecting a recent
+// directory only fills the form (Cancel must still restore the active root); the
+// inline hint repeats that Save settings is required.
 //
 // The bind address is a multi-select list: the compact field opens an in-dialog
 // picker (a drop-down style panel anchored under the field) that always offers
@@ -8,13 +21,9 @@
 // discovered on this machine. "All networks" is exclusive and cannot be
 // unchecked; the Rust side applies the toggle rules (see `toggle_address_choice`
 // in src/main.rs).
-//
-// The appearance row is the only setting that applies immediately instead of on
-// 保存设置: a theme is a display preference, not server configuration, so it is
-// applied and persisted by its own callback.
 import { ScrollView } from "std-widgets.slint";
 import { Icons, MaterialIcon } from "icons.slint";
-import { AddressOption } from "models.slint";
+import { AddressOption, RecentDir } from "models.slint";
 import { Theme } from "theme.slint";
 import {
     DisabledCheckRow,
@@ -22,6 +31,45 @@ import {
     SmallButton,
     TextField,
 } from "widgets.slint";
+
+// One entry of the left navigation bar.
+component SettingsNavItem inherits Rectangle {
+    in property <string> label;
+    in property <string> icon-data;
+    in property <bool> selected: false;
+    callback clicked();
+
+    height: 40px;
+    border-radius: 8px;
+    background: root.selected ? Theme.info-soft
+        : touch.has-hover ? Theme.row-hover
+        : transparent;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 9px;
+        cross-axis-alignment: center;
+        MaterialIcon {
+            path-data: root.icon-data;
+            tint: root.selected ? Theme.accent : Theme.text-muted;
+            icon-size: 18px;
+        }
+        Text {
+            text: root.label;
+            color: root.selected ? Theme.accent-strong : Theme.text;
+            font-size: 12px;
+            font-weight: 600;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
 
 export component SettingsDialog inherits Rectangle {
     in-out property <string> port: "69";
@@ -33,18 +81,36 @@ export component SettingsDialog inherits Rectangle {
     in-out property <string> max-sessions: "16";
     // 0 = follow the system, 1 = light, 2 = dark.
     in-out property <int> theme-mode: 0;
+    // 0 = follow the system, 1 = English, 2 = Simplified Chinese.
+    in-out property <int> language-mode: 0;
+    in property <[RecentDir]> recent-dirs: [];
     in property <string> error-text: "";
     in property <string> hint-text: "";
     in-out property <bool> picker-open: false;
-    property <length> card-height: 531px
-        + (root.error-text == "" ? 0px : 52px)
-        + (root.hint-text == "" ? 0px : 26px);
+    // 0 = server settings, 1 = interface settings.
+    property <int> page: 0;
+    property <bool> history-open: false;
+
+    property <length> card-width: 780px;
+    property <length> card-height: 500px;
+    property <length> card-padding: 18px;
+    property <length> nav-width: 176px;
+    // Header row (28 px), spacing (12), divider (1), spacing (12).
+    property <length> body-top: root.card-padding + 28px + 12px + 1px + 12px;
+    // Left edge of the content pane inside the card.
+    property <length> content-left: root.card-padding + root.nav-width + 14px + 1px + 14px;
+    // Intro rows were removed to keep the dialog quiet; the nav label and the
+    // field labels carry the meaning. The bind row is first, then the port row,
+    // then the root row.
+    property <length> root-row-top: root.body-top + 80px;
 
     callback apply-requested();
     callback cancel-requested();
     callback address-toggled(string);
     callback browse-requested();
+    callback recent-dir-selected(string);
     callback theme-changed(int);
+    callback language-changed(int);
 
     width: 100%;
     height: 100%;
@@ -56,10 +122,8 @@ export component SettingsDialog inherits Rectangle {
 
     card := Rectangle {
         x: (root.width - self.width) / 2;
-        y: (root.height - self.height) / 2;
-        width: 640px;
-        // The validation error box only appears on failure; give it room
-        // instead of letting the fixed-height card clip the footer.
+        y: Math.max(12px, (root.height - root.card-height) / 2);
+        width: root.card-width;
         height: root.card-height;
 
         background: Theme.panel-bg;
@@ -75,7 +139,7 @@ export component SettingsDialog inherits Rectangle {
         }
 
         VerticalLayout {
-            padding: 20px;
+            padding: root.card-padding;
             spacing: 12px;
 
             HorizontalLayout {
@@ -87,7 +151,7 @@ export component SettingsDialog inherits Rectangle {
                     icon-size: 19px;
                 }
                 Text {
-                    text: @tr("Service settings");
+                    text: @tr("Settings");
                     color: Theme.text-strong;
                     font-size: 16px;
                     font-weight: 700;
@@ -102,157 +166,262 @@ export component SettingsDialog inherits Rectangle {
                 }
             }
 
-            Text {
-                text: @tr("Uses the same TOML validation rules as the daemon. Saving restarts a running server automatically when no transfer is active; otherwise restart it manually later.");
-                color: Theme.text-muted;
-                font-size: 11px;
-                wrap: word-wrap;
-            }
-
             Rectangle { height: 1px; background: Theme.panel-border; }
 
-            VerticalLayout {
-                spacing: 9px;
+            HorizontalLayout {
+                vertical-stretch: 1;
+                spacing: 14px;
 
-                HorizontalLayout {
-                    cross-axis-alignment: center;
-                    spacing: 10px;
-                    Text { text: @tr("Bind addresses"); width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        height: 30px;
-                        border-radius: 6px;
-                        border-width: 1px;
-                        border-color: address-touch.has-hover ? Theme.accent : Theme.panel-border-strong;
-                        background: Theme.panel-bg;
-                        clip: true;
+                VerticalLayout {
+                    width: root.nav-width;
+                    spacing: 4px;
 
-                        HorizontalLayout {
-                            cross-axis-alignment: center;
-                            padding-left: 9px;
-                            padding-right: 7px;
-                            spacing: 6px;
-                            Text {
-                                text: root.bind-summary;
-                                color: Theme.text-strong;
-                                font-size: 12px;
-                                horizontal-stretch: 1;
-                                vertical-alignment: center;
-                                overflow: elide;
+                    SettingsNavItem {
+                        label: @tr("Server");
+                        icon-data: Icons.dns;
+                        selected: root.page == 0;
+                        clicked => {
+                            root.page = 0;
+                            root.history-open = false;
+                            root.picker-open = false;
+                        }
+                    }
+                    SettingsNavItem {
+                        label: @tr("Appearance");
+                        icon-data: Icons.settings;
+                        selected: root.page == 1;
+                        clicked => {
+                            root.page = 1;
+                            root.history-open = false;
+                            root.picker-open = false;
+                        }
+                    }
+                    Rectangle { vertical-stretch: 1; background: transparent; }
+                }
+
+                Rectangle {
+                    width: 1px;
+                    background: Theme.panel-border;
+                }
+
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
+                    spacing: 0;
+
+                    // --- Server settings ------------------------------------
+                    if root.page == 0 : ScrollView {
+                        vertical-stretch: 1;
+                        horizontal-scrollbar-policy: always-off;
+                        VerticalLayout {
+                            spacing: 10px;
+
+                            // Bind address multi-select.
+                            HorizontalLayout {
+                                cross-axis-alignment: center;
+                                spacing: 10px;
+                                Text { text: @tr("Bind addresses"); width: 140px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 30px;
+                                    border-radius: 6px;
+                                    border-width: 1px;
+                                    border-color: address-touch.has-hover ? Theme.accent : Theme.panel-border-strong;
+                                    background: Theme.panel-bg;
+                                    clip: true;
+
+                                    HorizontalLayout {
+                                        cross-axis-alignment: center;
+                                        padding-left: 9px;
+                                        padding-right: 7px;
+                                        spacing: 6px;
+                                        Text {
+                                            text: root.bind-summary;
+                                            color: Theme.text-strong;
+                                            font-size: 12px;
+                                            horizontal-stretch: 1;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                        MaterialIcon {
+                                            path-data: Icons.keyboard-arrow-down;
+                                            tint: Theme.text-muted;
+                                            icon-size: 16px;
+                                        }
+                                    }
+
+                                    address-touch := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            root.history-open = false;
+                                            root.picker-open = true;
+                                        }
+                                    }
+                                }
                             }
-                            MaterialIcon {
-                                path-data: Icons.keyboard-arrow-down;
-                                tint: Theme.text-muted;
-                                icon-size: 16px;
+
+                            HorizontalLayout {
+                                cross-axis-alignment: center;
+                                spacing: 10px;
+                                Text { text: @tr("Port"); width: 140px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                                TextField { text <=> root.port; placeholder: "69"; width: 120px; }
+                                Text {
+                                    text: @tr("Port 69 needs admin/root.");
+                                    color: Theme.text-faint;
+                                    font-size: 10px;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                    wrap: word-wrap;
+                                }
                             }
-                        }
 
-                        address-touch := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => { root.picker-open = true; }
-                        }
-                    }
-                }
+                            HorizontalLayout {
+                                cross-axis-alignment: center;
+                                spacing: 10px;
+                                Text { text: @tr("Root directory"); width: 140px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                                TextField { text <=> root.root-dir; placeholder: @tr("Select a root directory"); horizontal-stretch: 1; }
+                                IconButton {
+                                    icon-data: Icons.history;
+                                    tint: root.history-open ? Theme.accent : Theme.text-muted;
+                                    button-size: 30px;
+                                    icon-size: 16px;
+                                    clicked => {
+                                        root.picker-open = false;
+                                        root.history-open = !root.history-open;
+                                    }
+                                }
+                                SmallButton {
+                                    label: @tr("Browse…");
+                                    button-width: 76px;
+                                    clicked => { root.browse-requested(); }
+                                }
+                            }
 
-                HorizontalLayout {
-                    cross-axis-alignment: center;
-                    spacing: 10px;
-                    Text { text: @tr("Port"); width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
-                    TextField { text <=> root.port; placeholder: "69"; width: 120px; }
-                    Text {
-                        text: @tr("The standard port 69 needs administrator/root; without permission use an unprivileged port such as 6969.");
-                        color: Theme.text-faint;
-                        font-size: 10px;
-                        horizontal-stretch: 1;
-                        vertical-alignment: center;
-                        wrap: word-wrap;
-                    }
-                }
+                            if root.hint-text != "" : HorizontalLayout {
+                                Rectangle { width: 150px; background: transparent; }
+                                Text {
+                                    text: root.hint-text;
+                                    color: Theme.text-muted;
+                                    font-size: 10px;
+                                    horizontal-stretch: 1;
+                                    wrap: word-wrap;
+                                }
+                            }
 
-                HorizontalLayout {
-                    cross-axis-alignment: center;
-                    spacing: 10px;
-                    Text { text: @tr("Root directory"); width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
-                    TextField { text <=> root.root-dir; placeholder: @tr("Select a root directory"); horizontal-stretch: 1; }
-                    SmallButton {
-                        label: @tr("Browse…");
-                        button-width: 76px;
-                        clicked => { root.browse-requested(); }
-                    }
-                }
+                            HorizontalLayout {
+                                cross-axis-alignment: center;
+                                spacing: 10px;
+                                Text { text: @tr("Max block size"); width: 140px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                                TextField { text <=> root.block-size; placeholder: "512"; horizontal-stretch: 1; }
+                            }
 
-                if root.hint-text != "" : HorizontalLayout {
-                    Rectangle { width: 130px; background: transparent; }
-                    Text {
-                        text: root.hint-text;
-                        color: Theme.text-muted;
-                        font-size: 10px;
-                        horizontal-stretch: 1;
-                        wrap: word-wrap;
-                    }
-                }
+                            HorizontalLayout {
+                                cross-axis-alignment: center;
+                                spacing: 10px;
+                                Text { text: @tr("Timeout (s)"); width: 140px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                                TextField { text <=> root.timeout-secs; placeholder: "3"; horizontal-stretch: 1; }
+                            }
 
-                HorizontalLayout {
-                    cross-axis-alignment: center;
-                    spacing: 10px;
-                    Text { text: @tr("Max block size"); width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
-                    TextField { text <=> root.block-size; placeholder: "512"; horizontal-stretch: 1; }
-                }
+                            HorizontalLayout {
+                                cross-axis-alignment: center;
+                                spacing: 10px;
+                                Text { text: @tr("Max concurrent sessions"); width: 140px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                                TextField { text <=> root.max-sessions; placeholder: "16"; horizontal-stretch: 1; }
+                            }
 
-                HorizontalLayout {
-                    cross-axis-alignment: center;
-                    spacing: 10px;
-                    Text { text: @tr("Timeout (s)"); width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
-                    TextField { text <=> root.timeout-secs; placeholder: "3"; horizontal-stretch: 1; }
-                }
+                            DisabledCheckRow {
+                                label: @tr("Uploads (WRQ) are not implemented");
+                            }
 
-                HorizontalLayout {
-                    cross-axis-alignment: center;
-                    spacing: 10px;
-                    Text { text: @tr("Max concurrent sessions"); width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
-                    TextField { text <=> root.max-sessions; placeholder: "16"; horizontal-stretch: 1; }
-                }
-
-                // Appearance applies immediately; it is a local display
-                // preference and never restarts the server.
-                HorizontalLayout {
-                    cross-axis-alignment: center;
-                    spacing: 10px;
-                    Text { text: @tr("Appearance"); width: 120px; color: Theme.text; font-size: 12px; vertical-alignment: center; }
-                    HorizontalLayout {
-                        spacing: 6px;
-                        SmallButton {
-                            label: @tr("Follow system");
-                            primary: root.theme-mode == 0;
-                            button-width: 104px;
-                            clicked => { root.theme-changed(0); }
-                        }
-                        SmallButton {
-                            label: @tr("Light");
-                            primary: root.theme-mode == 1;
-                            button-width: 72px;
-                            clicked => { root.theme-changed(1); }
-                        }
-                        SmallButton {
-                            label: @tr("Dark");
-                            primary: root.theme-mode == 2;
-                            button-width: 72px;
-                            clicked => { root.theme-changed(2); }
+                            // Absorb the remaining viewport height so the rows
+                            // stay top-aligned instead of being spread apart.
+                            Rectangle { vertical-stretch: 1; background: transparent; }
                         }
                     }
-                    Text {
-                        text: @tr("Applies immediately and is remembered.");
-                        color: Theme.text-faint;
-                        font-size: 10px;
-                        horizontal-stretch: 1;
-                        vertical-alignment: center;
-                        wrap: word-wrap;
+
+                    // --- Appearance settings -------------------------------
+                    if root.page == 1 : ScrollView {
+                        vertical-stretch: 1;
+                        horizontal-scrollbar-policy: always-off;
+                        VerticalLayout {
+                            spacing: 10px;
+
+                            VerticalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: @tr("Theme");
+                                    color: Theme.text-strong;
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                }
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    SmallButton {
+                                        label: @tr("Follow system");
+                                        primary: root.theme-mode == 0;
+                                        button-width: 104px;
+                                        clicked => { root.theme-changed(0); }
+                                    }
+                                    SmallButton {
+                                        label: @tr("Light");
+                                        primary: root.theme-mode == 1;
+                                        button-width: 72px;
+                                        clicked => { root.theme-changed(1); }
+                                    }
+                                    SmallButton {
+                                        label: @tr("Dark");
+                                        primary: root.theme-mode == 2;
+                                        button-width: 72px;
+                                        clicked => { root.theme-changed(2); }
+                                    }
+                                }
+                            }
+
+                            Rectangle { height: 1px; background: Theme.panel-border; }
+
+                            VerticalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: @tr("Language");
+                                    color: Theme.text-strong;
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                }
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    SmallButton {
+                                        label: @tr("Follow system");
+                                        primary: root.language-mode == 0;
+                                        button-width: 104px;
+                                        clicked => { root.language-changed(0); }
+                                    }
+                                    SmallButton {
+                                        label: @tr("English");
+                                        primary: root.language-mode == 1;
+                                        button-width: 88px;
+                                        clicked => { root.language-changed(1); }
+                                    }
+                                    SmallButton {
+                                        label: @tr("Simplified Chinese");
+                                        primary: root.language-mode == 2;
+                                        button-width: 148px;
+                                        clicked => { root.language-changed(2); }
+                                    }
+                                }
+                                Text {
+                                    text: @tr("Restart to apply.");
+                                    color: Theme.text-faint;
+                                    font-size: 10px;
+                                    wrap: word-wrap;
+                                }
+                            }
+
+                            // Absorb the remaining viewport height so the two
+                            // groups are not stretched apart.
+                            Rectangle { vertical-stretch: 1; background: transparent; }
+                        }
                     }
                 }
-            }
-
-            DisabledCheckRow {
-                label: @tr("Allow uploads (WRQ) — not implemented in this release");
             }
 
             if root.error-text != "" : Rectangle {
@@ -281,32 +450,155 @@ export component SettingsDialog inherits Rectangle {
                 }
             }
 
-            Rectangle { vertical-stretch: 1; background: transparent; }
-
             Rectangle { height: 1px; background: Theme.panel-border; }
 
             HorizontalLayout {
                 cross-axis-alignment: center;
                 spacing: 8px;
-                Text {
-                    text: @tr("Read-only: uploads are disabled in the protocol layer.");
-                    color: Theme.text-faint;
-                    font-size: 10px;
-                    vertical-alignment: center;
-                }
                 Rectangle { horizontal-stretch: 1; background: transparent; }
-                SmallButton {
+                if root.page == 0 : SmallButton {
                     label: @tr("Cancel");
                     tint: Theme.text-muted;
                     button-width: 80px;
                     clicked => { root.cancel-requested(); }
                 }
-                SmallButton {
+                if root.page == 0 : SmallButton {
                     label: @tr("Save settings");
                     icon-data: Icons.check;
                     primary: true;
                     button-width: 116px;
                     clicked => { root.apply-requested(); }
+                }
+                if root.page == 1 : SmallButton {
+                    label: @tr("Close");
+                    primary: true;
+                    button-width: 96px;
+                    clicked => { root.cancel-requested(); }
+                }
+            }
+        }
+    }
+
+    // Recent root directories for the settings form. Rendered above the card
+    // (sibling of the card so it is painted last) and anchored below the root
+    // row; selecting an entry only fills the form.
+    if root.history-open : Rectangle {
+        width: 100%;
+        height: 100%;
+        background: transparent;
+
+        TouchArea {
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    root.history-open = false;
+                }
+            }
+        }
+
+        history-card := Rectangle {
+            x: card.x + root.content-left;
+            y: card.y + root.root-row-top + 34px;
+            width: card.width - root.card-padding - root.content-left;
+            height: Math.max(120px, Math.min(84px + root.recent-dirs.length * 44px, 320px));
+
+            background: Theme.panel-bg;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Theme.panel-border-strong;
+            clip: true;
+
+            // Consume clicks on the panel background so it does not fall
+            // through to the dismissal scrim.
+            TouchArea {
+                clicked => {}
+            }
+
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+
+                HorizontalLayout {
+                    cross-axis-alignment: center;
+                    spacing: 7px;
+                    MaterialIcon {
+                        path-data: Icons.history;
+                        tint: Theme.accent;
+                        icon-size: 17px;
+                    }
+                    Text {
+                        text: @tr("Recent root directories");
+                        color: Theme.text-strong;
+                        font-size: 13px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                    IconButton {
+                        icon-data: Icons.close;
+                        button-size: 24px;
+                        icon-size: 15px;
+                        clicked => { root.history-open = false; }
+                    }
+                }
+
+                Rectangle { height: 1px; background: Theme.panel-border; }
+
+                ScrollView {
+                    vertical-stretch: 1;
+                    horizontal-scrollbar-policy: always-off;
+                    VerticalLayout {
+                        spacing: 2px;
+                        if root.recent-dirs.length == 0 : Text {
+                            text: @tr("No recent directories.");
+                            color: Theme.text-faint;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
+                        for dir in root.recent-dirs : Rectangle {
+                            height: 42px;
+                            border-radius: 6px;
+                            background: dir-touch.has-hover ? Theme.row-hover : transparent;
+
+                            HorizontalLayout {
+                                cross-axis-alignment: center;
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 8px;
+                                MaterialIcon {
+                                    path-data: Icons.folder-open;
+                                    tint: Theme.text-muted;
+                                    icon-size: 16px;
+                                }
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    spacing: 1px;
+                                    Text {
+                                        text: dir.name;
+                                        color: Theme.text-strong;
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                        width: 100%;
+                                        overflow: elide;
+                                    }
+                                    Text {
+                                        text: dir.path;
+                                        color: Theme.text-faint;
+                                        font-size: 10px;
+                                        width: 100%;
+                                        overflow: elide;
+                                    }
+                                }
+                            }
+
+                            dir-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.history-open = false;
+                                    root.recent-dir-selected(dir.path);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -329,10 +621,10 @@ export component SettingsDialog inherits Rectangle {
         }
 
         picker := Rectangle {
-            x: (root.width - 600px) / 2;
-            y: Math.max(12px, (root.height - root.card-height) / 2 + 142px);
-            width: 600px;
-            height: Math.max(190px, Math.min(root.address-options.length * 34px + 112px, 340px));
+            x: card.x + root.content-left;
+            y: Math.max(12px, card.y + root.body-top + 34px);
+            width: card.width - root.card-padding - root.content-left;
+            height: Math.max(170px, Math.min(root.address-options.length * 34px + 96px, 340px));
 
             background: Theme.panel-bg;
             border-radius: 10px;
@@ -375,7 +667,7 @@ export component SettingsDialog inherits Rectangle {
                 }
 
                 Text {
-                    text: @tr("Multi-select. Choosing a specific address clears “All networks”; choosing “All networks” clears the other addresses. The port applies to every address.");
+                    text: @tr("“All networks” is exclusive.");
                     color: Theme.text-muted;
                     font-size: 10px;
                     wrap: word-wrap;
@@ -431,17 +723,9 @@ export component SettingsDialog inherits Rectangle {
                     }
                 }
 
-                Rectangle { height: 1px; background: Theme.panel-border; }
-
                 HorizontalLayout {
                     cross-axis-alignment: center;
                     spacing: 8px;
-                    Text {
-                        text: @tr("These are this machine's interface addresses. A port without permission is reported when the server starts.");
-                        color: Theme.text-faint;
-                        font-size: 10px;
-                        vertical-alignment: center;
-                    }
                     Rectangle { horizontal-stretch: 1; background: transparent; }
                     SmallButton {
                         label: @tr("Done");

@@ -1,11 +1,16 @@
 //! Startup language selection and the panel's operator-facing text.
 //!
 //! The panel supports English and Simplified Chinese. The language is decided
-//! **once at startup** from the system locale: Simplified Chinese locales show
-//! Chinese, everything else (including every unsupported language and a
-//! detection failure) shows English. There is no language picker, so a text is
-//! always rendered in the language the process started with; this also means
-//! the in-memory activity log does not have to store message IDs.
+//! **once per process start** from the persisted [`LanguagePreference`] (default:
+//! follow the system locale). The settings dialog can change the preference, but
+//! the running process keeps its language: the in-memory activity log stores
+//! rendered strings, and the native dialog titles are captured at startup, so
+//! applying the choice on the next start keeps every rendered line and dialog
+//! consistent. The preference is stored in `ui-prefs.txt` next to the theme
+//! choice.
+//!
+//! Simplified Chinese locales show Chinese; everything else (including every
+//! unsupported language and a detection failure) shows English.
 //!
 //! Static labels live in the `.slint` files behind `@tr(...)` with English
 //! source strings; [`Text`] covers the strings the Rust side builds at runtime
@@ -84,6 +89,92 @@ impl Language {
         match self {
             Self::En => "English",
             Self::ZhCn => "简体中文",
+        }
+    }
+}
+
+/// Persisted language choice of the panel.
+///
+/// The preference is selected in the settings dialog and stored in
+/// `ui-prefs.txt`. It is resolved **before** the window is created; changing it
+/// does not switch the running process (the activity log stores rendered text,
+/// and the native dialogs capture their titles at startup), so the panel keeps
+/// one language for its lifetime and applies the new choice on the next start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LanguagePreference {
+    /// Follow the system locale, exactly like [`Language::detect`].
+    #[default]
+    System,
+    /// Always start in English.
+    En,
+    /// Always start in Simplified Chinese.
+    ZhCn,
+}
+
+impl LanguagePreference {
+    /// Persisted spelling in `ui-prefs.txt`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::En => "en",
+            Self::ZhCn => "zh-CN",
+        }
+    }
+
+    /// Parse the persisted spelling; unknown values are rejected so a corrupt
+    /// file falls back to the default instead of silently picking a language.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.trim() {
+            "system" => Some(Self::System),
+            "en" => Some(Self::En),
+            "zh-CN" => Some(Self::ZhCn),
+            _ => None,
+        }
+    }
+
+    /// Resolve the preference against the current system locale.
+    #[must_use]
+    pub fn resolve(self) -> Language {
+        match self {
+            Self::System => Language::detect(),
+            Self::En => Language::En,
+            Self::ZhCn => Language::ZhCn,
+        }
+    }
+
+    /// Resolve the preference against an explicit locale (used by tests to
+    /// avoid depending on the machine's locale).
+    #[cfg(test)]
+    #[must_use]
+    pub fn resolve_locale(self, locale: Option<&str>) -> Language {
+        match self {
+            Self::System => Language::from_locale(locale),
+            Self::En => Language::En,
+            Self::ZhCn => Language::ZhCn,
+        }
+    }
+
+    /// Value of the Slint `language-mode` property (0 system, 1 English,
+    /// 2 Simplified Chinese).
+    #[must_use]
+    pub fn slint_value(self) -> i32 {
+        match self {
+            Self::System => 0,
+            Self::En => 1,
+            Self::ZhCn => 2,
+        }
+    }
+
+    /// Inverse of [`Self::slint_value`]; unknown values are rejected.
+    #[must_use]
+    pub fn from_slint_value(value: i32) -> Option<Self> {
+        match value {
+            0 => Some(Self::System),
+            1 => Some(Self::En),
+            2 => Some(Self::ZhCn),
+            _ => None,
         }
     }
 }
@@ -521,6 +612,41 @@ impl Text {
         )
     }
 
+    /// Name of a language preference, translated into the current language.
+    #[must_use]
+    pub fn language_preference_name(self, preference: LanguagePreference) -> &'static str {
+        match preference {
+            LanguagePreference::System => text!(self, "Follow system", "跟随系统"),
+            LanguagePreference::En => "English",
+            LanguagePreference::ZhCn => "简体中文",
+        }
+    }
+
+    /// The language preference was stored for the next start.
+    #[must_use]
+    pub fn language_preference_saved(self, name: &str) -> String {
+        text!(
+            self,
+            format!(
+                "Language preference saved: {name}. It takes effect after restarting the panel."
+            ),
+            format!("语言偏好已保存：{name}。重启面板后生效。")
+        )
+    }
+
+    /// The language preference could not be written to the state file. The
+    /// currently running panel is unaffected either way.
+    #[must_use]
+    pub fn language_preference_not_saved(self, error: &str) -> String {
+        text!(
+            self,
+            format!(
+                "Cannot remember the language preference: {error}; the next start keeps the previous language."
+            ),
+            format!("无法记住语言偏好：{error}；下次启动仍使用原来的语言。")
+        )
+    }
+
     // --- Settings -----------------------------------------------------------
 
     /// Settings were rejected by the shared validation.
@@ -914,6 +1040,90 @@ mod tests {
     }
 
     #[test]
+    fn language_preferences_round_trip_through_their_persisted_and_slint_forms() {
+        for preference in [
+            LanguagePreference::System,
+            LanguagePreference::En,
+            LanguagePreference::ZhCn,
+        ] {
+            assert_eq!(
+                LanguagePreference::parse(preference.as_str()),
+                Some(preference)
+            );
+            assert_eq!(
+                LanguagePreference::from_slint_value(preference.slint_value()),
+                Some(preference)
+            );
+        }
+        assert_eq!(LanguagePreference::default(), LanguagePreference::System);
+    }
+
+    #[test]
+    fn unknown_language_preferences_are_rejected() {
+        assert_eq!(LanguagePreference::parse(""), None);
+        assert_eq!(LanguagePreference::parse("zh"), None);
+        assert_eq!(LanguagePreference::parse("zh_CN"), None);
+        assert_eq!(LanguagePreference::parse("Auto"), None);
+        assert_eq!(LanguagePreference::from_slint_value(3), None);
+        assert_eq!(LanguagePreference::from_slint_value(-1), None);
+    }
+
+    #[test]
+    fn explicit_language_preferences_override_the_system_locale() {
+        assert_eq!(
+            LanguagePreference::En.resolve_locale(Some("zh-CN")),
+            Language::En
+        );
+        assert_eq!(
+            LanguagePreference::ZhCn.resolve_locale(Some("en-US")),
+            Language::ZhCn
+        );
+        // The default follows the same mapping (and fallback) as detection.
+        assert_eq!(
+            LanguagePreference::System.resolve_locale(Some("zh-CN")),
+            Language::ZhCn
+        );
+        assert_eq!(
+            LanguagePreference::System.resolve_locale(Some("zh-TW")),
+            Language::En
+        );
+        assert_eq!(
+            LanguagePreference::System.resolve_locale(None),
+            Language::En
+        );
+    }
+
+    #[test]
+    fn language_preference_names_follow_the_rendering_language() {
+        let en = Text::new(Language::En);
+        let zh = Text::new(Language::ZhCn);
+        assert_eq!(
+            en.language_preference_name(LanguagePreference::System),
+            "Follow system"
+        );
+        assert_eq!(
+            zh.language_preference_name(LanguagePreference::System),
+            "跟随系统"
+        );
+        assert_eq!(
+            en.language_preference_name(LanguagePreference::ZhCn),
+            "简体中文"
+        );
+        assert_eq!(
+            zh.language_preference_name(LanguagePreference::En),
+            "English"
+        );
+        assert_ne!(
+            en.language_preference_saved("English"),
+            zh.language_preference_saved("English")
+        );
+        assert_ne!(
+            en.language_preference_not_saved("denied"),
+            zh.language_preference_not_saved("denied")
+        );
+    }
+
+    #[test]
     fn status_texts_are_localised() {
         let en = Text::new(Language::En);
         let zh = Text::new(Language::ZhCn);
@@ -982,6 +1192,7 @@ mod tests {
             en.settings_saved_restart_failed(),
             en.settings_saved_next_start(),
             en.settings_unchanged(),
+            en.language_preference_name(LanguagePreference::System),
             en.port_out_of_range(),
             en.select_bind_address(),
             en.choose_root_first(),
@@ -1012,6 +1223,7 @@ mod tests {
             zh.settings_saved_restart_failed(),
             zh.settings_saved_next_start(),
             zh.settings_unchanged(),
+            zh.language_preference_name(LanguagePreference::System),
             zh.port_out_of_range(),
             zh.select_bind_address(),
             zh.choose_root_first(),

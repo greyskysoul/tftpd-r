@@ -103,6 +103,10 @@ export component AppWindow inherits Window {
     in-out property <string> settings-hint: "";
     // 0 = follow the system, 1 = light, 2 = dark.
     in-out property <int> theme-mode: 0;
+    // 0 = follow the system, 1 = English, 2 = Simplified Chinese. The chosen
+    // language is stored for the next start; the running panel keeps its
+    // language so its log and native dialog titles stay consistent.
+    in-out property <int> language-mode: 0;
 
     callback primary-requested();
     callback stop-requested();
@@ -112,6 +116,8 @@ export component AppWindow inherits Window {
     callback browse-root();
     callback browse-root-menu();
     callback theme-mode-changed(int);
+    callback language-mode-changed(int);
+    callback settings-recent-selected(string);
     callback clear-logs();
     callback export-logs();
     callback log-filter-changed(string);
@@ -213,6 +219,8 @@ export component AppWindow inherits Window {
         timeout-secs <=> root.settings-timeout;
         max-sessions <=> root.settings-max-sessions;
         theme-mode <=> root.theme-mode;
+        language-mode <=> root.language-mode;
+        recent-dirs: root.recent-dirs;
         picker-open <=> root.settings-picker-open;
         error-text: root.settings-error;
         hint-text: root.settings-hint;
@@ -220,9 +228,14 @@ export component AppWindow inherits Window {
         cancel-requested => { root.cancel-settings(); }
         address-toggled(address) => { root.address-toggled(address); }
         browse-requested => { root.browse-root(); }
+        recent-dir-selected(path) => { root.settings-recent-selected(path); }
         theme-changed(mode) => {
             root.theme-mode = mode;
             root.theme-mode-changed(mode);
+        }
+        language-changed(mode) => {
+            root.language-mode = mode;
+            root.language-mode-changed(mode);
         }
     }
 

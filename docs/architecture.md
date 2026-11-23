@@ -173,13 +173,17 @@ The GUI crate stays deliberately small:
   `translations/zh_CN/LC_MESSAGES/tftpd-r-gui-slint.po` is bundled by
   `build.rs` (`slint_build::CompilerConfiguration::with_bundled_translations`
   plus `with_default_translation_context(DefaultTranslationContext::None)`, so
-  the catalogue has no `msgctxt`). `src/i18n.rs` maps the system locale to
-  `Language::En` or `Language::ZhCn` before the window is created and calls
+  the catalogue has no `msgctxt`). `src/i18n.rs` resolves the persisted
+  `LanguagePreference` (default: follow the system locale) to `Language::En` or
+  `Language::ZhCn` before the window is created and calls
   `slint::select_bundled_translation` afterwards, which also overrides Slint's
-  own (language-part-only) locale guess. The same module's `Text` renders every
-  string the Rust side builds (log lines, validation errors, status text,
-  address labels, export header, native dialog titles), so both halves of the
-  panel always use one language. See
+  own (language-part-only) locale guess. The settings dialog's Appearance page
+  stores a new preference in `ui-prefs.txt`, but the running process keeps its
+  startup language: the activity log holds rendered strings and the native
+  dialogs captured their titles, so the new language appears on the next start.
+  The same module's `Text` renders every string the Rust side builds (log lines,
+  validation errors, status text, address labels, export header, native dialog
+  titles), so both halves of the panel always use one language. See
   [ADR 0015](adr/0015-gui-language-and-theme.md).
 - **Theme.** `src/theme.rs` owns `ThemeMode` (follow the system / light / dark),
   the persisted choice and the platform probe: Windows reads
@@ -199,26 +203,29 @@ The GUI crate stays deliberately small:
   shows `No root directory` (`未指定根目录` in Chinese); there is no placeholder
   path. The recent-root drop-down also offers Select…, which opens the native
   folder dialog and applies the chosen directory immediately.
-- The settings dialog edits `port`, the multi-select bind address list, the
-  root, the block size, the timeout, the maximum session count and the
-  appearance. The address picker always offers `0.0.0.0` ("All networks") and
-  `127.0.0.1` ("Loopback"), merges
+- The settings dialog has a left navigation bar with two pages. **Server** edits
+  `port`, the multi-select bind address list, the root, the block size, the
+  timeout and the maximum session count; **Appearance** holds the theme and
+  language choices and applies to the panel only. The address picker always
+  offers `0.0.0.0` ("All networks") and `127.0.0.1` ("Loopback"), merges
   the discovered interface addresses and never drops a selected address that
   discovery did not report. "All networks" is exclusive and sticky: selecting it
   clears the other addresses, selecting another address clears it, and it cannot
   be unchecked (unchecking the last specific address selects it again), so the
   bind list is never empty. The root field has a Browse… button backed by a
-  native directory dialog; the helper behind it is pre-warmed when the settings
-  dialog (or the recent-root menu) opens, so the click does not pay for
-  PowerShell startup (see [ADR 0014](adr/0014-prewarmed-folder-picker-helper.md)).
-  Picking a directory only edits the form (Cancel must be able to restore the
-  active value), so the form shows an inline "click Save settings to apply"
-  reminder; Save settings applies and remembers it. The appearance row is the
-  only control that applies immediately: it is a display preference, not server
-  configuration, and it never restarts the server. When no valid `config.toml`
-  exists, the panel preselects `0.0.0.0`; the core and daemon defaults stay
-  loopback. On the first start of a profile without a valid configuration the
-  dialog opens automatically, once (see `src/user_state.rs`).
+  native directory dialog and a history button that opens the recent-root list;
+  the helper behind the dialog is pre-warmed when the settings dialog (or the
+  recent-root menu) opens, so the click does not pay for PowerShell startup (see
+  [ADR 0014](adr/0014-prewarmed-folder-picker-helper.md)). Picking a directory
+  (through Browse… or the history list) only edits the form (Cancel must be able
+  to restore the active value), so the form shows an inline "click Save settings
+  to apply" reminder; Save settings applies and remembers it. The Appearance page
+  is the only place whose controls apply independently: the theme applies
+  immediately, the language is stored for the next start, and neither restarts
+  the server. When no valid `config.toml` exists, the panel preselects `0.0.0.0`;
+  the core and daemon defaults stay loopback. On the first start of a profile
+  without a valid configuration the dialog opens automatically, once (see
+  `src/user_state.rs`).
 - The GUI uses an **empty root path** as its "no root selected" state (a
   GUI-only convention; `ServerConfig::default()` and the daemon keep
   `tftp-root`). The status bar then shows `未指定根目录` and the settings field is
@@ -347,8 +354,9 @@ renderer.
   a half-started server.
 - Log rows are capped at 500 in the model; the event ring is independently
   bounded. Logs are displayed newest-first so the latest event stays visible
-  without programmatic scrolling. Log text is rendered in the startup language,
-  which is why the language is fixed for the process lifetime.
+  without programmatic scrolling. Log text is rendered in the startup language;
+  changing the language preference takes effect on the next start, which keeps
+  existing rows and the native dialog titles consistent (ADR 0015).
 - `SystemThemeWatcher` runs one worker thread that re-reads the operating-system
   theme every 30 s while the panel follows the system; the UI timer copies the
   newest value into the state and re-applies the palette on the UI thread. The

@@ -98,7 +98,7 @@ export component RootMenu inherits Rectangle {
                 VerticalLayout {
                     spacing: 2px;
                     if root.items.length == 0 : Text {
-                        text: @tr("No recent directories. Click “Select…” to choose and apply a root directory directly.");
+                        text: @tr("No recent directories.");
                         color: Theme.text-faint;
                         font-size: 12px;
                         wrap: word-wrap;
@@ -159,7 +159,7 @@ export component RootMenu inherits Rectangle {
 
             Rectangle { height: 1px; background: Theme.panel-border; }
             Text {
-                text: @tr("Switching directories while the server runs restarts it automatically when no transfer is active; otherwise restart it manually later.");
+                text: @tr("Switching the root restarts an idle server.");
                 color: Theme.text-faint;
                 font-size: 10px;
             }

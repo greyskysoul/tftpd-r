@@ -28,14 +28,8 @@ msgstr "运行日志"
 msgid "All levels"
 msgstr "全部级别"
 
-msgid "Allow uploads (WRQ) — not implemented in this release"
-msgstr "允许上传（WRQ）— 本版本尚未实现"
-
 msgid "Appearance"
 msgstr "外观"
-
-msgid "Applies immediately and is remembered."
-msgstr "立即生效并记住选择。"
 
 msgid "Bind addresses"
 msgstr "绑定地址"
@@ -70,6 +64,9 @@ msgstr "深色"
 msgid "Done"
 msgstr "完成"
 
+msgid "English"
+msgstr "English"
+
 msgid "ERROR only"
 msgstr "仅 ERROR"
 
@@ -88,6 +85,9 @@ msgstr "图标：Google Material Design Icons（Apache License 2.0）"
 msgid "INFO only"
 msgstr "仅 INFO"
 
+msgid "Language"
+msgstr "语言"
+
 msgid "Language: {}"
 msgstr "语言：{}"
 
@@ -103,9 +103,6 @@ msgstr "最大块大小"
 msgid "Max concurrent sessions"
 msgstr "最大并发会话"
 
-msgid "Multi-select. Choosing a specific address clears “All networks”; choosing “All networks” clears the other addresses. The port applies to every address."
-msgstr "可多选。选中具体地址会自动取消「全部网络」；选中「全部网络」会清空其他地址。端口对所有地址生效。"
-
 msgid "Newest first"
 msgstr "最新在上"
 
@@ -115,9 +112,6 @@ msgstr "当前筛选级别下没有日志。"
 msgid "No log entries yet. Connection and transfer events appear here once the server starts."
 msgstr "尚无日志。启动服务后，连接与传输事件会显示在这里。"
 
-msgid "No recent directories. Click “Select…” to choose and apply a root directory directly."
-msgstr "暂无最近使用的目录。点击“选择…”可直接选择一个根目录并应用。"
-
 msgid "No transfers. Client downloads appear here once the server starts."
 msgstr "暂无传输。服务启动后，客户端下载文件会显示在这里。"
 
@@ -126,9 +120,6 @@ msgstr "端口"
 
 msgid "Progress"
 msgstr "进度"
-
-msgid "Read-only: uploads are disabled in the protocol layer."
-msgstr "只读模式：上传已在协议层禁用。"
 
 msgid "Recent root directories"
 msgstr "最近使用的根目录"
@@ -160,14 +151,17 @@ msgstr "选择绑定地址"
 msgid "Select…"
 msgstr "选择…"
 
-msgid "Service settings"
-msgstr "服务设置"
+msgid "Server"
+msgstr "服务端"
 
 msgid "Service status"
 msgstr "服务状态"
 
 msgid "Settings"
 msgstr "设置"
+
+msgid "Simplified Chinese"
+msgstr "简体中文"
 
 msgid "Size"
 msgstr "大小"
@@ -181,20 +175,14 @@ msgstr "状态"
 msgid "Stop"
 msgstr "停止"
 
-msgid "Switching directories while the server runs restarts it automatically when no transfer is active; otherwise restart it manually later."
-msgstr "服务运行中切换目录：无进行中的传输时自动重启，否则请稍后手动重启。"
-
 msgid "TftpdR · TFTP server"
 msgstr "TftpdR · TFTP 服务端"
 
 msgid "The R in TftpdR stands for Rust. This is a read-only TFTP server; the daemon and the desktop panel share one protocol core and one set of configuration rules."
 msgstr "TftpdR 中的 R 代表 Rust。这是一个只读 TFTP 服务端，守护进程与桌面面板共享同一套协议内核与配置校验规则。"
 
-msgid "The standard port 69 needs administrator/root; without permission use an unprivileged port such as 6969."
-msgstr "标准端口 69 需要管理员/root；无权限时请改用 6969 等非特权端口。"
-
-msgid "These are this machine's interface addresses. A port without permission is reported when the server starts."
-msgstr "显示的是本机网卡地址，权限不足的端口会在启动时给出提示。"
+msgid "Theme"
+msgstr "主题"
 
 msgid "Timeout (s)"
 msgstr "超时（秒）"
@@ -202,11 +190,26 @@ msgstr "超时（秒）"
 msgid "Transfers"
 msgstr "传输列表"
 
-msgid "Uses the same TOML validation rules as the daemon. Saving restarts a running server automatically when no transfer is active; otherwise restart it manually later."
-msgstr "与守护进程使用同一套 TOML 校验规则。保存后，运行中且无传输时自动重启；否则请稍后手动重启。"
-
 msgid "Version {}"
 msgstr "版本 {}"
 
 msgid "WARN only"
 msgstr "仅 WARN"
+
+msgid "No recent directories."
+msgstr "暂无最近使用的目录。"
+
+msgid "Switching the root restarts an idle server."
+msgstr "切换根目录会重启空闲的服务。"
+
+msgid "Port 69 needs admin/root."
+msgstr "端口 69 需要管理员/root 权限。"
+
+msgid "Uploads (WRQ) are not implemented"
+msgstr "上传（WRQ）尚未实现"
+
+msgid "Restart to apply."
+msgstr "重启后生效。"
+
+msgid "“All networks” is exclusive."
+msgstr "“全部网络”与其他地址互斥。"

@@ -30,8 +30,8 @@ with network access; subsequent builds/tests ran with `--offline`.
 | --- | --- |
 | `cargo fmt --all -- --check` | Pass (exit 0) |
 | `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` | Pass (exit 0, no warnings on the 0.3.1 candidate) |
-| `cargo test --workspace --offline` | **213 passed, 0 failed, 1 ignored** (the ignored test opens the native folder dialog; see the eleventh run) |
-| `cargo build --workspace --release --locked --offline` | Pass (exit 0, **117 s on the 0.3.1 candidate**; 66.65 s on the 0.3.0 candidate; 57.16 s on the pre-0.3.0 daemon log-filter tree; 84 s on the language/theme tree; 59.04 s on the 0.2.2 final tree, 51.43 s for the GUI-only increment before the version bump, 49.08 s on the previous tree). The first full size-profile build was 116.4 s. |
+| `cargo test --workspace --locked --offline` | **219 passed, 0 failed, 1 ignored** (the ignored test opens the native folder dialog; see the eleventh run) |
+| `cargo build --workspace --release --locked --offline` | Pass (exit 0, **108.60 s final incremental build on the settings-navigation/language tree**; earlier builds of the same tree took 92.15 s and 83.32 s; 117 s on the 0.3.1 candidate; 66.65 s on the 0.3.0 candidate; 57.16 s on the pre-0.3.0 daemon log-filter tree; 84 s on the language/theme tree; 59.04 s on the 0.2.2 final tree, 51.43 s for the GUI-only increment before the version bump, 49.08 s on the previous tree). The first full size-profile build was 116.4 s. |
 
 The workspace was renamed from `rust-tftpd`/`tftp-*` to TftpdR/`tftpd-r-*` on
 2026-11-20. The original `0.2.0` verification ran on 2026-11-20 (offline, GNU toolchain)
@@ -50,9 +50,12 @@ language/theme work added 28 GUI tests (language mapping, the `Text` messages,
 catalogue consistency, the theme preference and the system-theme parsers), so the
 suite reached 205 test functions. The daemon log-filter work added 6 daemon unit
 tests (`logging`), and the recent-root menu work added two GUI tests (the model
-no-reset regression and `recent-dirs.txt` BOM tolerance), so the current suite
-has **213 test functions** (3 build-support, 61 core unit, 29 RRQ integration,
-15 daemon unit, 5 CLI integration, 99 GUI, 1 doctest) and one ignored test. GUI
+no-reset regression and `recent-dirs.txt` BOM tolerance), so the suite reached
+213 test functions. The settings-navigation and persisted-language work added
+language-preference parsing/resolution, `Text` messages, `ui-prefs.txt` language
+round-trip and write-failure coverage (6 GUI tests), so the current suite has
+**219 test functions** (3 build-support, 61 core unit, 29 RRQ integration,
+15 daemon unit, 5 CLI integration, 105 GUI, 1 doctest) and one ignored test. GUI
 coverage includes `log_model_stays_bounded_and_keeps_newest_entries_first`, a
 deterministic 501-entry check for the 500-row newest-first cap,
 `the_recent_menu_model_is_only_rebuilt_when_its_rows_change` (repeated refreshes
@@ -63,6 +66,55 @@ of unchanged rows, the current marker, a new history entry and clearing),
 state-directory selection tests (`the_first_writable_state_directory_is_used`,
 `a_blocked_state_directory_falls_back_to_the_portable_one`). The current
 workspace-check results are shown in the table above.
+
+### Settings navigation, language preference and root history (2026-11-23)
+
+This change added the left navigation bar to the settings dialog, an Appearance
+page with the persisted language preference, and the recent-root drop-down in
+the server root field. The automated results on the verification machine were:
+
+- `cargo fmt --all -- --check` → exit 0.
+- `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` →
+  exit 0.
+- `cargo test --workspace --locked --offline` → **219 passed, 0 failed,
+  1 ignored** (3 build-support, 61 core unit, 29 RRQ integration, 15 daemon unit,
+  5 CLI integration, 105 GUI, 1 doctest).
+- `cargo build --workspace --release --locked --offline` → exit 0, **108.60 s**;
+  GNU x64 `tftpd-r-server.exe` **1,063,936 B**, `tftpd-r.exe` **9,184,256 B**
+  (8.76 MiB), +147,456 B (+1.63 %) over the 0.3.1 GUI baseline (9,036,800 B).
+
+The startup language preference was exercised headlessly with an isolated
+`APPDATA` and a hand-written `ui-prefs.txt`:
+
+| `language=` | `--smoke-test` output |
+| --- | --- |
+| `zh-CN` | `language=zh_CN language_pref=zh-CN tagline=Rust TFTP 服务端 theme=system` |
+| `en` | `language=en language_pref=en tagline=Rust TFTP server theme=system` |
+| `system` (host locale zh-CN) | `language=zh_CN language_pref=system tagline=Rust TFTP 服务端 theme=system` |
+
+The dialog layout was checked by launching the debug build with
+`TFTPD_R_GUI_PREVIEW=settings` under an isolated `APPDATA` and capturing the
+window with `PrintWindow`:
+
+- The Server page shows the left navigation (服务端 selected), the existing
+  server fields, the history icon next to 浏览…, and the Cancel/Save footer.
+- The Appearance page lists Theme (跟随系统/浅色/深色) and Language
+  (跟随系统/English/简体中文) with the restart hint; the footer is a single 关闭
+  button.
+- Follow-up copy trimming removed the page intro paragraphs, the read-only
+  footer note, the history/picker footer explanations and the long root-menu
+  hint; the card is now 780 × 500 px and both pages still fit without clipping
+  at the 1120 × 780 window used for the captures.
+- The history drop-down lists the recent directories from `recent-dirs.txt`;
+  selecting one fills the root field and shows the inline
+  “已选择目录，点击“保存设置”后生效。” reminder without closing the dialog.
+- Clicking English on the Appearance page wrote `language=en` to `ui-prefs.txt`
+  (verified by reading the file) and the next `--smoke-test` start reported
+  `language=en`, proving the restart-based application path.
+- Both light and dark palettes were checked during the change; the Readme
+  screenshot was replaced with the final light Server page. Real
+  mouse/keyboard/IME input, other DPI settings and the Linux GUI remain **not
+  verified** on this machine.
 
 The `0.2.0` release artifacts built on the verification machine measured
 `tftpd-r.exe` ≈ 2.07 MiB (2,174,976 bytes) and `tftpd-r-gui.exe` ≈ 12.81 MiB
@@ -80,8 +132,11 @@ and the theme probe) brings the GUI to **9,036,288 bytes (8.62 MiB)**, +55,808
 bytes (+0.62 %); the daemon stayed at 1,357,824 bytes at that point. ADR 0016
 then removed `tracing-subscriber`'s `env-filter` (and with it the `regex`
 engine) from the daemon: it now measures **1,063,936 bytes (1.01 MiB)**, 293,888
-bytes (−21.6 %) below the previous baseline. The GUI is unchanged at
-**9,036,288 bytes (8.62 MiB)** because it has no `tracing` subscriber. The
+bytes (−21.6 %) below the previous baseline. The GUI was unchanged at that point
+(**9,036,288 bytes (8.62 MiB)**) because it has no `tracing` subscriber. The
+settings-navigation/persisted-language/root-history work raises the GNU x64 GUI
+to **9,184,256 bytes (8.76 MiB)**, +147,456 bytes (+1.63 %) over 0.3.1; the
+daemon stayed at 1,063,936 bytes. The
 attribution came from an unstripped build inspected with `nm --demangle` over
 the COFF symbol table (see the fifteenth run below). These figures
 are informational only; they are not an acceptance criterion and not a promise

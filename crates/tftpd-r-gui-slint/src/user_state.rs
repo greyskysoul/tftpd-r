@@ -13,6 +13,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+use crate::i18n::LanguagePreference;
 use crate::theme::ThemeMode;
 
 /// File with the canonicalised, most-recently-used root directories.
@@ -21,7 +22,8 @@ pub const RECENT_DIRS_FILE: &str = "recent-dirs.txt";
 pub const LAST_ROOT_FILE: &str = "last-root.txt";
 /// File with one-time setup flags.
 pub const SETUP_STATE_FILE: &str = "ui-state.txt";
-/// File with the panel's display preferences (currently the theme choice).
+/// File with the panel's display preferences (the theme choice and the
+/// language preference).
 pub const UI_PREFS_FILE: &str = "ui-prefs.txt";
 
 /// Portable state directory used when the per-user configuration directory
@@ -312,13 +314,17 @@ impl SetupState {
 
 /// Persistent display preferences of the panel.
 ///
-/// Currently only the theme choice. Unlike the server configuration this is a
-/// local display preference: it is not part of `ServerConfig`, never affects the
-/// TFTP server and is stored in its own small state file so the setup flag and
-/// the remembered root keep their meaning.
+/// The theme choice and the language preference. Unlike the server
+/// configuration these are local display preferences: they are not part of
+/// `ServerConfig`, never affect the TFTP server and are stored in their own
+/// small state file so the setup flag and the remembered root keep their
+/// meaning. The theme applies immediately; the language preference is resolved
+/// at the next start, because the running process renders its log and native
+/// dialog titles only once.
 pub struct UiPrefs {
     storage: Option<PathBuf>,
     theme_mode: ThemeMode,
+    language_preference: LanguagePreference,
 }
 
 impl UiPrefs {
@@ -334,6 +340,13 @@ impl UiPrefs {
         self.theme_mode
     }
 
+    /// The persisted language preference (follow the system when unset or
+    /// invalid).
+    #[must_use]
+    pub fn language_preference(&self) -> LanguagePreference {
+        self.language_preference
+    }
+
     /// Preferences without a storage file, for tests in other modules.
     #[cfg(test)]
     #[must_use]
@@ -341,6 +354,7 @@ impl UiPrefs {
         Self {
             storage: None,
             theme_mode: ThemeMode::System,
+            language_preference: LanguagePreference::System,
         }
     }
 
@@ -358,21 +372,45 @@ impl UiPrefs {
         self.save()
     }
 
+    /// Remember the language preference for the next start and write the state
+    /// file. The running panel is not re-rendered; the caller reports whether
+    /// the preference could be stored.
+    ///
+    /// # Errors
+    ///
+    /// Returns the filesystem error when the state file cannot be written.
+    pub fn set_language_preference(
+        &mut self,
+        preference: LanguagePreference,
+    ) -> std::io::Result<()> {
+        self.language_preference = preference;
+        self.save()
+    }
+
     fn load_from(storage: Option<PathBuf>) -> Self {
-        let theme_mode = storage
+        let mut theme_mode = ThemeMode::System;
+        let mut language_preference = LanguagePreference::System;
+        if let Some(text) = storage
             .as_ref()
             .and_then(|storage| read_state_text(storage))
-            .and_then(|text| {
-                text.lines().find_map(|line| {
-                    line.trim()
-                        .strip_prefix("theme-mode=")
-                        .and_then(ThemeMode::parse)
-                })
-            })
-            .unwrap_or_default();
+        {
+            for line in text.lines() {
+                let line = line.trim();
+                if let Some(value) = line.strip_prefix("theme-mode=") {
+                    if let Some(mode) = ThemeMode::parse(value) {
+                        theme_mode = mode;
+                    }
+                } else if let Some(value) = line.strip_prefix("language=") {
+                    if let Some(preference) = LanguagePreference::parse(value) {
+                        language_preference = preference;
+                    }
+                }
+            }
+        }
         Self {
             storage,
             theme_mode,
+            language_preference,
         }
     }
 
@@ -385,7 +423,11 @@ impl UiPrefs {
         }
         std::fs::write(
             storage,
-            format!("theme-mode={}\n", self.theme_mode.as_str()),
+            format!(
+                "theme-mode={}\nlanguage={}\n",
+                self.theme_mode.as_str(),
+                self.language_preference.as_str()
+            ),
         )
     }
 }
@@ -580,6 +622,7 @@ mod tests {
         let mut prefs = UiPrefs::load_from(Some(storage.clone()));
         // Follow the system when nothing has been stored yet.
         assert_eq!(prefs.theme_mode(), ThemeMode::System);
+        assert_eq!(prefs.language_preference(), LanguagePreference::System);
 
         prefs
             .set_theme_mode(ThemeMode::Dark)
@@ -587,7 +630,7 @@ mod tests {
         assert_eq!(prefs.theme_mode(), ThemeMode::Dark);
         assert_eq!(
             std::fs::read_to_string(&storage).expect("read preference"),
-            "theme-mode=dark\n"
+            "theme-mode=dark\nlanguage=system\n"
         );
         assert_eq!(
             UiPrefs::load_from(Some(storage.clone())).theme_mode(),
@@ -601,6 +644,43 @@ mod tests {
             UiPrefs::load_from(Some(storage)).theme_mode(),
             ThemeMode::Light
         );
+
+        // A file written before the language preference existed contains only
+        // the theme key; it must keep working and default to "system".
+        let legacy = temp.path().join("legacy-prefs.txt");
+        std::fs::write(&legacy, "theme-mode=dark\n").expect("write legacy preference");
+        let legacy = UiPrefs::load_from(Some(legacy));
+        assert_eq!(legacy.theme_mode(), ThemeMode::Dark);
+        assert_eq!(legacy.language_preference(), LanguagePreference::System);
+    }
+
+    #[test]
+    fn the_language_preference_round_trips_through_the_state_file() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let storage = temp.path().join(UI_PREFS_FILE);
+        let mut prefs = UiPrefs::load_from(Some(storage.clone()));
+        assert_eq!(prefs.language_preference(), LanguagePreference::System);
+
+        prefs
+            .set_language_preference(LanguagePreference::ZhCn)
+            .expect("write the preference");
+        assert_eq!(prefs.language_preference(), LanguagePreference::ZhCn);
+        assert_eq!(
+            std::fs::read_to_string(&storage).expect("read preference"),
+            "theme-mode=system\nlanguage=zh-CN\n"
+        );
+        assert_eq!(
+            UiPrefs::load_from(Some(storage.clone())).language_preference(),
+            LanguagePreference::ZhCn
+        );
+
+        // The two keys are independent and survive each other's writes.
+        prefs
+            .set_theme_mode(ThemeMode::Dark)
+            .expect("write the theme");
+        let reloaded = UiPrefs::load_from(Some(storage));
+        assert_eq!(reloaded.theme_mode(), ThemeMode::Dark);
+        assert_eq!(reloaded.language_preference(), LanguagePreference::ZhCn);
     }
 
     #[test]
@@ -612,19 +692,30 @@ mod tests {
         );
 
         let corrupt = temp.path().join("corrupt.txt");
-        std::fs::write(&corrupt, "theme-mode=neon\nsomething-else=1\n").expect("write corrupt");
-        assert_eq!(
-            UiPrefs::load_from(Some(corrupt)).theme_mode(),
-            ThemeMode::System
-        );
+        std::fs::write(
+            &corrupt,
+            "theme-mode=neon\nlanguage=klingon\nsomething-else=1\n",
+        )
+        .expect("write corrupt");
+        let corrupt = UiPrefs::load_from(Some(corrupt));
+        assert_eq!(corrupt.theme_mode(), ThemeMode::System);
+        assert_eq!(corrupt.language_preference(), LanguagePreference::System);
+
+        // A valid key next to a corrupt one is still used; only the corrupt key
+        // falls back to its default.
+        let partial = temp.path().join("partial.txt");
+        std::fs::write(&partial, "theme-mode=dark\nlanguage=klingon\n")
+            .expect("write partial preference");
+        let partial = UiPrefs::load_from(Some(partial));
+        assert_eq!(partial.theme_mode(), ThemeMode::Dark);
+        assert_eq!(partial.language_preference(), LanguagePreference::System);
 
         // A directory where a file is expected is treated the same way.
         let directory = temp.path().join("prefs-dir");
         std::fs::create_dir(&directory).expect("prefs dir");
-        assert_eq!(
-            UiPrefs::load_from(Some(directory)).theme_mode(),
-            ThemeMode::System
-        );
+        let directory = UiPrefs::load_from(Some(directory));
+        assert_eq!(directory.theme_mode(), ThemeMode::System);
+        assert_eq!(directory.language_preference(), LanguagePreference::System);
     }
 
     #[test]
@@ -639,16 +730,29 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_language_write_is_reported_and_keeps_the_selection() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let parent_file = temp.path().join("not-a-directory");
+        std::fs::write(&parent_file, b"x").expect("write parent file");
+        let mut prefs = UiPrefs::load_from(Some(parent_file.join(UI_PREFS_FILE)));
+        // The running panel does not switch anyway; the error is what tells the
+        // operator that the next start will keep the previous language.
+        assert!(prefs
+            .set_language_preference(LanguagePreference::ZhCn)
+            .is_err());
+        assert_eq!(prefs.language_preference(), LanguagePreference::ZhCn);
+    }
+
+    #[test]
     fn a_byte_order_mark_does_not_hide_the_stored_values() {
         // An editor on Windows can add a UTF-8 BOM; without stripping it the
         // first key would never match and the value would be silently ignored.
         let temp = tempfile::tempdir().expect("temp dir");
         let theme = temp.path().join(UI_PREFS_FILE);
-        std::fs::write(&theme, "\u{feff}theme-mode=dark\n").expect("write theme");
-        assert_eq!(
-            UiPrefs::load_from(Some(theme)).theme_mode(),
-            ThemeMode::Dark
-        );
+        std::fs::write(&theme, "\u{feff}theme-mode=dark\nlanguage=zh-CN\n").expect("write theme");
+        let theme = UiPrefs::load_from(Some(theme));
+        assert_eq!(theme.theme_mode(), ThemeMode::Dark);
+        assert_eq!(theme.language_preference(), LanguagePreference::ZhCn);
 
         let setup = temp.path().join(SETUP_STATE_FILE);
         std::fs::write(&setup, "\u{feff}setup-shown=true\n").expect("write setup");

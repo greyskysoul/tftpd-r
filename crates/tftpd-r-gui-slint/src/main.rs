@@ -38,7 +38,7 @@ use tftpd_r_core::ServerConfig;
 
 use controller::EmbeddedController;
 use folder_picker::FolderPicker;
-use i18n::{Language, Text};
+use i18n::{Language, LanguagePreference, Text};
 use log_export::SaveChoice;
 use logging::{
     export_file_name, format_export, write_export, LogEntry, LogFilter, LogLevel, MAX_LOG_ROWS,
@@ -448,18 +448,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let discovered = Arc::new(StdMutex::new(None));
     spawn_discovery(discovered.clone());
 
-    // Language: decided once, from the system locale. Simplified Chinese is the
-    // only supported translation; every other locale (and a failed detection)
-    // keeps the English source strings. The choice drives both the bundled
-    // Slint translation and the strings the Rust side builds.
+    // Language: resolved once, before the window exists. The persisted
+    // preference (system / English / Simplified Chinese) is the normal source;
+    // Simplified Chinese is the only supported translation, and every other
+    // locale (including a failed detection) keeps the English source strings.
+    // The choice drives both the bundled Slint translation and the strings the
+    // Rust side builds. Changing the preference in the settings dialog stores it
+    // for the next start instead of re-rendering this process.
     //
     // `TFTPD_R_GUI_LANGUAGE` is a development/diagnostic override: a machine
     // whose Windows UI language is, say, English cannot otherwise be used to
     // look at the Chinese layout. It is not reachable from the UI and is
     // documented as a development aid only.
+    let prefs = UiPrefs::load();
+    let language_preference = prefs.language_preference();
     let language = match std::env::var("TFTPD_R_GUI_LANGUAGE") {
         Ok(value) => Language::from_locale(Some(&value)),
-        Err(_) => Language::detect(),
+        Err(_) => language_preference.resolve(),
     };
     let text = Text::new(language);
 
@@ -467,7 +472,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // forcing light/dark. Reading the system value starts a helper process, so
     // it happens once here (before the first frame) and afterwards on the
     // watcher thread.
-    let prefs = UiPrefs::load();
     let theme_mode = prefs.theme_mode();
     let theme_watcher = SystemThemeWatcher::start();
     let system_dark = theme_watcher.latest().unwrap_or(false);
@@ -481,6 +485,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.set_app_icon(app_icon());
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
     app.set_language(language.display_name().into());
+    app.set_language_mode(language_preference.slint_value());
     // Selecting the bundled catalogue must happen after the first component
     // exists; `"en"` selects the source strings. This also overrides Slint's
     // own locale guess, which would treat e.g. zh-TW as Chinese.
@@ -683,8 +688,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // the bundled catalogue was applied) and the resolved palette, so a
         // headless run shows the whole startup decision.
         println!(
-            "smoke-test: language={} translation={} tagline={} theme={} dark={}",
+            "smoke-test: language={} language_pref={} translation={} tagline={} theme={} dark={}",
             language.slint_locale(),
+            language_preference.as_str(),
             if translation.is_ok() { "ok" } else { "missing" },
             app.get_tagline(),
             state.borrow().theme_mode.as_str(),
@@ -1289,6 +1295,36 @@ fn install_callbacks(
         });
     }
 
+    // Fill the settings root field from its history drop-down. Unlike the
+    // recent-root menu this only edits the form: the directory becomes active
+    // when Save settings is pressed, so Cancel still restores the active root.
+    {
+        let weak = app.as_weak();
+        let state = state.clone();
+        app.on_settings_recent_selected(move |path_text| {
+            let Some(app) = weak.upgrade() else {
+                return;
+            };
+            let mut state = state.borrow_mut();
+            let path = PathBuf::from(path_text.as_str());
+            if !path.is_dir() {
+                let message = state.text.path_is_not_a_directory(&display_path(&path));
+                state.push_log(LogLevel::Error, message.clone());
+                // The history is behind the modal dialog; repeat the failure in
+                // the form so a directory that disappeared while the list was
+                // open is not silently ignored.
+                app.set_settings_error(message.into());
+                refresh_models(&app, &mut state);
+                return;
+            }
+            let display = display_root_path(&path);
+            app.set_settings_root(display.clone().into());
+            app.set_settings_hint(state.text.root_selected_not_saved().into());
+            let message = state.text.root_selected_in_form(&display);
+            state.push_log(LogLevel::Info, message);
+            refresh_models(&app, &mut state);
+        });
+    }
     // Forget the recent-root history. The configured and running root are
     // unaffected: they are server configuration, not history.
     {
@@ -1336,6 +1372,36 @@ fn install_callbacks(
             }
             apply_theme(&app, &state);
             app.set_theme_mode(mode.slint_value());
+            refresh_models(&app, &mut state);
+        });
+    }
+    // Language: persist the choice for the next start. The running panel keeps
+    // its language (the activity log stores rendered lines and the native dialog
+    // titles were captured at startup), so no property is re-translated here.
+    {
+        let weak = app.as_weak();
+        let state = state.clone();
+        app.on_language_mode_changed(move |value| {
+            let Some(app) = weak.upgrade() else {
+                return;
+            };
+            let Some(preference) = LanguagePreference::from_slint_value(value) else {
+                return;
+            };
+            let mut state = state.borrow_mut();
+            if state.prefs.language_preference() == preference {
+                app.set_language_mode(preference.slint_value());
+                return;
+            }
+            let name = state.text.language_preference_name(preference).to_string();
+            if let Err(error) = state.prefs.set_language_preference(preference) {
+                let message = state.text.language_preference_not_saved(&error.to_string());
+                state.push_log(LogLevel::Warn, message);
+            } else {
+                let message = state.text.language_preference_saved(&name);
+                state.push_log(LogLevel::Info, message);
+            }
+            app.set_language_mode(preference.slint_value());
             refresh_models(&app, &mut state);
         });
     }
