@@ -1,0 +1,126 @@
+// "Close TftpdR?" prompt shown when the window close button (or Alt+F4) is
+// pressed while the embedded server is running.
+//
+// It is an in-window overlay like the settings and About dialogs: the window
+// stays where it is so the operator can still see the server state behind the
+// scrim and change their mind with Cancel.
+import { Icons, MaterialIcon } from "icons.slint";
+import { Theme } from "theme.slint";
+import { SmallButton } from "widgets.slint";
+
+export component ClosePromptDialog inherits Rectangle {
+    // Bind addresses / status detail of the running server, already localised.
+    in property <string> detail-text: "";
+    // False when this build has no native tray backend; the background choice
+    // is then hidden instead of hiding the window with no way back.
+    in property <bool> background-available: true;
+
+    callback close-and-exit-requested();
+    callback background-requested();
+    callback cancel-requested();
+
+    width: 100%;
+    height: 100%;
+    background: Theme.scrim;
+
+    // Clicking the backdrop is the same as Cancel: the panel stays open.
+    TouchArea {
+        clicked => { root.cancel-requested(); }
+    }
+
+    card := Rectangle {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        width: 560px;
+        height: 300px;
+
+        background: Theme.panel-bg;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: Theme.panel-border-strong;
+
+        // Consume clicks inside the card so only the scrim cancels.
+        TouchArea {
+            clicked => {}
+        }
+
+        VerticalLayout {
+            padding: 20px;
+            spacing: 12px;
+
+            HorizontalLayout {
+                cross-axis-alignment: center;
+                spacing: 10px;
+                MaterialIcon {
+                    path-data: Icons.dns;
+                    tint: Theme.warning;
+                    icon-size: 22px;
+                }
+                Text {
+                    text: @tr("Close TftpdR?");
+                    color: Theme.text-strong;
+                    font-size: 16px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+            }
+
+            Rectangle { height: 1px; background: Theme.panel-border; }
+
+            Text {
+                text: @tr("The TFTP server is still running. Closing the window stops the server and exits the program.");
+                color: Theme.text;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+
+            Text {
+                visible: root.detail-text != "";
+                text: root.detail-text;
+                color: Theme.text-muted;
+                font-size: 11px;
+                wrap: word-wrap;
+            }
+
+            Text {
+                visible: root.background-available;
+                text: @tr("Running in the background keeps the server available and adds a notification-area icon for showing the window again or quitting.");
+                color: Theme.text-muted;
+                font-size: 11px;
+                wrap: word-wrap;
+            }
+
+            Text {
+                visible: !root.background-available;
+                text: @tr("Running in the background is unavailable in this build because no system tray backend is available.");
+                color: Theme.warn-text;
+                font-size: 11px;
+                wrap: word-wrap;
+            }
+
+            Rectangle { vertical-stretch: 1; background: transparent; }
+
+            HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+                SmallButton {
+                    label: @tr("Cancel");
+                    button-width: 78px;
+                    clicked => { root.cancel-requested(); }
+                }
+                if root.background-available : SmallButton {
+                    label: @tr("Run in background");
+                    primary: true;
+                    button-width: 134px;
+                    clicked => { root.background-requested(); }
+                }
+                SmallButton {
+                    label: @tr("Close and exit");
+                    tint: Theme.danger-text;
+                    button-width: 120px;
+                    clicked => { root.close-and-exit-requested(); }
+                }
+            }
+        }
+    }
+}

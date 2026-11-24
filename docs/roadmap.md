@@ -52,6 +52,25 @@ form and keeps the inline "save the settings" reminder. No protocol,
 configuration-format, daemon or security-default change. The GNU x64 GUI grows
 from 9,036,800 B to 9,184,256 B (+1.63 %).
 
+### Unreleased after 0.3.1: duplicate-launch prompt, tray icon and close choice (ADR 0017/0018)
+
+A second launch detects the running panel through advisory files in the per-user
+state directory and asks whether to show the existing window, start another
+instance or cancel; the prompt is now a standalone small window rather than a
+full-panel overlay. Closing the window while the embedded server is
+`Starting`/`Running` offers **Close and exit / Run in background / Cancel**.
+Background mode hides the panel and shows a notification-area icon
+(Slint `SystemTrayIcon`: `Shell_NotifyIcon` on Windows, `ksni`
+StatusNotifierItem on Linux/BSD, AppKit on macOS); the tray menu or left-click,
+a later launch's *Show program window*, and `--activate-only` all raise the
+hidden window. Linux/BSD tray support depends on a StatusNotifierItem host and
+has not been run on a Linux desktop; without a visible icon the last-window rule
+exits rather than leaving an unreachable background process. The handshake
+remains a local UI convenience, not a server-control IPC channel. No protocol,
+configuration-format, bind-default or upload change. The GNU x64 GUI grows from
+9,233,408 B to 9,309,184 B (+0.82 %); target-machine tray/close verification is
+still pending.
+
 ### In 0.3.0: daemon log filter size (ADR 0016)
 
 The daemon no longer links `tracing-subscriber`'s `env-filter` (and with it the

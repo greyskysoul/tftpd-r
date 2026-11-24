@@ -229,6 +229,11 @@ The desktop panel has no native interface-enumeration or file-dialog dependency
   means "light". Dialog titles and the save filter are passed to the PowerShell
   helpers through environment variables, never interpolated into the script
   text, so a translated string cannot become script content.
+- The About dialog's repository link hands the compile-time `Cargo.toml`
+  `repository` URL to the platform's default browser (`rundll32.exe
+  url.dll,FileProtocolHandler` on Windows, `xdg-open` on Unix) as one fixed
+  argument. The address is never user input, no shell is involved, and the
+  panel never opens an arbitrary URL; a failed launch is only logged.
 - Both Windows dialogs are shown with a 1×1, fully transparent, top-most owner
   form. This only affects window activation/Z-order: it keeps the native dialog
   visible above the panel and other windows. It does not add privileges or
@@ -245,6 +250,61 @@ The desktop panel has no native interface-enumeration or file-dialog dependency
 A machine policy that blocks PowerShell or the dialog tools only degrades these
 convenience features; the panel and the server keep working with the two special
 address entries and a manually typed root path.
+
+## Single-instance handshake
+
+The panel detects an already running instance through advisory files in the same
+per-user state directory as `last-root.txt`/`ui-prefs.txt` (ADR 0017):
+
+- `instance-<token>.lock` (one per running panel, refreshed every 3 s),
+  `activate-request-<token>.req` (written by a second launch) and
+  `activate-ack-<token>.ack` (written by the owning panel). The token is 32 hex
+  characters derived from the PID, the wall clock and a per-process counter; it
+  is not a secret.
+- The files contain a PID, the token, timestamps and a 2 s deadline. They never
+  contain root paths, peer addresses or server configuration.
+- There is no listener, no socket and no network exposure. The handshake works
+  only for the same user and only inside a directory the panel could already
+  write. It is not a control channel: a request can do exactly one thing, show
+  the existing window (including a window that was hidden for background mode).
+- Only names with the exact prefix, suffix and a 32-hex token are touched, so
+  the cleanup of stale locks cannot delete unrelated state files. A corrupt lock
+  whose timestamp is still fresh is treated as a live panel (fail-safe: the
+  launch offers the choice instead of deleting it).
+- A missing or unwritable state directory disables the check and is logged as a
+  WARN; it never blocks startup. A second launch that ends in Cancel or
+  Activate writes no lock of its own, and a panel removes its lock on exit.
+- The activation request cannot force the foreground: the owning panel asks the
+  backend to show and restore its window, and Windows may only flash the
+  task-bar button. No Win32 handle discovery, no `unsafe` and no elevation is
+  involved.
+
+## Tray icon and close choice
+
+The notification-area icon and the close-time prompt (ADR 0018) add no new
+network or IPC surface:
+
+- The tray icon is provided by Slint's native `SystemTrayIcon` backend
+  (`Shell_NotifyIconW` on Windows, StatusNotifierItem/`ksni` on Linux/BSD and
+  AppKit on macOS). The panel only registers its own icon and a two-entry local
+  menu (*Show program window*, *Quit*); no menu text or path comes from a client
+  or an untrusted file.
+- Background mode is a hidden main window, not a service or a privilege change.
+  The server keeps the same bind addresses and configuration; the state
+  directory heartbeat continues, so the single-instance handshake still works.
+- *Close and exit* stops the embedded server through the normal shutdown path
+  (`shutdown_grace_secs`); *Cancel* leaves the server and configuration
+  untouched. Neither action writes server configuration.
+- If the tray component cannot be created, the background choice is not applied
+  and the panel stays visible. If the platform rejects the icon after the
+  component was created, hiding the last window makes the process exit rather
+  than leaving a background process with no reachable UI.
+- The standalone duplicate-launch prompt is a second local Slint window with the
+  same three fixed actions as before. It accepts no path, URL or command from
+  the other process; the activation request still only asks to show the window.
+- The tray icon itself is not a security boundary. Any process in the same user
+  session that can interact with the desktop notification area can select its
+  menu entries, exactly as it could click the panel's own buttons.
 
 ## Logging and error hygiene
 
@@ -268,7 +328,9 @@ address entries and a manually typed root path.
 ## Explicitly out of scope for this release
 
 - Upload security (atomic temp writes, overwrite policy, path permissions).
-- IPC authentication/ACLs and any local control channel.
+- IPC authentication/ACLs and any local control channel; the single-instance
+  handshake is a startup-only window-raise request and is not a server control
+  channel.
 - Windows Service hardening (service account, SCM recovery, privilege).
 - TLS, authentication, rate limiting per IP beyond the concurrent-session cap.
 - Audit logging with tamper evidence.

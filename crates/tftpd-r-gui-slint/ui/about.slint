@@ -7,8 +7,13 @@ export component AboutDialog inherits Rectangle {
     in property <string> app-version: "0.0.0";
     // Name of the language the panel started in (see `i18n::Language`).
     in property <string> language: "";
+    // Public repository address, passed from Rust (Cargo package metadata) so
+    // the URL lives in one place; it is not translated.
+    in property <string> repository-url: "";
 
     callback close-requested();
+    // Open the fixed public repository address in the default browser.
+    callback open-repository();
 
     width: 100%;
     height: 100%;
@@ -118,6 +123,11 @@ export component AboutDialog inherits Rectangle {
             VerticalLayout {
                 spacing: 3px;
                 Text {
+                    text: @tr("Issues and pull requests are welcome.");
+                    color: Theme.text-muted;
+                    font-size: 10px;
+                }
+                Text {
                     text: @tr("Icons: Google Material Design Icons (Apache License 2.0)");
                     color: Theme.text-muted;
                     font-size: 10px;
@@ -131,8 +141,21 @@ export component AboutDialog inherits Rectangle {
 
             Rectangle { vertical-stretch: 1; background: transparent; }
 
+            // The repository link shares the Close row and is left aligned;
+            // hovering brightens it and the pointer cursor marks it as a link.
             HorizontalLayout {
                 cross-axis-alignment: center;
+                spacing: 8px;
+                Text {
+                    text: @tr("Repository: {}", root.repository-url);
+                    color: link-touch.has-hover ? Theme.accent : Theme.accent-strong;
+                    font-size: 10px;
+                    vertical-alignment: center;
+                    link-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.open-repository(); }
+                    }
+                }
                 Rectangle { horizontal-stretch: 1; background: transparent; }
                 SmallButton {
                     label: @tr("Close");

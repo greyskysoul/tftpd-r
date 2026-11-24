@@ -134,6 +134,12 @@ Constraints from the repository:
   same choice. This has to happen in `init`/`changed` handlers: assigning a
   global's property at component scope is a parse error, and the window property
   is what Rust sets.
+- Semi-transparent tokens are written with `rgba()`, not as an eight-digit hex
+  literal. Slint parses `#rrggbbaa`, so an ARGB-style value such as
+  `#99000000` means "red 0x99, alpha 0" instead of "60 % black". The
+  settings/About backdrop is `rgba(0, 0, 0, 0.60)` in dark mode and
+  `rgba(0, 0, 0, 0.40)` in light mode, and a GUI test pins both branches to
+  neutral black with a visible alpha.
 - The system's own preference is read from the platform, not from Slint:
   - Windows: `reg.exe query HKCU\...\Themes\Personalize /v AppsUseLightTheme`
     (`0` = dark);

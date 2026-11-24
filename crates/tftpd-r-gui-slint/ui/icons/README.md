@@ -53,18 +53,23 @@ top edge fading out by 42 %, black up to 10 % at the bottom edge).
 
 The in-app brand mark (`Widgets.BrandMark` in `../widgets.slint`) draws the
 same tile with Slint primitives so it stays crisp at any scale: `#263238` tile,
-`#fafafa` glyph, ratios from the SVG. It is deliberately flat — the panel
-surfaces use no gradients — and it sits on the flat `#37474f` header of
-`../theme.slint`, one step lighter than the tile so the rounded square keeps its
-shape.
+`#fafafa` glyph, the same sheen (`Theme.brand-sheen`) and the same proportions
+as the SVG — corner radius 56/256 and the Material 24-unit glyph box at
+192/256 of the tile. Because `MaterialIcon` sizes the 24-unit viewbox while the
+visible `dns` ink only spans units 3..21, the component's `icon-size` is
+`mark-size * 0.75`, not `mark-size * 0.5625`; the latter is the visible-ink
+ratio and made the in-app badge's glyph about 25 % smaller than the icon. The
+mark sits on the flat `#37474f` header of `../theme.slint`, one step lighter
+than the tile so the rounded square keeps its shape.
 
 The three bitmaps are generated from `app-icon.svg`; do not hand-edit them.
 Regenerate them on Windows with the throwaway scripts kept outside version
 control (`.bootstrap/icon/gen_icon.py` after `render_wpf.ps1`), or with any
 SVG rasteriser plus an ICO packer, then confirm `cargo test -p
-tftpd-r-gui-slint` still passes: `product_icon_pixels_are_a_valid_rounded_tile`
+tftpd-r-gui-slint` still passes: `the_product_icon_and_brand_mark_share_one_geometry`
 checks the embedded RGBA buffer (size, transparent corners, `#263238` tile,
-`#fafafa` glyph).
+`#fafafa` glyph), the `BrandMark` ratios and that the raster's glyph ink is the
+same 56.25 % of the tile as the vector badge.
 
 ## Windows executable icon
 

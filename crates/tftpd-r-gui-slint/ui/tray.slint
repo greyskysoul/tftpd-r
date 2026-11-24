@@ -1,0 +1,37 @@
+// Notification-area (system tray) icon of the background instance.
+//
+// Slint's `SystemTrayIcon` is a top-level element: the panel creates this
+// component from Rust only while its main window is hidden. Left-clicking the
+// icon and the menu's first entry both raise the window; the second entry quits
+// the process (and with it the embedded server).
+//
+// The inherited properties are mirrored through component-level properties so
+// the generated Rust type exposes setters for them (a `SystemTrayIcon`-rooted
+// component has no `ComponentHandle`/window API of its own).
+export component TrayIcon inherits SystemTrayIcon {
+    in property <image> tray-icon;
+    in property <string> tray-tooltip: "";
+    in property <bool> tray-visible: false;
+
+    icon: root.tray-icon;
+    tooltip: root.tray-tooltip;
+    title: "TftpdR";
+    visible: root.tray-visible;
+
+    callback show-requested();
+    callback quit-requested();
+
+    clicked => { root.show-requested(); }
+
+    Menu {
+        MenuItem {
+            title: @tr("Show program window");
+            activated => { root.show-requested(); }
+        }
+        MenuSeparator { }
+        MenuItem {
+            title: @tr("Quit");
+            activated => { root.quit-requested(); }
+        }
+    }
+}

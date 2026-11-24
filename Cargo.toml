@@ -11,6 +11,7 @@ members = [
 authors = ["TftpdR contributors"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/greyskysoul/tftpd-r"
 version = "0.3.1"
 
 [workspace.dependencies]
@@ -44,6 +45,11 @@ slint = { version = "1.19", default-features = false, features = [
     "renderer-software",
     "software-renderer-systemfonts",
     "compat-1-2",
+    # Native notification-area icon (ADR 0018): Shell_NotifyIconW on Windows,
+    # StatusNotifierItem/ksni on Linux and NSStatusItem on macOS. The generated
+    # `SystemTrayIcon` element is part of the panel UI; without this feature it
+    # would silently fall back to the dummy backend.
+    "system-tray",
 ] }
 slint-build = "1.19"
 

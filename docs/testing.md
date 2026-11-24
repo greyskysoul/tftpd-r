@@ -14,9 +14,9 @@ are defined in [roadmap.md](roadmap.md).
 | Rust | `rustc 1.100.0 (0ef1bc386 2026-11-09)`, host `x86_64-pc-windows-gnu` |
 | Cargo | `cargo 1.100.0 (3acc79c0c 2026-11-05)` |
 | Linker | MinGW-w64 GCC 15.3.0 (winlibs, msvcrt runtime); `windres` 2.46.1 from the same binutils for the executable icon |
-| Slint | 1.19.0, features `std`, `backend-winit`, `renderer-software`, `software-renderer-systemfonts`, `compat-1-2` |
+| Slint | 1.19.0, features `std`, `backend-winit`, `renderer-software`, `software-renderer-systemfonts`, `compat-1-2`, `system-tray` (ADR 0018; native backend per platform) |
 | Release profile | `opt-level = "z"`, `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = "symbols"` (ADR 0010; measured 2026-11-21) |
-| Date | 2026-11-23 (historical runs from 2026-11-20 onward; 0.3.0 release was 2026-11-22; 0.3.1 candidate preparation added 2026-11-23) |
+| Date | 2026-11-24 (historical runs from 2026-11-20 onward; 0.3.0 release was 2026-11-22; 0.3.1 candidate preparation added 2026-11-23; tray/close choice added 2026-11-24) |
 
 The development environment used a portable toolchain stored in
 `.dsh-toolchain/` (git-ignored) because the agent sandbox could not perform
@@ -30,8 +30,8 @@ with network access; subsequent builds/tests ran with `--offline`.
 | --- | --- |
 | `cargo fmt --all -- --check` | Pass (exit 0) |
 | `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` | Pass (exit 0, no warnings on the 0.3.1 candidate) |
-| `cargo test --workspace --locked --offline` | **219 passed, 0 failed, 1 ignored** (the ignored test opens the native folder dialog; see the eleventh run) |
-| `cargo build --workspace --release --locked --offline` | Pass (exit 0, **108.60 s final incremental build on the settings-navigation/language tree**; earlier builds of the same tree took 92.15 s and 83.32 s; 117 s on the 0.3.1 candidate; 66.65 s on the 0.3.0 candidate; 57.16 s on the pre-0.3.0 daemon log-filter tree; 84 s on the language/theme tree; 59.04 s on the 0.2.2 final tree, 51.43 s for the GUI-only increment before the version bump, 49.08 s on the previous tree). The first full size-profile build was 116.4 s. |
+| `cargo test --workspace --locked --offline` | **235 passed, 0 failed, 1 ignored** (the ignored test opens the native folder dialog; see the eleventh run) |
+| `cargo build --workspace --release --locked --offline` | Pass (exit 0, **71.31 s** for the first build after enabling the Windows tray backend; 59.88 s for the final close-path code rebuild; 0.76 s for a no-op incremental rebuild on the same tree; 75.9 s on the single-instance tree; 89.18 s on the modal-scrim tree; 53.95 s on the About-link tree; 108.60 s on the settings-navigation/language tree; earlier builds of that tree took 92.15 s and 83.32 s; 117 s on the 0.3.1 candidate; 66.65 s on the 0.3.0 candidate; 57.16 s on the pre-0.3.0 daemon log-filter tree; 84 s on the language/theme tree; 59.04 s on the 0.2.2 final tree, 51.43 s for the GUI-only increment before the version bump, 49.08 s on the previous tree). The first full size-profile build was 116.4 s. |
 
 The workspace was renamed from `rust-tftpd`/`tftp-*` to TftpdR/`tftpd-r-*` on
 2026-11-20. The original `0.2.0` verification ran on 2026-11-20 (offline, GNU toolchain)
@@ -53,10 +53,26 @@ tests (`logging`), and the recent-root menu work added two GUI tests (the model
 no-reset regression and `recent-dirs.txt` BOM tolerance), so the suite reached
 213 test functions. The settings-navigation and persisted-language work added
 language-preference parsing/resolution, `Text` messages, `ui-prefs.txt` language
-round-trip and write-failure coverage (6 GUI tests), so the current suite has
-**219 test functions** (3 build-support, 61 core unit, 29 RRQ integration,
-15 daemon unit, 5 CLI integration, 105 GUI, 1 doctest) and one ignored test. GUI
-coverage includes `log_model_stays_bounded_and_keeps_newest_entries_first`, a
+round-trip and write-failure coverage (6 GUI tests), so the suite reached 219
+test functions. The About repository link added 1 GUI test (fixed HTTPS address
+and a shell-free browser command), so the suite reached 220 test functions. The
+modal-scrim fix added 1 GUI test (`the_modal_scrim_is_a_neutral_black_overlay`,
+which pins both palette branches to black `rgba()` channels and a visible
+alpha), so the suite reached 221 test functions. The single-instance work added
+10 GUI tests (7 in `single_instance`: empty directory, fresh-lock handshake
+round-trip, stale-lock cleanup, unrelated/wrong-length file protection, expired
+request, lock removal on drop and token shape; 3 in `main`: launch-flag
+parsing, the prompt state with a registered owner, and the translated prompt
+strings/callbacks), so the suite reached 231 test functions (3 build-support,
+61 core unit, 29 RRQ integration, 15 daemon unit, 5 CLI integration, 117 GUI,
+1 doctest). The tray/close-choice work added 4 GUI tests (`server_is_active`
+accepts only `Starting`/`Running`, the duplicate-launch prompt is a `Window`
+rather than an `AppWindow` overlay, the tray menu offers show/quit, and the
+close prompt has three translated choices and callbacks), bringing the current
+suite to **235 test functions** (3 build-support, 61 core unit, 29 RRQ
+integration, 15 daemon unit, 5 CLI integration, 121 GUI, 1 doctest) plus one
+ignored test.
+GUI coverage includes `log_model_stays_bounded_and_keeps_newest_entries_first`, a
 deterministic 501-entry check for the 500-row newest-first cap,
 `the_recent_menu_model_is_only_rebuilt_when_its_rows_change` (repeated refreshes
 of unchanged rows, the current marker, a new history entry and clearing),
@@ -64,7 +80,11 @@ of unchanged rows, the current marker, a new history entry and clearing),
 `helper_replies_are_parsed_without_mangling_the_path` /
 `a_non_ascii_directory_is_accepted` for the picker's UTF-8 protocol, and the
 state-directory selection tests (`the_first_writable_state_directory_is_used`,
-`a_blocked_state_directory_falls_back_to_the_portable_one`). The current
+`a_blocked_state_directory_falls_back_to_the_portable_one`),
+`the_product_icon_and_brand_mark_share_one_geometry` (embedded RGBA glyph/ink
+ratio plus the `BrandMark` 0.75 viewbox and sheen overlay) and
+`the_repository_link_uses_a_fixed_https_address_and_a_shell_free_handler` (the
+Cargo repository URL and the exact browser argument vector). The current
 workspace-check results are shown in the table above.
 
 ### Settings navigation, language preference and root history (2026-11-23)
@@ -116,6 +136,94 @@ window with `PrintWindow`:
   mouse/keyboard/IME input, other DPI settings and the Linux GUI remain **not
   verified** on this machine.
 
+### Single-instance prompt and activation handshake (2026-11-24)
+
+This change added the startup detection, the three-way prompt, `--new-instance`
+and `--activate-only`. Automated results on the verification machine:
+
+- `cargo fmt --all -- --check` → exit 0.
+- `cargo clippy --workspace --all-targets --offline -- -D warnings` → exit 0.
+- `cargo test --workspace --offline` → **231 passed, 0 failed, 1 ignored**
+  (3 build-support, 61 core unit, 29 RRQ integration, 15 daemon unit, 5 CLI
+  integration, 117 GUI, 1 doctest).
+- `cargo build --workspace --release --offline` → exit 0, **75.9 s**; GNU x64
+  `tftpd-r-server.exe` **1,063,936 B** (unchanged), `tftpd-r.exe`
+  **9,233,408 B (8.81 MiB)**, +43,520 B (+0.47 %) over the modal-scrim tree.
+
+The file protocol was exercised end-to-end with an isolated `APPDATA`
+(`target\si-test-appdata`, so the real profile was untouched) and the debug
+build:
+
+- First launch: created `TftpdR\instance-<32 hex>.lock`; its modification time
+  advanced every 3 s, proving the UI-timer heartbeat runs.
+- Second launch (same `APPDATA`): stayed alive with the prompt window, created
+  **no second lock**, and left the first panel's lock alone. A third launch
+  with `--new-instance` did add a second lock file, so two panels coexist and
+  the prompt is offered again by the next normal launch.
+- `tftpd-r --activate-only` against the running panel: the owner claimed
+  `activate-request-*.req`, wrote `activate-ack-*.ack`, and the requester exited
+  in **0.217 s** with both transient files removed. Without a running panel it
+  printed `no running panel to activate` and exited in <0.1 s.
+- A request whose deadline had already passed was removed without an
+  acknowledgement (also covered by unit test), so a cancelled launch cannot wake
+  the panel later.
+- Crash residue: a force-killed panel leaves its lock behind; the next launch
+  treats it as live for up to 15 s (documented, ADR 0017) and "New instance"
+  still works, so the prompt is never a dead end.
+- The prompt layout itself could **not** be visually confirmed on this machine:
+  the desktop is not attached to the interactive session (`GetForegroundWindow`
+  is 0 and a full-screen capture is black), so this run proves the state
+  machine and the window/UIA existence (`TftpdR · TFTP 服务端` window found via
+  UI Automation) but not the rendered pixels, mouse clicks or the
+  `set_minimized(false)`/`show()` foreground behaviour. Those need a desktop
+  session and are listed under "Not verified" below.
+
+### Tray icon, close choice and standalone prompt (2026-11-24)
+
+This change added the close-time three-way choice, the Windows notification-area
+icon, and the standalone `InstancePromptWindow` (ADR 0018). Automated results on
+the verification machine:
+
+- `cargo fmt --all -- --check` → exit 0.
+- `cargo clippy --workspace --all-targets --offline -- -D warnings` → exit 0.
+- `cargo test --workspace --offline` → **235 passed, 0 failed, 1 ignored**
+  (3 build-support, 61 core unit, 29 RRQ integration, 15 daemon unit, 5 CLI
+  integration, 121 GUI, 1 doctest).
+- `cargo build --workspace --release --offline` → exit 0. The first build after
+  enabling `system-tray` took **71.31 s**, the final close-path code rebuild
+  **59.88 s**, and a no-op incremental rebuild **0.76 s**. GNU x64
+  `tftpd-r-server.exe` is **1,063,936 B**
+  (unchanged); `tftpd-r.exe` is **9,309,184 B (8.88 MiB)**, +75,776 B
+  (+0.82 %) over the single-instance tree (9,233,408 B).
+- `target\release\tftpd-r.exe --smoke-test` → exit 0, printed
+  `language=zh_CN language_pref=system translation=ok tagline=Rust TFTP 服务端
+  theme=system dark=true`. The lazy tray creation means the smoke run does not
+  touch `Shell_NotifyIconW` at startup.
+- A Linux cross-check (`cargo check --workspace --target
+  x86_64-unknown-linux-gnu`) was attempted after enabling the global
+  `system-tray` feature. It fetched and started compiling the new crates but
+  stopped in `yeslogic-fontconfig-sys` because this Windows host has no Linux
+  pkg-config sysroot; the Linux GUI therefore remains **not built or run** here
+  (CI on `ubuntu-latest` is the gate for that target).
+
+The four new GUI tests cover `server_is_active` (only `Starting`/`Running` ask
+before closing), the tray menu's Show/Quit shape, the close prompt's three
+translated choices/callbacks and the fact that `InstancePromptWindow` is a
+`Window` outside `AppWindow`. The translation catalogue tests include the new
+`@tr(...)` strings.
+
+Tray registration and the close flow could **not** be exercised end-to-end on
+this machine: the desktop is not attached to the interactive session
+(`GetForegroundWindow` is 0 and a full-screen capture is black). An earlier
+startup-time tray creation attempt logged `Shell_NotifyIconW(NIM_ADD) failed`;
+the implementation therefore creates the tray lazily while the main window is
+still visible and hides the window on the next tick, but the actual icon,
+right-click menu, left-click restore, Alt+F4 prompt, background hide and
+single-instance/`--activate-only` restore of a hidden window are **not
+verified** here. They need a real desktop session and are listed under "Not
+verified" below. Direct unit testing of the native tray backend is not possible
+without that session.
+
 The `0.2.0` release artifacts built on the verification machine measured
 `tftpd-r.exe` ≈ 2.07 MiB (2,174,976 bytes) and `tftpd-r-gui.exe` ≈ 12.81 MiB
 (13,430,272 bytes, thin LTO and symbols stripped). After the size-first release
@@ -136,7 +244,12 @@ bytes (−21.6 %) below the previous baseline. The GUI was unchanged at that poi
 (**9,036,288 bytes (8.62 MiB)**) because it has no `tracing` subscriber. The
 settings-navigation/persisted-language/root-history work raises the GNU x64 GUI
 to **9,184,256 bytes (8.76 MiB)**, +147,456 bytes (+1.63 %) over 0.3.1; the
-daemon stayed at 1,063,936 bytes. The
+daemon stayed at 1,063,936 bytes. The About-link/modal-scrim tree measured
+**9,189,888 bytes (8.76 MiB)**, and the single-instance prompt plus its
+translated strings bring the GUI to **9,233,408 bytes (8.81 MiB)**, +43,520
+bytes (+0.47 %); the daemon is still 1,063,936 bytes. The tray/close-choice
+work brings the GUI to **9,309,184 bytes (8.88 MiB)**, +75,776 bytes (+0.82 %)
+over the single-instance tree; the daemon is unchanged. The
 attribution came from an unstripped build inspected with `nm --demangle` over
 the COFF symbol table (see the fifteenth run below). These figures
 are informational only; they are not an acceptance criterion and not a promise
@@ -374,7 +487,8 @@ actual result must be recorded after execution.
   the `#263238`/`#fafafa` brand mark at 22 px on the left of the title bar
   (previously a 20 px `#2563eb` badge), the toolbar icons/labels on the
   blue-grey tints and the About dialog's 54 px mark. Panel surfaces carry no
-  gradients; only the exported icon files do.
+  gradients except the product mark's icon sheen, added on 2026-11-23 (see
+  the twenty-first run below); the exported icon files always had it.
 - **Failure mode found and removed in this run.** Embedding the icon with
   `slint_build::EmbedResourcesKind::EmbedForSoftwareRenderer` makes the Slint
   compiler pre-render glyphs at build time, which left every Chinese string and
@@ -1023,6 +1137,144 @@ published 2026-11-23T03:21:22Z).
   TFTP clients, LAN/firewall/TID traffic, privileged ports and RDP remain target
   machine checks. CI build success is not runtime evidence for those platforms.
 
+### Brand mark geometry and sheen (2026-11-23, twenty-first run)
+
+The title-bar and About badges are drawn by `Widgets.BrandMark` with Slint
+primitives, but their `dns` glyph was visibly smaller than the window/task-bar
+icon and the PE icon. Measured from a desktop capture of the debug build at
+1× (pixels, straight RGB):
+
+| Render | Tile | Visible glyph ink | Ink / tile |
+| --- | ---: | ---: | ---: |
+| Title-bar `BrandMark` | 22 px | 8 px | 36 % |
+| About `BrandMark` | 54 px | 22 px | 41 % |
+| Shipped `app-icon-128.rgba` | 128 px | 70 px | 55 % |
+| `app-icon.png` | 256 px | 142 px | 55 % |
+
+Root cause: `BrandMark` passed `mark-size * 0.5625` (144/256, the *visible ink*
+ratio) to `MaterialIcon.icon-size`. That property sizes Material's 24-unit
+viewbox, whose `dns` path only fills units 3..21 (18/24), so the ink landed at
+42 % of the tile instead of the artwork's 56.25 %. The badge also omitted the
+sheen that the exported files carry.
+
+The mark now uses `mark-size * 0.75` (viewbox 192/256, ink 144/256) and paints
+`Theme.brand-sheen`, the SVG's white-12 % → black-10 % vertical overlay,
+between the tile and the glyph. The product-icon test was renamed to
+`the_product_icon_and_brand_mark_share_one_geometry` and additionally asserts
+the 0.75 viewbox, the sheen background and that the raster's measured ink is
+within 2 px of 56.25 % of the tile.
+
+Verification on the documented machine:
+
+- `cargo fmt --all -- --check` → exit 0.
+- `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` →
+  exit 0.
+- `cargo test --workspace --locked --offline` → **219 passed, 0 failed,
+  1 ignored** (3 build-support, 61 core unit, 29 RRQ integration, 15 daemon unit,
+  5 CLI integration, 105 GUI, 1 doctest); the test count is unchanged because
+  the product-icon test was extended instead of adding a new function.
+- `cargo build --workspace --release --locked --offline` → exit 0, 1 m 10 s;
+  GNU x64 `tftpd-r.exe` was still **9,184,256 B** and `tftpd-r-server.exe`
+  **1,063,936 B** (this vector change did not move the size baseline; the About
+  footer (text plus the clickable link) added 5,632 B afterwards, see the
+  twenty-second run).
+- `TFTPD_R_GUI_PREVIEW=about` was captured at 1× in the dark/zh_CN palette and
+  in the light/en palette (isolated `APPDATA` with `ui-prefs.txt`). The
+  title-bar tile measured 22 px with 12 px ink (55 %), the About tile 54 px
+  with 30 px ink (56 %); tile samples went from `(62,73,78)` at the top edge to
+  `(37,49,55)` in the middle and `(34,45,50)` at the bottom, matching the
+  artwork's top-light sheen. The 32 px icon extracted from the rebuilt
+  `target/release/tftpd-r.exe` has the same SHA-256 as the extraction taken
+  before the change (`F23CD7DE…9F35`), and the seven-frame `app-icon.ico` that
+  feeds the PE resource is unchanged and still covered by the build-support
+  tests.
+- Not verified: non-100 % DPI (125/150/200 %) rendering, Windows Explorer and
+  task-bar icon caching, Linux window icons, and real mouse/IME interaction.
+
+### About dialog repository link (2026-11-23, twenty-second run)
+
+The About footer carries the public repository address and a contribution hint,
+and the address is now a clickable link:
+
+- The URL is defined once as `repository` in the root `Cargo.toml`
+  (`[workspace.package]`), inherited by `tftpd-r-gui-slint`
+  (`repository.workspace = true`) and read at compile time with
+  `env!("CARGO_PKG_REPOSITORY")`. Rust copies it into the `AppWindow` property;
+  the dialog renders `@tr("Repository: {}", root.repository-url)`, so the
+  address itself is never translated.
+- The link sits in the bottom row on the left, opposite the Close button, with
+  the pointer cursor and an accent-colour hover. Clicking it invokes
+  `open_repository_url()`: on Windows `rundll32.exe url.dll,FileProtocolHandler
+  <url>`, on Unix `xdg-open <url>`. The URL is one fixed argument, no shell is
+  involved, and a failed spawn is written to the activity log with a localised
+  message instead of crashing the panel.
+- Two new translatable strings were added: `Repository: {}` → `仓库：{}` and
+  `Issues and pull requests are welcome.` → `欢迎提出 issue 和 PR`. The welcome
+  line stays in the information footer; the link moved to the Close row. The
+  `.po` coverage, no-redundancy and placeholder tests pass.
+- `the_repository_link_uses_a_fixed_https_address_and_a_shell_free_handler`
+  asserts the exact Cargo URL and the platform command vector
+  (`rundll32.exe` + `url.dll,FileProtocolHandler` + URL on Windows, `xdg-open` +
+  URL elsewhere).
+- Layout and rendering: `TFTPD_R_GUI_PREVIEW=about` was captured at 1× in
+  dark/zh_CN and light/en (`ui-prefs.txt` in an isolated `APPDATA`). The link
+  is fully visible at the bottom left (`https://github.com/greyskysoul/tftpd-r`),
+  the Close button is on the same row at the right, and no text is clipped. A
+  hover capture changed the link pixels from `Theme.accent-strong` to
+  `Theme.accent`.
+- Click test: the panel was launched with the preview, and a Win32
+  `SetCursorPos`/`mouse_event` click was injected at the link. Within four
+  seconds a new `msedge.exe` (PID 13128) had started, i.e. the handler passed the
+  URL to the system default browser. The sandboxed Edge then showed an elevation
+  prompt and did not load the page; that is the documented sandbox/browser
+  limitation (Edge cannot start under the agent sandbox), not an application
+  error. The normal-desktop browser path was therefore not observed.
+- Verification: `cargo fmt --all -- --check` → exit 0; `cargo clippy --workspace
+  --all-targets --locked --offline -- -D warnings` → exit 0; `cargo test
+  --workspace --locked --offline` → **220 passed, 0 failed, 1 ignored**;
+  `cargo build --workspace --release --locked --offline` → exit 0, 53.95 s;
+  GNU x64 `tftpd-r.exe` **9,189,888 B** (+2,560 B over 9,187,328 B for the
+  clickable link; +153,088 B / +1.69 % over the 0.3.1 9,036,800 B),
+  `tftpd-r-server.exe` unchanged at **1,063,936 B**.
+- Not verified: actual page load in a normal desktop session, `xdg-open` on a
+  Linux desktop, and non-100 % DPI.
+
+### Modal scrim colour (2026-11-23, twenty-third run)
+
+The settings/About backdrop was reported as reddish; it is now a neutral black
+overlay:
+
+- Symptom: opening the settings dialog dimmed the panel with a pink/maroon wash
+  instead of a neutral shade, and in dark mode the panel was not dimmed at all.
+- Cause: Slint parses an eight-digit hex literal as `#rrggbbaa`, not ARGB
+  (`i-slint-common`'s `parse_color_literal` tests assert `#01234567` →
+  `0x67012345`). The old token `dark ? #99000000 : #66111827` therefore painted
+  RGB `#661118` at 15 % alpha in light mode (a red tint) and RGB `#990000` at
+  alpha 0 in dark mode (no overlay). `settings.slint` and `about.slint` share
+  `Theme.scrim`, so both dialogs were affected.
+- Fix: `ui/theme.slint` now uses
+  `dark ? rgba(0, 0, 0, 0.60) : rgba(0, 0, 0, 0.40)`, keeping the intended
+  60 %/40 % strength with pure black channels.
+- Regression test: `the_modal_scrim_is_a_neutral_black_overlay` reads
+  `ui/theme.slint`, splits the dark/light branches and requires
+  `rgba(0, 0, 0, alpha)` with `0.30 <= alpha <= 0.85`. Run against the old
+  literal it fails with "the scrim must be neutral black: #99000000"; with the
+  fix it passes.
+- Pixel check: the release panel was started with `TFTPD_R_GUI_PREVIEW=settings`
+  and an isolated `APPDATA`, then captured through `PrintWindow` at 1×. The
+  pixel outside the card moved from `#D8CED3` (R > G, pink) to `#8E9193`
+  (neutral; the `#eef2f6` surface under 40 % black) at (20, 400) and
+  (1110, 700). The dark-mode capture shows the toolbar and content dimmed
+  behind the card, which the old alpha-0 value did not.
+- Verification: `cargo fmt --all -- --check` → exit 0; `cargo clippy --workspace
+  --all-targets --locked --offline -- -D warnings` → exit 0; `cargo test
+  --workspace --locked --offline` → **221 passed, 0 failed, 1 ignored**;
+  `cargo build --workspace --release --locked --offline` → exit 0, 89.18 s;
+  sizes unchanged at `tftpd-r.exe` **9,189,888 B** and `tftpd-r-server.exe`
+  **1,063,936 B**.
+- Not verified: non-100 % DPI and a Linux desktop capture; only the software
+  renderer at 1× was observed.
+
 ## Not verified (and therefore not claimed)
 - **External TFTP client interoperability** (tftp-hpa, Tftpd64, PXE firmware,
   U-Boot, etc.). Only the in-repo test client and the raw Python client were
@@ -1033,6 +1285,22 @@ published 2026-11-23T03:21:22Z).
   and the arm64 MSVC binaries were not run.
 - **Linux/macOS runtime.** CI runs the full suite on Linux, but the GUI has never
   been run on a Linux desktop, and macOS is untested.
+- **Notification-area icon and background mode (ADR 0018).** The tray component,
+  close prompt, background hide and window restore are unit-tested only at the
+  state/property level. This verification session has no attached desktop, so
+  `Shell_NotifyIconW` registration, the tray menu/left-click, Alt+F4 opening the
+  close prompt, hiding to the tray, restoring from the tray or from
+  `--activate-only`, and the rendered `InstancePromptWindow` were not observed.
+  A startup-time registration attempt in this session failed with
+  `NIM_ADD`; the lazy registration while the main window is still visible is
+  intended to avoid that failure mode, but it remains unverified on a real
+  desktop.
+- **Linux/BSD tray backend.** The Linux build compiles Slint's `ksni`
+  StatusNotifierItem backend (pure Rust, no GTK build dependency), but no Linux
+  desktop was available to run it. A desktop without a StatusNotifier host will
+  not show the icon; the documented fallback is that hiding the last window
+  exits the process, and a later launch can raise a hidden panel through the
+  single-instance prompt.
 - **LAN/deployment behaviour:** binding `0.0.0.0`, Windows Defender Firewall
   rules for TID ports, RDP sessions, concurrent real-world clients. Port 69 was
   actually bound by the daemon on this Windows machine (Windows normally allows
@@ -1083,7 +1351,18 @@ published 2026-11-23T03:21:22Z).
   `GTK_THEME`) was not executed at all.
 - **Visual sign-off by a designer/user** on the new layout; the screenshots above
   are evidence of rendering, not an approved design review.
-- **Windows Service, IPC, uploads** — not implemented in this release.
+- **The single-instance prompt on a real desktop.** The state machine, lock
+  heartbeat, request/acknowledgement round trip, `--new-instance`,
+  `--activate-only` and the absence of a second lock are verified (see the
+  2026-11-24 run), but the menu card itself was not rendered or clicked here: the
+  agent session has no attached interactive desktop, so the "显示程序窗口 / 启动新实例 / 取消"
+  buttons, the hidden-main-window behaviour, Escape/backdrop behaviour,
+  `set_minimized(false)` and whether Windows actually grants the foreground were
+  not observed. Two panels writing the same state files concurrently
+  (`ui-prefs.txt`, `last-root.txt`) are also not exercised beyond the lock files.
+- **Windows Service, IPC, uploads** — not implemented in this release. The
+  single-instance handshake is a startup-only window-raise request, not an IPC
+  control channel.
 - **Fuzz/property testing** of the codec; tests are table-driven and
   boundary-focused instead.
 
@@ -1133,6 +1412,13 @@ published 2026-11-23T03:21:22Z).
 10. Close the window with the custom close button during an active transfer;
     confirm the process exits and no server task keeps running.
 11. Verify firewall behaviour for the listening port and ephemeral TID ports.
+12. Start a panel, then launch `tftpd-r` again: confirm the 显示程序窗口 / 启动新实例 /
+    取消 prompt appears without a second panel window, that 取消 exits and
+    writes no lock file, that 启动新实例 opens a second panel (and the next launch
+    offers the prompt again), and that 显示程序窗口 restores a minimised first panel
+    to the foreground. Check that the first panel's activity log records the
+    activation, and that closing either panel removes only its own
+    `instance-*.lock`.
 
 ## Reproducing the checks
 

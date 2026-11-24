@@ -123,6 +123,17 @@ pub fn state_file(name: &str) -> Option<PathBuf> {
     state_location().map(|location| location.dir.join(name))
 }
 
+/// Directory holding the GUI state files.
+///
+/// Used by the single-instance check, which places its advisory lock and
+/// activation files next to the other per-user state. The files are only an
+/// inter-process handshake between two panels of the same user; they never
+/// contain server configuration.
+#[must_use]
+pub fn state_dir() -> Option<PathBuf> {
+    state_location().map(|location| location.dir.clone())
+}
+
 /// Read one state file as text, removing a UTF-8 byte-order mark.
 ///
 /// The panel writes these files without a BOM, but an operator editing them in

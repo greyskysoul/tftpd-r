@@ -14,6 +14,15 @@ import { TransfersPanel } from "transfers.slint";
 import { RootMenu } from "root-menu.slint";
 import { SettingsDialog } from "settings.slint";
 import { AboutDialog } from "about.slint";
+import { ClosePromptDialog } from "close-prompt.slint";
+// Top-level companions of the panel. They are compiled from this root so
+// `slint::include_modules!()` generates their Rust types; neither is placed
+// inside `AppWindow` (the prompt is its own window, the tray has no window).
+import { InstancePromptWindow } from "single-instance.slint";
+import { TrayIcon } from "tray.slint";
+// Re-export the two top-level companions so the generated Rust module contains
+// their public types even though they are not children of `AppWindow`.
+export { InstancePromptWindow, TrayIcon }
 
 export component AppWindow inherits Window {
     title: @tr("TftpdR · TFTP server");
@@ -73,7 +82,19 @@ export component AppWindow inherits Window {
     in-out property <bool> settings-picker-open: false;
     in-out property <bool> about-open: false;
     in-out property <bool> recent-menu-open: false;
+    // "Close TftpdR?" prompt shown when the window is closed while the server
+    // is still running. It is an in-window overlay so the operator keeps the
+    // server status in view and Cancel leaves everything untouched.
+    in-out property <bool> close-prompt-open: false;
+    // Localised status detail of the running server, shown in that prompt.
+    in-out property <string> close-prompt-detail: "";
+    // False when this build/platform has no native tray backend; the close
+    // prompt then offers only "Close and exit" and "Cancel".
+    in-out property <bool> background-available: true;
     in-out property <string> app-version: "0.0.0";
+    // Public repository address shown on the About page; set from Rust with the
+    // Cargo package metadata so the URL is defined once.
+    in-out property <string> repository-url: "";
     // Name of the language the panel started in (see `i18n::Language`).
     in-out property <string> language: "English";
     // Translated product tagline shown in the title bar. It is a property rather
@@ -126,6 +147,10 @@ export component AppWindow inherits Window {
     callback minimize-requested();
     callback maximize-requested();
     callback close-requested();
+    callback close-and-exit-requested();
+    callback background-requested();
+    callback close-prompt-cancel-requested();
+    callback open-repository-requested();
 
     VerticalLayout {
         TitleBar {
@@ -242,7 +267,19 @@ export component AppWindow inherits Window {
     if root.about-open : AboutDialog {
         app-version: root.app-version;
         language: root.language;
+        repository-url: root.repository-url;
         close-requested => { root.about-open = false; }
+        open-repository => { root.open-repository-requested(); }
+    }
+
+    // Drawn last so it covers the title bar, toolbar and every other dialog:
+    // while it is open the window must not be closed or hidden by accident.
+    if root.close-prompt-open : ClosePromptDialog {
+        detail-text: root.close-prompt-detail;
+        background-available: root.background-available;
+        close-and-exit-requested => { root.close-and-exit-requested(); }
+        background-requested => { root.background-requested(); }
+        cancel-requested => { root.close-prompt-cancel-requested(); }
     }
 
     // A one-pixel dark frame keeps the frameless window visually contained

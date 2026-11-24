@@ -46,9 +46,18 @@ export global Theme {
     out property <color> window-close-hover: #e81123;
     out property <color> window-close-pressed: #b91c1c;
 
-    // Product mark (see ui/icons/app-icon.svg): #263238 tile, #fafafa glyph.
+    // Product mark (see ui/icons/app-icon.svg): #263238 tile, #fafafa glyph,
+    // and the same top-light sheen as the exported icon (white 12 % at the top
+    // edge fading out by 42 %, black 2 % at 72 % and 10 % at the bottom edge).
+    // The sheen is a separate brush so `BrandMark` can overlay it on the tile
+    // without duplicating the gradient in every use site.
     out property <color> brand-bg: #263238;
     out property <color> brand-glyph: #fafafa;
+    out property <brush> brand-sheen: @linear-gradient(180deg,
+        rgba(255, 255, 255, 0.12) 0%,
+        rgba(255, 255, 255, 0) 42%,
+        rgba(0, 0, 0, 0.02) 72%,
+        rgba(0, 0, 0, 0.10) 100%);
 
     // --- Text -------------------------------------------------------------
     out property <color> text-strong: dark ? #f1f5f9 : #0f172a;
@@ -87,7 +96,12 @@ export global Theme {
     out property <color> field-disabled-bg: dark ? #20272f : #f8fafc;
     out property <color> selection-bg: dark ? #1e3a5f : #bfdbfe;
     out property <color> selection-fg: dark ? #e2e8f0 : #0f172a;
-    out property <color> scrim: dark ? #99000000 : #66111827;
+    // Modal backdrop (settings/about). Written with `rgba()` on purpose: an
+    // eight-digit hex literal in Slint is `#rrggbbaa`, so an intended
+    // "alpha + black" value like `#99000000` reads as red 0x99 with alpha 0.
+    // The previous light value `#66111827` therefore painted a faint maroon
+    // wash instead of dimming; keep the parsed channels at pure black.
+    out property <color> scrim: dark ? rgba(0, 0, 0, 0.60) : rgba(0, 0, 0, 0.40);
 
     // --- Service status (drawn on the dark header in both modes) ----------
     out property <color> status-idle: #94a3b8;

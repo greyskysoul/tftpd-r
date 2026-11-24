@@ -4,11 +4,11 @@ import { Icons, MaterialIcon } from "icons.slint";
 import { Theme } from "theme.slint";
 
 // The TftpdR product mark: a rounded #263238 tile with the Material "dns"
-// (server racks) glyph in #fafafa. It mirrors ui/icons/app-icon.svg — the same
-// artwork plus a top-light sheen for the exported icon — so the in-app badge,
-// the window/task-bar icon and the shipped ICO carry one single identity.
-// Corner radius and glyph size keep the source artwork's ratios (56/256 and
-// 144/256), so the badge looks like a scaled-down copy of the icon.
+// (server racks) glyph in #fafafa and the same top-light sheen as the exported
+// icon, so the in-app badge, the window/task-bar icon and the shipped ICO carry
+// one single identity. Corner radius, glyph box and sheen are copied from
+// ui/icons/app-icon.svg: radius 56/256, glyph box 192/256 of the tile, and a
+// white 12 % to black 10 % vertical overlay.
 export component BrandMark inherits Rectangle {
     in property <length> mark-size: 24px;
     in property <color> tile: Theme.brand-bg;
@@ -19,10 +19,23 @@ export component BrandMark inherits Rectangle {
     border-radius: root.mark-size * 0.21875;
     background: root.tile;
 
+    // The sheen sits between the tile and the glyph. It needs the same rounded
+    // corners as the tile, otherwise the overlay would paint square corners.
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: root.mark-size * 0.21875;
+        background: Theme.brand-sheen;
+    }
+
+    // `icon-size` covers Material's 24-unit viewbox, while the visible `dns`
+    // ink only spans units 3..21 (18/24). The master artwork puts that 24-unit
+    // box at 192/256 of the tile, so the viewbox must be 75 % of the mark and
+    // the ink lands at 56.25 % — the ratio shown by app-icon.png/ico/rgba.
     MaterialIcon {
         path-data: Icons.dns;
         tint: root.glyph;
-        icon-size: root.mark-size * 0.5625;
+        icon-size: root.mark-size * 0.75;
         x: (root.width - self.width) / 2;
         y: (root.height - self.height) / 2;
     }

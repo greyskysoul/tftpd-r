@@ -17,6 +17,7 @@ mod log_export;
 mod logging;
 mod netif;
 mod recent;
+mod single_instance;
 mod theme;
 mod user_state;
 
@@ -24,13 +25,14 @@ use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use chrono::Local;
-use slint::{Model, ModelRc, Timer, TimerMode, VecModel};
+use slint::{CloseRequestResponse, Model, ModelRc, Timer, TimerMode, VecModel};
 use tftpd_r_core::config::display_path;
 use tftpd_r_core::events::{EventBus, EventKind, SessionId, TftpEvent};
 use tftpd_r_core::server::ServerStatus;
@@ -44,6 +46,7 @@ use logging::{
     export_file_name, format_export, write_export, LogEntry, LogFilter, LogLevel, MAX_LOG_ROWS,
 };
 use recent::RecentDirs;
+use single_instance::{ActivationRequest, Background, Owner};
 use theme::{SystemThemeWatcher, ThemeMode};
 use user_state::{fallback_state_dir, LastRoot, SetupState, UiPrefs};
 
@@ -71,6 +74,40 @@ fn app_icon() -> slint::Image {
     slint::Image::from_rgba8(buffer)
 }
 
+/// Command that hands `url` to the platform's default browser without a shell.
+///
+/// Split from [`open_repository_url`] so tests can assert the exact program and
+/// argument vector. `url` is always the compile-time Cargo repository metadata,
+/// never user input.
+fn repository_command(url: &str) -> Command {
+    #[cfg(target_os = "windows")]
+    {
+        // `FileProtocolHandler` resolves the default browser; using
+        // `cmd /c start` would introduce a shell.
+        let system_root = std::env::var_os("SystemRoot")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+        let mut command = Command::new(system_root.join("System32").join("rundll32.exe"));
+        command.arg("url.dll,FileProtocolHandler").arg(url);
+        command
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Desktop Linux provides `xdg-open`. A missing helper is reported to
+        // the activity log instead of crashing the panel.
+        let mut command = Command::new("xdg-open");
+        command.arg(url);
+        command
+    }
+}
+
+/// Open the public project page in the default browser.
+fn open_repository_url() -> std::io::Result<()> {
+    repository_command(env!("CARGO_PKG_REPOSITORY"))
+        .spawn()
+        .map(|_| ())
+}
+
 struct TransferState {
     file: String,
     peer: String,
@@ -85,6 +122,19 @@ struct AddressChoice {
     ip: IpAddr,
     label: String,
     selected: bool,
+}
+
+/// State of the "TftpdR is already running" prompt of a second launch.
+///
+/// Present only while the operator has not decided yet. The prompt is shown
+/// before the panel is visible, so the second process never flashes a full
+/// window for a launch that is about to exit.
+struct SingleInstancePrompt {
+    /// The panel that was already running when this one started.
+    background: Background,
+    /// Activation request sent by "Show program window", kept until the timer sees
+    /// the answer (or the request expires).
+    request: Option<ActivationRequest>,
 }
 
 struct UiState {
@@ -141,6 +191,14 @@ struct UiState {
     picker_prewarmed: bool,
     /// Pending log-export save dialog; polled from the UI timer.
     log_export: Option<PendingLogExport>,
+    /// "Already running" prompt of a second launch; `None` once the operator
+    /// decided to start this instance.
+    single_instance_prompt: Option<SingleInstancePrompt>,
+    /// Whether the "Close TftpdR?" choice is currently covering the panel.
+    close_prompt_open: bool,
+    /// Set after "Run in background"; the window is hidden on the next UI tick
+    /// so the tray icon's visibility change is processed first.
+    pending_background: bool,
 }
 
 /// Which part of the panel asked for the native folder dialog.
@@ -247,6 +305,9 @@ impl UiState {
             pending_pick: None,
             picker_prewarmed: false,
             log_export: None,
+            single_instance_prompt: None,
+            close_prompt_open: false,
+            pending_background: false,
         }
     }
 
@@ -420,9 +481,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!(
             "      --smoke-test  Create the window, run a few UI ticks and exit (development)"
         );
+        println!("      --activate-only  Ask a running panel to show its window, then exit");
+        println!("      --new-instance   Start without the \"already running\" prompt");
         return Ok(());
     }
-    let smoke_test = std::env::args().any(|argument| argument == "--smoke-test");
+    let arguments: Vec<String> = std::env::args().collect();
+    let smoke_test = arguments.iter().any(|argument| argument == "--smoke-test");
+    let launch = launch_mode(&arguments);
+    // A second launch asks the running panel to show its window and exits. This
+    // path never creates a window and therefore runs before any UI setup; the
+    // operator who double-clicked the executable gets the panel they already
+    // have instead of a duplicate.
+    if launch == LaunchMode::ActivateOnly {
+        return activate_running_panel();
+    }
     let initial = load_initial_config();
     let last_root = LastRoot::load();
     // Keep the unusable entry and the remembered path for the startup log
@@ -484,6 +556,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = AppWindow::new()?;
     app.set_app_icon(app_icon());
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
+    app.set_repository_url(env!("CARGO_PKG_REPOSITORY").into());
     app.set_language(language.display_name().into());
     app.set_language_mode(language_preference.slint_value());
     // Selecting the bundled catalogue must happen after the first component
@@ -504,6 +577,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         discovered,
         Appearance::new(text, theme_mode, prefs, system_dark),
     );
+    // Single instance: a launch that finds another panel must not silently
+    // create a second one. The check is skipped for development runs
+    // (`--smoke-test`, screenshot previews) and for `--new-instance`, where the
+    // operator already said "start another panel". The owner is registered
+    // immediately unless the prompt is shown; registering on every start keeps
+    // the third launch's prompt working after "New instance" was chosen.
+    let single_instance: Rc<RefCell<Option<Owner>>> = Rc::new(RefCell::new(None));
+    // Development aid for UI screenshots and manual layout checks: open a dialog
+    // at startup. Not reachable without the environment variable. It is also
+    // what keeps preview runs out of the single-instance prompt.
+    let preview = std::env::var("TFTPD_R_GUI_PREVIEW").ok();
+    if launch == LaunchMode::Normal && preview.is_none() && !smoke_test {
+        match check_launch(&mut state, &single_instance) {
+            Ok(()) => {}
+            Err(error) => {
+                eprintln!("warning: {error}");
+                state.push_log(LogLevel::Warn, error);
+            }
+        }
+    }
     app.set_log_filter(state.log_filter.key().into());
     app.set_theme_mode(state.theme_mode.slint_value());
     apply_theme(&app, &state);
@@ -512,11 +605,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // First start without a usable `config.toml`: open the settings dialog so
     // the operator can fill in the root directory and bind addresses before the
     // first start. The flag is per user, so this happens once; `--smoke-test` and
-    // the screenshot previews are development runs and must not consume it.
-    let preview = std::env::var("TFTPD_R_GUI_PREVIEW").ok();
+    // the screenshot previews are development runs and must not consume it, and
+    // neither does a second launch whose operator is still choosing between the
+    // running panel and a new instance.
     let mut setup = SetupState::load();
-    let show_setup =
-        preview.is_none() && !smoke_test && !initial.is_configured() && setup.should_show_setup();
+    let show_setup = preview.is_none()
+        && !smoke_test
+        && state.single_instance_prompt.is_none()
+        && !initial.is_configured()
+        && setup.should_show_setup();
     if show_setup {
         app.set_settings_open(true);
         setup.mark_setup_shown();
@@ -614,8 +711,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = Rc::new(RefCell::new(state));
     let controller = Rc::new(RefCell::new(EmbeddedController::new()?));
 
+    // Notification-area icon. The Slint tray item is created lazily on the
+    // first "Run in background" choice, because its platform handle is created
+    // from the first event-loop turn and would otherwise be registered (and
+    // fail) at startup.
+    let tray: Rc<RefCell<Option<TrayIcon>>> = Rc::new(RefCell::new(None));
+    app.set_background_available(true);
+
+    // The "already running" prompt of a second launch is its own small window.
+    // The main panel exists but is not shown until the operator picks "New
+    // instance", so an activation or cancel never flashes the full program.
+    let prompt_window: Rc<RefCell<Option<InstancePromptWindow>>> = Rc::new(RefCell::new(None));
+    let prompt_pid = state
+        .borrow()
+        .single_instance_prompt
+        .as_ref()
+        .map(|prompt| prompt.background.pid);
+    if let Some(pid) = prompt_pid {
+        let prompt = InstancePromptWindow::new()?;
+        prompt.set_app_icon(app_icon());
+        prompt.set_dark_mode(state.borrow().is_dark());
+        prompt.set_pid(i32::try_from(pid).unwrap_or(0));
+        install_instance_prompt_callbacks(&prompt, &app, &state, &single_instance, &prompt_window);
+        prompt.show()?;
+        *prompt_window.borrow_mut() = Some(prompt);
+    }
+
+    // A launch that has nothing to ask (or was started with `--new-instance`)
+    // owns its lock immediately, so later launches can find and activate it.
+    // When the prompt is open nothing is registered: "Cancel" and "Activate"
+    // must exit without leaving a lock file behind, and "New instance" registers
+    // from its callback.
+    if state.borrow().single_instance_prompt.is_none() {
+        register_single_instance(&mut state.borrow_mut(), &single_instance);
+    }
+
     apply_status(&app, &ServerStatus::Stopped, &state.borrow());
-    install_callbacks(&app, &controller, &state, &theme_watcher_slot);
+    install_callbacks(&app, &controller, &state, &theme_watcher_slot, &tray);
 
     let timer = Timer::default();
     {
@@ -623,6 +755,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let controller = controller.clone();
         let state = state.clone();
         let theme_watcher = theme_watcher_slot.clone();
+        let single_instance = single_instance.clone();
+        let prompt_window = prompt_window.clone();
+        let tray = tray.clone();
         timer.start(TimerMode::Repeated, UI_TICK, move || {
             let Some(app) = weak.upgrade() else {
                 return;
@@ -636,11 +771,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .and_then(SystemThemeWatcher::latest)
                 .unwrap_or(false);
             let mut state = state.borrow_mut();
+            if service_single_instance(&app, &prompt_window, &mut state, &single_instance, &tray) {
+                return;
+            }
+            // "Run in background" hides the window only after the tray icon's
+            // visibility change had one event-loop turn to reach the platform.
+            // If the tray handle could not be created, the hidden window makes
+            // the backend's last-window rule stop the process instead of
+            // leaving an unreachable background process.
+            if state.pending_background {
+                state.pending_background = false;
+                if state.close_prompt_open {
+                    // The operator reopened the close prompt in the meantime;
+                    // put the icon away and let them choose again.
+                    if let Some(tray_icon) = tray.borrow().as_ref() {
+                        tray_icon.set_tray_visible(false);
+                    }
+                } else if let Err(error) = app.window().hide() {
+                    if let Some(tray_icon) = tray.borrow().as_ref() {
+                        tray_icon.set_tray_visible(false);
+                    }
+                    let message = state.text.window_hide_failed(&error.to_string());
+                    state.push_log(LogLevel::Warn, message);
+                } else {
+                    let message = state.text.background_running();
+                    state.push_log(LogLevel::Info, message);
+                }
+            }
             // A changed system scheme is applied on the next tick, at most one
             // probe interval after the operating system changed.
             if state.system_dark != system_dark {
                 state.system_dark = system_dark;
                 apply_theme(&app, &state);
+                if let Some(prompt) = prompt_window.borrow().as_ref() {
+                    prompt.set_dark_mode(state.is_dark());
+                }
             }
             drain_events(&events, &mut state);
             if let Some(error) = restart_error {
@@ -701,9 +866,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    let result = app.run();
+    // The second-launch prompt is already visible and the full panel must stay
+    // hidden until the operator picks "New instance". Every other launch shows
+    // the panel before entering the event loop.
+    if prompt_window.borrow().is_none() {
+        app.window().show()?;
+    }
+
+    let result = slint::run_event_loop();
     timer.stop();
     quit_timer.stop();
+    // Remove the notification-area icon before dropping its component; a
+    // hidden tray icon must not survive the process exit path.
+    if let Some(tray_icon) = tray.borrow().as_ref() {
+        tray_icon.set_tray_visible(false);
+    }
+    *tray.borrow_mut() = None;
+    if let Some(prompt) = prompt_window.borrow_mut().take() {
+        let _ = prompt.hide();
+    }
+    let _ = app.window().hide();
     // Stop the pre-warmed picker helper (including an open dialog) before the
     // process exits; otherwise PowerShell would outlive the panel.
     state.borrow().folder_picker.shutdown();
@@ -712,6 +894,330 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     controller.borrow_mut().shutdown();
     result?;
+    Ok(())
+}
+
+/// How a panel launch begins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LaunchMode {
+    /// Check for a running panel and ask the operator what to do.
+    Normal,
+    /// Ask the running panel to show its window, then exit. Never creates one.
+    ActivateOnly,
+    /// Start without the "already running" prompt (`--new-instance`).
+    NewInstance,
+}
+
+/// Parse the launch flags. Only the exact long options are recognised; an
+/// unknown argument is ignored exactly like before, so a stray shell word does
+/// not change the startup decision.
+fn launch_mode(arguments: &[String]) -> LaunchMode {
+    let has = |flag: &str| arguments.iter().any(|argument| argument == flag);
+    // `--activate-only` is the more specific request: it must not be turned
+    // into a full launch by an accompanying `--new-instance`.
+    if has("--activate-only") {
+        LaunchMode::ActivateOnly
+    } else if has("--new-instance") {
+        LaunchMode::NewInstance
+    } else {
+        LaunchMode::Normal
+    }
+}
+
+/// Check for another panel without registering this one.
+///
+/// The detection is best effort: without a usable state directory the panel
+/// starts normally instead of refusing to run, and a stale lock of a crashed
+/// panel is cleaned up by [`single_instance::Owner::detect`]. Returns an error
+/// string (already localised when it comes from [`Text`]) that the caller logs.
+fn check_launch(state: &mut UiState, slot: &Rc<RefCell<Option<Owner>>>) -> Result<(), String> {
+    let Some(dir) = user_state::state_dir() else {
+        return Err(state.text.instance_check_unavailable().to_string());
+    };
+    let detected = Owner::detect(&dir, single_instance::now_millis());
+    let Some(background) = detected else {
+        register_single_instance(state, slot);
+        return Ok(());
+    };
+    // Being registered now would make the second launch look like an owner, so
+    // the lock is written only when the operator picks "New instance".
+    state.single_instance_prompt = Some(SingleInstancePrompt {
+        background,
+        request: None,
+    });
+    Ok(())
+}
+
+/// Register this process as the lock owner (idempotent).
+fn register_single_instance(state: &mut UiState, slot: &Rc<RefCell<Option<Owner>>>) {
+    let mut slot = slot.borrow_mut();
+    if slot.is_some() {
+        return;
+    }
+    let Some(dir) = user_state::state_dir() else {
+        let message = state.text.instance_check_unavailable().to_string();
+        state.push_log(LogLevel::Warn, message);
+        return;
+    };
+    *slot = Some(Owner::register(&dir));
+}
+
+/// Per-tick single-instance work: heartbeat, answering other launches, and the
+/// progress of this launch's own activation request.
+///
+/// Returns `true` when the event loop has been asked to quit, so the caller can
+/// skip the rest of the tick. Runs before the server status work: raising a
+/// hidden prompt window must not be delayed by transfer bookkeeping.
+fn service_single_instance(
+    app: &AppWindow,
+    prompt_window: &Rc<RefCell<Option<InstancePromptWindow>>>,
+    state: &mut UiState,
+    slot: &Rc<RefCell<Option<Owner>>>,
+    tray: &Rc<RefCell<Option<TrayIcon>>>,
+) -> bool {
+    let now = single_instance::now_millis();
+    if let Some(owner) = slot.borrow_mut().as_mut() {
+        // A failed refresh is reported to stderr by the protocol module; the
+        // running server is unaffected either way, so nothing else to do here.
+        owner.heartbeat(now);
+        // Answer another launch only when this panel has a main window of its
+        // own. While the "already running" prompt is open, this process has not
+        // started yet and must not claim the request.
+        let prompt_open = state.single_instance_prompt.is_some();
+        if !prompt_open {
+            if let Some(request) = owner.claim_activation(now) {
+                let message = state.text.activated_from_another_instance(request.pid);
+                state.push_log(LogLevel::Info, message);
+                raise_window(app, state, tray);
+            }
+        }
+    }
+
+    let Some(prompt_state) = state.single_instance_prompt.as_mut() else {
+        return false;
+    };
+    let request = prompt_state.request.take();
+    let Some(request) = request else {
+        return false;
+    };
+    let Some(prompt) = prompt_window
+        .borrow()
+        .as_ref()
+        .map(InstancePromptWindow::clone_strong)
+    else {
+        prompt_state.request = Some(request);
+        return false;
+    };
+    let Some(dir) = user_state::state_dir() else {
+        prompt.set_waiting(false);
+        prompt.set_status_text(state.text.instance_not_responding().into());
+        return false;
+    };
+    if request.poll_ack(&dir) {
+        prompt.set_waiting(false);
+        // The running panel raised its own window; this launch is done.
+        let _ = slint::quit_event_loop();
+        return true;
+    }
+    if request.expired(now) {
+        request.discard();
+        prompt.set_waiting(false);
+        prompt.set_status_text(state.text.instance_not_responding().into());
+        return false;
+    }
+    // Keep the request alive until the answer arrives or the deadline passes.
+    prompt_state.request = Some(request);
+    false
+}
+
+/// Show and raise the panel after another launch asked for it.
+///
+/// Restores a minimised window, reveals a window that was hidden by "Run in
+/// background" and puts the tray icon away. The operating system may still
+/// decline to hand over the foreground (Windows only flashes the task-bar
+/// button when the request comes from a background process); the window is then
+/// visible and the task-bar entry is the fallback.
+fn raise_window(app: &AppWindow, state: &mut UiState, tray: &Rc<RefCell<Option<TrayIcon>>>) {
+    let tray_icon = tray.borrow().as_ref().map(TrayIcon::clone_strong);
+    show_main_window(app, state, tray_icon.as_ref());
+}
+
+/// Reveal the main window and clear every state that belongs to the hidden
+/// background mode.
+fn show_main_window(app: &AppWindow, state: &mut UiState, tray_icon: Option<&TrayIcon>) {
+    state.close_prompt_open = false;
+    state.pending_background = false;
+    app.set_close_prompt_open(false);
+    let window = app.window();
+    window.set_minimized(false);
+    if let Err(error) = window.show() {
+        let message = state.text.window_show_failed(&error.to_string());
+        state.push_log(LogLevel::Warn, message);
+    }
+    // Hide the tray icon only after the window is visible: the event loop must
+    // never see both surfaces hidden.
+    if let Some(tray_icon) = tray_icon {
+        tray_icon.set_tray_visible(false);
+    }
+}
+
+/// Create the notification-area icon component, if this build has a native
+/// tray backend.
+///
+/// The icon image and tooltip are assigned immediately: Slint creates the
+/// platform handle on the first event-loop turn and does not retry after a
+/// failed `CreateIconIndirect`/`NIM_ADD`.
+fn create_tray(text: Text) -> Option<TrayIcon> {
+    match TrayIcon::new() {
+        Ok(tray) => {
+            tray.set_tray_icon(app_icon());
+            tray.set_tray_tooltip(text.tray_tooltip().into());
+            Some(tray)
+        }
+        Err(error) => {
+            eprintln!("warning: cannot create the notification-area icon: {error}");
+            None
+        }
+    }
+}
+
+/// Create the tray component on first use and wire its callbacks.
+fn ensure_tray(
+    app: &AppWindow,
+    state: &Rc<RefCell<UiState>>,
+    tray: &Rc<RefCell<Option<TrayIcon>>>,
+) -> bool {
+    if tray.borrow().is_some() {
+        return true;
+    }
+    let Some(tray_icon) = create_tray(state.borrow().text) else {
+        let message = state.borrow().text.background_unavailable();
+        state.borrow_mut().push_log(LogLevel::Warn, message);
+        return false;
+    };
+    *tray.borrow_mut() = Some(tray_icon);
+    install_tray_callbacks(app, state, tray);
+    true
+}
+
+/// Wire the tray icon's click and menu entries to the panel.
+///
+/// The callbacks capture a weak handle of the tray itself: a strong reference
+/// would make the component own its own callback and leak the icon.
+fn install_tray_callbacks(
+    app: &AppWindow,
+    state: &Rc<RefCell<UiState>>,
+    tray: &Rc<RefCell<Option<TrayIcon>>>,
+) {
+    let Some(tray_icon) = tray.borrow().as_ref().map(TrayIcon::clone_strong) else {
+        return;
+    };
+    let weak_app = app.as_weak();
+    let state_show = state.clone();
+    let weak_tray = tray_icon.as_weak();
+    tray_icon.on_show_requested(move || {
+        let (Some(app), Some(tray), Ok(mut state)) = (
+            weak_app.upgrade(),
+            weak_tray.upgrade(),
+            state_show.try_borrow_mut(),
+        ) else {
+            return;
+        };
+        show_main_window(&app, &mut state, Some(&tray));
+    });
+
+    tray_icon.on_quit_requested(|| {
+        let _ = slint::quit_event_loop();
+    });
+}
+
+/// Ask the panel to move to the notification area.
+///
+/// The window is not hidden here: the tray's visibility change is queued and
+/// the UI timer hides the window on its next tick. Returns `false` when there
+/// is no usable tray component; the caller then keeps the window (and the close
+/// prompt) in place instead of hiding the only UI.
+fn enter_background(
+    app: &AppWindow,
+    state: &mut UiState,
+    tray: &Rc<RefCell<Option<TrayIcon>>>,
+) -> bool {
+    let Some(tray_icon) = tray.borrow().as_ref().map(TrayIcon::clone_strong) else {
+        let message = state.text.background_unavailable();
+        state.push_log(LogLevel::Warn, message);
+        return false;
+    };
+    state.close_prompt_open = false;
+    app.set_close_prompt_open(false);
+    // Refresh the icon and tooltip, then show the icon before the window is
+    // hidden (the actual hide happens on the next UI tick).
+    tray_icon.set_tray_icon(app_icon());
+    tray_icon.set_tray_tooltip(state.text.tray_tooltip().into());
+    tray_icon.set_tray_visible(true);
+    state.pending_background = true;
+    true
+}
+
+/// Handle a request to close the panel window.
+///
+/// With a running server this opens the three-way close prompt and keeps the
+/// window visible; otherwise it exits and lets the normal shutdown path stop
+/// whatever server state remains. Both the custom title-bar button and the
+/// operating system's close request (Alt+F4) call this.
+fn request_close(
+    app: &AppWindow,
+    controller: &Rc<RefCell<EmbeddedController>>,
+    state: &Rc<RefCell<UiState>>,
+) {
+    let status = controller.borrow_mut().poll_status();
+    let mut state = state.borrow_mut();
+    if state.close_prompt_open {
+        return;
+    }
+    if !server_is_active(&status) {
+        let _ = slint::quit_event_loop();
+        return;
+    }
+    let detail = app.get_bind_text().to_string();
+    let detail = state.text.close_prompt_server_running(&detail);
+    state.close_prompt_open = true;
+    app.set_close_prompt_detail(detail.into());
+    app.set_background_available(true);
+    app.set_close_prompt_open(true);
+}
+
+/// Whether the embedded server is starting or running, i.e. closing the window
+/// would stop serving clients.
+fn server_is_active(status: &ServerStatus) -> bool {
+    matches!(
+        status,
+        ServerStatus::Starting | ServerStatus::Running { .. }
+    )
+}
+
+/// `--activate-only`: ask a running panel to show its window and exit.
+///
+/// Used by scripts and shortcuts that only want to bring the panel forward. The
+/// request is written and polled here, before any window is created, so the
+/// process never flashes a GUI.
+fn activate_running_panel() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(dir) = user_state::state_dir() else {
+        eprintln!("tftpd-r: no usable state directory for the single-instance check");
+        return Ok(());
+    };
+    let Some(background) = Owner::detect(&dir, single_instance::now_millis()) else {
+        eprintln!("tftpd-r: no running panel to activate");
+        return Ok(());
+    };
+    let request = ActivationRequest::send(&dir, &background, single_instance::now_millis());
+    let deadline = Instant::now() + single_instance::ACTIVATION_TIMEOUT;
+    while Instant::now() < deadline {
+        if request.poll_ack(&dir) {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    eprintln!("tftpd-r: the running panel did not respond");
     Ok(())
 }
 
@@ -993,6 +1499,7 @@ fn install_callbacks(
     controller: &Rc<RefCell<EmbeddedController>>,
     state: &Rc<RefCell<UiState>>,
     theme_watcher: &Rc<RefCell<Option<SystemThemeWatcher>>>,
+    tray: &Rc<RefCell<Option<TrayIcon>>>,
 ) {
     // Start / restart: the same button changes meaning while the server runs.
     {
@@ -1405,6 +1912,19 @@ fn install_callbacks(
             refresh_models(&app, &mut state);
         });
     }
+    // About dialog: open the fixed project URL in the default browser. The URL
+    // comes from Cargo metadata, so no user-controlled input reaches the
+    // platform handler; a failed launch is reported in the activity log.
+    {
+        let state = state.clone();
+        app.on_open_repository_requested(move || {
+            if let Err(error) = open_repository_url() {
+                let text = state.borrow().text;
+                let message = text.repository_open_failed(&error.to_string());
+                state.borrow_mut().push_log(LogLevel::Error, message);
+            }
+        });
+    }
     // Window controls of the frameless title bar. Use the window API rather
     // than the Slint window properties so the OS state stays authoritative.
     {
@@ -1424,9 +1944,151 @@ fn install_callbacks(
             }
         });
     }
+    // Close button: ask before stopping a running server. The operating
+    // system's close request (Alt+F4) goes through the same helper so it cannot
+    // bypass the prompt.
     {
-        app.on_close_requested(|| {
+        let weak = app.as_weak();
+        let controller = controller.clone();
+        let state = state.clone();
+        app.on_close_requested(move || {
+            if let Some(app) = weak.upgrade() {
+                request_close(&app, &controller, &state);
+            }
+        });
+    }
+    {
+        let weak = app.as_weak();
+        let controller = controller.clone();
+        let state = state.clone();
+        app.window().on_close_requested(move || {
+            let Some(app) = weak.upgrade() else {
+                return CloseRequestResponse::HideWindow;
+            };
+            request_close(&app, &controller, &state);
+            CloseRequestResponse::KeepWindowShown
+        });
+    }
+
+    // "Close TftpdR?" choices. "Close and exit" hides the window before the
+    // event loop stops; the normal shutdown path then drains the server.
+    {
+        let weak = app.as_weak();
+        let state = state.clone();
+        app.on_close_and_exit_requested(move || {
+            if let Some(app) = weak.upgrade() {
+                let mut state = state.borrow_mut();
+                state.close_prompt_open = false;
+                state.pending_background = false;
+                app.set_close_prompt_open(false);
+                let _ = app.window().hide();
+            }
             let _ = slint::quit_event_loop();
+        });
+    }
+    {
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tray = tray.clone();
+        app.on_background_requested(move || {
+            if let Some(app) = weak.upgrade() {
+                if ensure_tray(&app, &state, &tray) {
+                    let mut state = state.borrow_mut();
+                    enter_background(&app, &mut state, &tray);
+                }
+            }
+        });
+    }
+    {
+        let weak = app.as_weak();
+        let state = state.clone();
+        app.on_close_prompt_cancel_requested(move || {
+            if let Some(app) = weak.upgrade() {
+                let mut state = state.borrow_mut();
+                state.close_prompt_open = false;
+                state.pending_background = false;
+                app.set_close_prompt_open(false);
+            }
+        });
+    }
+}
+
+/// Wire the second-launch prompt window.
+///
+/// The prompt never starts a server unless the operator explicitly picks "New
+/// instance"; asking the running panel for its window exits after the
+/// acknowledgement. "New instance" shows the main panel before hiding the
+/// prompt, so the event loop always has a visible window during the switch.
+fn install_instance_prompt_callbacks(
+    prompt: &InstancePromptWindow,
+    app: &AppWindow,
+    state: &Rc<RefCell<UiState>>,
+    single_instance: &Rc<RefCell<Option<Owner>>>,
+    prompt_window: &Rc<RefCell<Option<InstancePromptWindow>>>,
+) {
+    {
+        let weak_prompt = prompt.as_weak();
+        let state = state.clone();
+        prompt.on_activate_requested(move || {
+            let Some(prompt) = weak_prompt.upgrade() else {
+                return;
+            };
+            let mut state = state.borrow_mut();
+            let text = state.text;
+            let Some(instance) = state.single_instance_prompt.as_mut() else {
+                return;
+            };
+            if instance.request.is_some() {
+                return;
+            }
+            let Some(dir) = user_state::state_dir() else {
+                prompt.set_status_text(text.instance_not_responding().into());
+                return;
+            };
+            let background = instance.background.clone();
+            instance.request = Some(ActivationRequest::send(
+                &dir,
+                &background,
+                single_instance::now_millis(),
+            ));
+            prompt.set_waiting(true);
+            prompt.set_status_text(text.switching_to_existing().into());
+        });
+    }
+    {
+        let weak_prompt = prompt.as_weak();
+        let weak_app = app.as_weak();
+        let state = state.clone();
+        let single_instance = single_instance.clone();
+        let prompt_window = prompt_window.clone();
+        prompt.on_new_instance_requested(move || {
+            let Some(prompt) = weak_prompt.upgrade() else {
+                return;
+            };
+            let Some(app) = weak_app.upgrade() else {
+                return;
+            };
+            let mut state = state.borrow_mut();
+            state.single_instance_prompt = None;
+            register_single_instance(&mut state, &single_instance);
+            // Show the panel first: the event loop must never see both windows
+            // hidden, or it would stop before the new instance is usable.
+            app.window().show().ok();
+            prompt.hide().ok();
+            *prompt_window.borrow_mut() = None;
+            let message = state.text.panel_started(env!("CARGO_PKG_VERSION"));
+            state.push_log(LogLevel::Info, message);
+        });
+    }
+    {
+        prompt.on_cancel_requested(|| {
+            let _ = slint::quit_event_loop();
+        });
+    }
+    {
+        prompt.window().on_close_requested(|| {
+            let _ = slint::quit_event_loop();
+            CloseRequestResponse::KeepWindowShown
         });
     }
 }
@@ -2487,7 +3149,7 @@ mod tests {
     }
 
     #[test]
-    fn product_icon_pixels_are_a_valid_rounded_tile() {
+    fn the_product_icon_and_brand_mark_share_one_geometry() {
         assert_eq!(
             APP_ICON_RGBA.len(),
             (APP_ICON_SIZE * APP_ICON_SIZE * 4) as usize,
@@ -2511,6 +3173,80 @@ mod tests {
             );
         }
         assert_eq!(pixel(APP_ICON_SIZE / 2, 44), &[0xfa, 0xfa, 0xfa, 255]);
+
+        // The `dns` path fills 18 of Material's 24-unit viewbox and the master
+        // artwork scales that viewbox to 192/256 of the tile. `BrandMark` must
+        // therefore size the viewbox at 75 % of the mark; sizing it at the
+        // visible-ink ratio (56.25 %) — the earlier value — shrank the glyph to
+        // 42 % and made the title-bar/About badge look like a different logo
+        // from the window, task-bar and PE icon.
+        let widgets = include_str!("../ui/widgets.slint");
+        assert!(
+            widgets.contains("icon-size: root.mark-size * 0.75;"),
+            "BrandMark must map the 24-unit Material viewbox to 75 % of the tile"
+        );
+        assert!(
+            widgets.contains("background: Theme.brand-sheen;"),
+            "BrandMark must paint the same sheen as the exported icon"
+        );
+        // The shipped raster must keep the same ink ratio (144/256 of the
+        // tile), so the vector badge and the bitmaps cannot drift apart again.
+        let mut bounds: Option<(u32, u32, u32, u32)> = None;
+        for y in 0..APP_ICON_SIZE {
+            for x in 0..APP_ICON_SIZE {
+                let pixel = pixel(x, y);
+                let opaque_glyph =
+                    pixel[3] > 200 && pixel[..3].iter().all(|channel| *channel > 200);
+                if !opaque_glyph {
+                    continue;
+                }
+                bounds = Some(match bounds {
+                    None => (x, y, x, y),
+                    Some((min_x, min_y, max_x, max_y)) => {
+                        (min_x.min(x), min_y.min(y), max_x.max(x), max_y.max(y))
+                    }
+                });
+            }
+        }
+        let (min_x, min_y, max_x, max_y) = bounds.expect("the icon must contain glyph pixels");
+        let ink = (max_x - min_x + 1).max(max_y - min_y + 1) as f32;
+        let expected = APP_ICON_SIZE as f32 * 0.75 * 18.0 / 24.0;
+        assert!(
+            (ink - expected).abs() <= 2.0,
+            "shipped icon ink is {ink} px, but the brand mark implies {expected} px"
+        );
+    }
+
+    #[test]
+    fn the_repository_link_uses_a_fixed_https_address_and_a_shell_free_handler() {
+        let url = env!("CARGO_PKG_REPOSITORY");
+        assert_eq!(url, "https://github.com/greyskysoul/tftpd-r");
+        assert!(url.starts_with("https://"));
+
+        // The link handler must receive the URL as one argument and must not
+        // involve a shell, so the fixed address cannot turn into a command.
+        let command = repository_command(url);
+        let program = command.get_program().to_string_lossy().into_owned();
+        let args: Vec<String> = command
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect();
+        #[cfg(target_os = "windows")]
+        {
+            assert!(
+                program.ends_with("rundll32.exe"),
+                "unexpected browser handler {program}"
+            );
+            assert_eq!(
+                args,
+                vec!["url.dll,FileProtocolHandler".to_owned(), url.to_owned()]
+            );
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            assert_eq!(program, "xdg-open");
+            assert_eq!(args, vec![url.to_owned()]);
+        }
     }
 
     #[test]
@@ -2564,6 +3300,44 @@ mod tests {
     }
 
     #[test]
+    fn the_modal_scrim_is_a_neutral_black_overlay() {
+        // Slint parses an eight-digit hex literal as `#rrggbbaa`, not ARGB, so
+        // the old backdrop (`dark ? #99000000 : #66111827`) painted a
+        // translucent maroon wash in light mode and a fully transparent overlay
+        // in dark mode. The token must stay an explicit black `rgba()` so the
+        // channels are neutral in both schemes and the alpha is unambiguous.
+        let theme = include_str!("../ui/theme.slint");
+        let scrim = theme
+            .lines()
+            .find(|line| line.trim_start().starts_with("out property <color> scrim:"))
+            .expect("theme.slint must define the scrim token");
+
+        let branches: Vec<&str> = scrim
+            .split_once('?')
+            .expect("the scrim token must pick a dark and a light value")
+            .1
+            .trim_end_matches(';')
+            .split(" : ")
+            .map(str::trim)
+            .collect();
+        assert_eq!(branches.len(), 2, "unexpected scrim expression: {scrim}");
+        for branch in branches {
+            let alpha = branch
+                .strip_prefix("rgba(0, 0, 0,")
+                .and_then(|rest| rest.strip_suffix(')'))
+                .unwrap_or_else(|| panic!("the scrim must be neutral black: {branch}"));
+            let alpha: f32 = alpha
+                .trim()
+                .parse()
+                .expect("the scrim alpha must be a plain float");
+            assert!(
+                (0.30..=0.85).contains(&alpha),
+                "the scrim must visibly dim the panel, got alpha {alpha}"
+            );
+        }
+    }
+
+    #[test]
     fn the_startup_language_of_the_state_is_used_for_new_log_lines() {
         let mut state = test_state(gui_default_config());
         assert_eq!(state.text, en());
@@ -2583,5 +3357,153 @@ mod tests {
             state.logs.front().expect("english line").message,
             "unknown size"
         );
+    }
+
+    #[test]
+    fn launch_flags_choose_the_startup_path() {
+        let args = |list: &[&str]| -> Vec<String> {
+            list.iter().map(|value| (*value).to_string()).collect()
+        };
+        assert_eq!(launch_mode(&args(&[])), LaunchMode::Normal);
+        assert_eq!(launch_mode(&args(&["tftpd-r"])), LaunchMode::Normal);
+        assert_eq!(
+            launch_mode(&args(&["tftpd-r", "--smoke-test"])),
+            LaunchMode::Normal
+        );
+        assert_eq!(
+            launch_mode(&args(&["tftpd-r", "--new-instance"])),
+            LaunchMode::NewInstance
+        );
+        assert_eq!(
+            launch_mode(&args(&["tftpd-r", "--activate-only"])),
+            LaunchMode::ActivateOnly
+        );
+        // Activation is the more specific request and must not be turned into a
+        // normal launch by a second flag.
+        assert_eq!(
+            launch_mode(&args(&["tftpd-r", "--new-instance", "--activate-only"])),
+            LaunchMode::ActivateOnly
+        );
+        // Only the exact long options are recognised.
+        assert_eq!(
+            launch_mode(&args(&["tftpd-r", "--new_instance"])),
+            LaunchMode::Normal
+        );
+    }
+
+    #[test]
+    fn a_running_panel_puts_the_launch_into_the_prompt_state() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let owner = Owner::register(dir.path());
+        let detected = Owner::detect(dir.path(), single_instance::now_millis())
+            .expect("the registered panel must be found");
+        assert_eq!(detected.token, owner.token());
+
+        let mut state = test_state(gui_default_config());
+        state.single_instance_prompt = Some(SingleInstancePrompt {
+            background: detected,
+            request: None,
+        });
+        let prompt = state
+            .single_instance_prompt
+            .as_ref()
+            .expect("the prompt stays open until the operator decides");
+        assert_eq!(prompt.background.pid, std::process::id());
+        assert!(prompt.request.is_none());
+        // "Cancel" clears the prompt without registering a lock; nothing else
+        // in the state depends on it.
+        state.single_instance_prompt = None;
+        assert!(state.single_instance_prompt.is_none());
+    }
+
+    #[test]
+    fn the_single_instance_prompt_offers_three_translated_choices() {
+        // The prompt is the only UI of a second launch, so its wording must come
+        // from the catalogue rather than raw English literals.
+        let source = include_str!("../ui/single-instance.slint");
+        for expected in [
+            "@tr(\"TftpdR is already running\")",
+            "@tr(\"Cancel\")",
+            "@tr(\"New instance\")",
+            "@tr(\"Show program window\")",
+        ] {
+            assert!(
+                source.contains(expected),
+                "the prompt must use the translated string {expected}"
+            );
+        }
+        // The three callbacks are what the second launch actually does.
+        for callback in [
+            "callback activate-requested();",
+            "callback new-instance-requested();",
+            "callback cancel-requested();",
+        ] {
+            assert!(source.contains(callback), "missing {callback}");
+        }
+    }
+
+    #[test]
+    fn the_single_instance_prompt_is_its_own_small_window() {
+        // The second launch must not flash (or build into the visual tree of)
+        // the full panel: the prompt is a Window-rooted component of its own,
+        // and the main window only contains the close prompt overlay.
+        let prompt = include_str!("../ui/single-instance.slint");
+        assert!(prompt.contains("export component InstancePromptWindow inherits Window"));
+        assert!(!prompt.contains("Theme.scrim"));
+        let app = include_str!("../ui/app.slint");
+        assert!(!app.contains("instance-prompt-open"));
+        assert!(app.contains("import { InstancePromptWindow } from \"single-instance.slint\""));
+    }
+
+    #[test]
+    fn the_tray_icon_offers_show_and_quit() {
+        let source = include_str!("../ui/tray.slint");
+        assert!(source.contains("export component TrayIcon inherits SystemTrayIcon"));
+        assert!(source.contains("@tr(\"Show program window\")"));
+        assert!(source.contains("@tr(\"Quit\")"));
+        assert!(source.contains("callback show-requested();"));
+        assert!(source.contains("callback quit-requested();"));
+        // Left-clicking the icon raises the window; the menu's first entry does
+        // the same and the separator keeps Quit away from it.
+        assert!(source.contains("clicked => { root.show-requested(); }"));
+        assert!(source.contains("MenuSeparator { }"));
+    }
+
+    #[test]
+    fn the_close_prompt_offers_exit_background_and_cancel() {
+        let source = include_str!("../ui/close-prompt.slint");
+        for expected in [
+            "@tr(\"Close TftpdR?\")",
+            "@tr(\"Close and exit\")",
+            "@tr(\"Run in background\")",
+            "@tr(\"Cancel\")",
+        ] {
+            assert!(
+                source.contains(expected),
+                "the close prompt must use the translated string {expected}"
+            );
+        }
+        for callback in [
+            "callback close-and-exit-requested();",
+            "callback background-requested();",
+            "callback cancel-requested();",
+        ] {
+            assert!(source.contains(callback), "missing {callback}");
+        }
+        // The background choice is only offered when a tray backend exists.
+        assert!(source.contains("if root.background-available : SmallButton"));
+    }
+
+    #[test]
+    fn only_a_starting_or_running_server_asks_before_closing() {
+        assert!(server_is_active(&ServerStatus::Starting));
+        assert!(server_is_active(&ServerStatus::Running {
+            local_addrs: Vec::new(),
+        }));
+        assert!(!server_is_active(&ServerStatus::Stopping));
+        assert!(!server_is_active(&ServerStatus::Stopped));
+        assert!(!server_is_active(&ServerStatus::Failed {
+            message: "boom".to_string(),
+        }));
     }
 }

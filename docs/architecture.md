@@ -152,9 +152,12 @@ to `tracing` records; the GUI uses `EventBus`, a bounded ring guarded by a
 The GUI crate stays deliberately small:
 
 - `ui/app.slint` composes the window from `titlebar.slint`, `toolbar.slint`,
-  `logs.slint`, `transfers.slint`, `statusbar.slint` and three overlays:
-  `root-menu.slint` (recent root directories), `settings.slint` and
-  `about.slint`.
+  `logs.slint`, `transfers.slint`, `statusbar.slint` and four overlays:
+  `root-menu.slint` (recent root directories), `settings.slint`,
+  `about.slint` and `close-prompt.slint` (the close-time three-way choice,
+  drawn last so it covers the whole window). `ui/single-instance.slint` is a
+  separate `InstancePromptWindow` for a second launch and `ui/tray.slint` is the
+  notification-area icon; neither is a child of `AppWindow`.
 - The window is frameless (`no-frame: true`). `titlebar.slint` draws the title
   and minimize / maximize-restore / close controls, and uses `WindowMoveArea`
   for dragging. `resize-border-width` keeps the native edge/corner resize
@@ -240,6 +243,34 @@ The GUI crate stays deliberately small:
   a WARN (the next launch will not restore it); a stored entry that is no longer
   a directory is reported as a WARN on the next launch, and a valid
   `config.toml` that overrides it is reported too.
+- **Second launch.** `src/single_instance.rs` owns an advisory lock file per
+  running panel (`instance-<token>.lock`, refreshed from the UI timer every 3 s,
+  stale after 15 s) plus a `activate-request-*.req` / `activate-ack-*.ack`
+  handshake in the per-user state directory. A launch that finds a fresh lock
+  shows the standalone `InstancePromptWindow` (`ui/single-instance.slint`)
+  instead of registering its own lock; Activate writes the request and exits when
+  the owner acknowledges (the owner raises itself with `set_minimized(false)` +
+  `Window::show()`), New instance shows the main panel, registers a lock and
+  continues, Cancel exits without a lock. The main panel is created but never
+  shown while the prompt is open, and `--new-instance` / `--activate-only` are
+  the scriptable forms. The files are advisory UI state, not an IPC channel; see
+  [ADR 0017](adr/0017-single-instance-prompt.md) and
+  [ADR 0018](adr/0018-tray-icon-and-close-choice.md).
+- **Close choice and notification area.** With the server `Starting`/`Running`,
+  the title-bar close button and `Window::on_close_requested` open the
+  `close-prompt.slint` overlay: close-and-exit hides the window and quits,
+  run-in-background keeps serving, cancel restores the panel. Background mode
+  creates `ui/tray.slint` (Slint `SystemTrayIcon`; the `system-tray` feature is
+  enabled workspace-wide and selects `Shell_NotifyIconW`, `ksni` or AppKit at
+  compile time) on first use, shows the icon and hides the window on the next
+  200 ms tick. The tray menu and left-click raise the window; its Quit entry
+  stops the event loop. The same `show_main_window` helper is used when another
+  launch or `--activate-only` raises a background panel, so the hidden window
+  reappears and the tray icon is removed. A desktop without a StatusNotifier
+  host (Linux/BSD) shows no icon; the last-window rule then makes the process
+  exit instead of leaving an unreachable background process, and a later launch
+  can still reach the panel through the single-instance prompt. See
+  [ADR 0018](adr/0018-tray-icon-and-close-choice.md).
 - Saving the dialog, or selecting another recent root, compares the resulting
   `ServerConfig` with the configuration of the running server. When the server
   is running (`Starting`/`Running`) and no transfer is active, the change is
@@ -252,8 +283,10 @@ The GUI crate stays deliberately small:
   `AddressOption`), translates `TftpEvent`s and `ServerStatus` into UI state,
   and keeps the UI thread free of blocking calls. Window controls call
   `slint::Window` methods (`set_minimized`, `set_maximized`) on the UI thread;
-  close requests quit the event loop so the normal window-close shutdown path
-  runs.
+  close requests route through the close-time prompt (or quit directly when the
+  server is not active) so the normal window-close shutdown path runs. The event
+  loop keeps running while the prompt window or a visible tray icon exists; the
+  main window may be hidden without stopping the process.
 - `src/logging.rs` owns the bounded in-memory activity log: at most 500 entries
   (newest first), local wall-clock timestamps, `Info`/`Warn`/`Error` levels, an
   exact-level display filter selected from a drop-down that never drops entries,

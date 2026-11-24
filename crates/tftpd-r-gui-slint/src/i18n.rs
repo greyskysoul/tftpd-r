@@ -647,6 +647,19 @@ impl Text {
         )
     }
 
+    // --- About --------------------------------------------------------------
+
+    /// Opening the repository page in the default browser failed. The About
+    /// dialog stays open, so the operator learns why nothing happened.
+    #[must_use]
+    pub fn repository_open_failed(self, error: &str) -> String {
+        text!(
+            self,
+            format!("Could not open the repository page: {error}."),
+            format!("无法打开仓库页面：{error}。")
+        )
+    }
+
     // --- Settings -----------------------------------------------------------
 
     /// Settings were rejected by the shared validation.
@@ -944,6 +957,105 @@ impl Text {
         )
     }
 
+    // --- Single instance ----------------------------------------------------
+
+    /// The running panel answered a second launch and is showing its window.
+    #[must_use]
+    pub fn activated_from_another_instance(self, pid: u32) -> String {
+        text!(
+            self,
+            format!("Another launch asked for this window; it is now in front (PID {pid})."),
+            format!("另一次启动请求显示本窗口，已将其置于前台（进程 ID {pid}）。")
+        )
+    }
+
+    /// A second launch asked for the window, but raising it failed.
+    #[must_use]
+    pub fn window_show_failed(self, error: &str) -> String {
+        text!(
+            self,
+            format!("Cannot show the program window: {error}"),
+            format!("无法显示程序窗口：{error}")
+        )
+    }
+
+    /// The background window could not be hidden.
+    #[must_use]
+    pub fn window_hide_failed(self, error: &str) -> String {
+        text!(
+            self,
+            format!("Cannot move the panel to the background: {error}"),
+            format!("无法将面板移到后台：{error}")
+        )
+    }
+
+    /// Confirmation that the panel keeps serving from the notification area.
+    #[must_use]
+    pub fn background_running(self) -> &'static str {
+        text!(
+            self,
+            "TftpdR is still serving in the background. Use the notification-area icon to show the window or quit.",
+            "TftpdR 仍在后台提供服务。请使用通知区域图标显示窗口或退出。"
+        )
+    }
+
+    /// No native tray backend is available, so the panel must stay visible.
+    #[must_use]
+    pub fn background_unavailable(self) -> &'static str {
+        text!(
+            self,
+            "Cannot run in the background: no system tray backend is available in this build.",
+            "无法在后台运行：当前构建没有可用的系统托盘后端。"
+        )
+    }
+
+    /// Hover text of the notification-area icon.
+    #[must_use]
+    pub fn tray_tooltip(self) -> &'static str {
+        text!(self, "TftpdR · TFTP server", "TftpdR · TFTP 服务")
+    }
+
+    /// Detail line of the "Close TftpdR?" prompt with the running bind address.
+    #[must_use]
+    pub fn close_prompt_server_running(self, detail: &str) -> String {
+        text!(
+            self,
+            format!("The TFTP server is running on {detail}."),
+            format!("TFTP 服务正在 {detail} 上运行。")
+        )
+    }
+
+    /// The running panel did not answer the activation request in time.
+    #[must_use]
+    pub fn instance_not_responding(self) -> &'static str {
+        text!(
+            self,
+            "The existing window did not respond. Start a new instance or cancel.",
+            "已有窗口未响应。请启动新实例或取消。"
+        )
+    }
+
+    /// The activation request is in flight.
+    #[must_use]
+    pub fn switching_to_existing(self) -> &'static str {
+        text!(
+            self,
+            "Switching to the existing window…",
+            "正在切换到已有窗口…"
+        )
+    }
+
+    /// The state directory could not be determined, so the single-instance
+    /// check is skipped and the panel starts normally.
+    #[must_use]
+    pub fn instance_check_unavailable(self) -> &'static str {
+        text!(
+            self,
+            "No writable state directory: the single-instance check is skipped.",
+            "没有可写状态目录：已跳过单实例检测。"
+        )
+    }
+
     // --- Native dialogs -----------------------------------------------------
 
     /// Title of the native folder dialog.
@@ -1202,6 +1314,12 @@ mod tests {
             en.log_export_unavailable(),
             en.folder_dialog_title(),
             en.save_dialog_title(),
+            en.instance_not_responding(),
+            en.switching_to_existing(),
+            en.instance_check_unavailable(),
+            en.background_running(),
+            en.background_unavailable(),
+            en.tray_tooltip(),
         ];
         let chinese = [
             zh.status_starting(),
@@ -1233,10 +1351,43 @@ mod tests {
             zh.log_export_unavailable(),
             zh.folder_dialog_title(),
             zh.save_dialog_title(),
+            zh.instance_not_responding(),
+            zh.switching_to_existing(),
+            zh.instance_check_unavailable(),
+            zh.background_running(),
+            zh.background_unavailable(),
+            zh.tray_tooltip(),
         ];
         for (english, chinese) in english.iter().zip(chinese.iter()) {
             assert_ne!(english, chinese, "message not translated: {english}");
         }
+        // Messages that take arguments are compared separately because they
+        // return an owned `String` instead of a `&'static str`.
+        assert_ne!(
+            en.repository_open_failed("io"),
+            zh.repository_open_failed("io"),
+            "message not translated: repository_open_failed"
+        );
+        assert_ne!(
+            en.activated_from_another_instance(7),
+            zh.activated_from_another_instance(7),
+            "message not translated: activated_from_another_instance"
+        );
+        assert_ne!(
+            en.window_show_failed("denied"),
+            zh.window_show_failed("denied"),
+            "message not translated: window_show_failed"
+        );
+        assert_ne!(
+            en.window_hide_failed("denied"),
+            zh.window_hide_failed("denied"),
+            "message not translated: window_hide_failed"
+        );
+        assert_ne!(
+            en.close_prompt_server_running("127.0.0.1:69"),
+            zh.close_prompt_server_running("127.0.0.1:69"),
+            "message not translated: close_prompt_server_running"
+        );
     }
 
     // --- Translation catalogue consistency ---------------------------------

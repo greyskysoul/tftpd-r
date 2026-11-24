@@ -85,6 +85,9 @@ msgstr "图标：Google Material Design Icons（Apache License 2.0）"
 msgid "INFO only"
 msgstr "仅 INFO"
 
+msgid "Issues and pull requests are welcome."
+msgstr "欢迎提出 issue 和 PR"
+
 msgid "Language"
 msgstr "语言"
 
@@ -123,6 +126,9 @@ msgstr "进度"
 
 msgid "Recent root directories"
 msgstr "最近使用的根目录"
+
+msgid "Repository: {}"
+msgstr "仓库：{}"
 
 msgid "Restart"
 msgstr "重启"
@@ -213,3 +219,45 @@ msgstr "重启后生效。"
 
 msgid "“All networks” is exclusive."
 msgstr "“全部网络”与其他地址互斥。"
+
+msgid "TftpdR is already running"
+msgstr "TftpdR 已在运行"
+
+msgid "PID {}"
+msgstr "进程 ID {}"
+
+msgid "Another TftpdR panel is already running. Activate its window, start a new instance on purpose, or cancel this launch."
+msgstr "后台已有 TftpdR 面板在运行。请选择显示程序窗口、仍启动新实例，或取消本次启动。"
+
+msgid "Starting a new instance leaves the running panel and its server untouched; two panels then share this user's state files."
+msgstr "启动新实例不会影响正在运行的面板及其服务；两个面板将共用当前用户的状态文件。"
+
+msgid "New instance"
+msgstr "新实例"
+
+msgid "Show program window"
+msgstr "显示程序窗口"
+
+msgid "Another TftpdR panel is running"
+msgstr "另一个 TftpdR 面板正在运行"
+
+msgid "Quit"
+msgstr "退出"
+
+msgid "Close TftpdR?"
+msgstr "关闭 TftpdR？"
+
+msgid "The TFTP server is still running. Closing the window stops the server and exits the program."
+msgstr "TFTP 服务仍在运行。关闭窗口将停止服务并退出程序。"
+
+msgid "Running in the background keeps the server available and adds a notification-area icon for showing the window again or quitting."
+msgstr "在后台运行会保持服务可用，并在通知区域添加图标，用于再次显示窗口或退出。"
+
+msgid "Running in the background is unavailable in this build because no system tray backend is available."
+msgstr "当前构建没有可用的系统托盘后端，因此无法在后台运行。"
+
+msgid "Run in background"
+msgstr "在后台运行"
+
+msgid "Close and exit"
+msgstr "关闭并退出"

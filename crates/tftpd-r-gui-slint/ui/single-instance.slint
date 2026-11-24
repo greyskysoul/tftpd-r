@@ -1,0 +1,213 @@
+// "TftpdR is already running" prompt of a second launch.
+//
+// The prompt is its own small window rather than an overlay of the full panel:
+// a launch that is about to exit must not build or flash the complete program
+// window. The main window is created but stays hidden until the operator picks
+// "New instance"; showing it first and closing this window afterwards keeps
+// the event loop alive throughout the switch.
+import { Icons, MaterialIcon } from "icons.slint";
+import { Theme } from "theme.slint";
+import { BrandMark, SmallButton } from "widgets.slint";
+
+export component InstancePromptWindow inherits Window {
+    title: @tr("TftpdR is already running");
+    in property <image> app-icon;
+    icon: root.app-icon;
+
+    // Each window-rooted component owns its copy of the `Theme` global, so the
+    // prompt mirrors the resolved light/dark state the same way `AppWindow`
+    // does.
+    in-out property <bool> dark-mode: false;
+    init => {
+        Theme.dark = self.dark-mode;
+    }
+    changed dark-mode => {
+        Theme.dark = self.dark-mode;
+    }
+
+    // Process ID of the panel that is already running (0 when unknown).
+    in property <int> pid: 0;
+    // Result of an activation attempt ("Switching to the existing window…" or
+    // the failure message); empty while the dialog waits for a choice.
+    in property <string> status-text: "";
+    // True while an activation request is in flight: the buttons stay visible
+    // but cannot start a second request.
+    in property <bool> waiting: false;
+
+    callback activate-requested();
+    callback new-instance-requested();
+    callback cancel-requested();
+
+    // A fixed, compact prompt window; it is intentionally not resizable.
+    no-frame: true;
+    preferred-width: 560px;
+    preferred-height: 340px;
+    min-width: 560px;
+    max-width: 560px;
+    min-height: 340px;
+    max-height: 340px;
+    background: Theme.app-bg;
+
+    VerticalLayout {
+        // Compact custom title bar. The drag area stops before the close button
+        // so a press on close cannot also start a window move.
+        Rectangle {
+            height: 36px;
+            background: Theme.titlebar-bg;
+
+            WindowMoveArea {
+                enabled: true;
+                x: 0;
+                y: 0;
+                width: parent.width - 44px;
+                height: parent.height;
+            }
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 4px;
+                spacing: 8px;
+                cross-axis-alignment: center;
+
+                BrandMark { mark-size: 22px; }
+                Text {
+                    text: "TftpdR";
+                    color: Theme.toolbar-label;
+                    font-size: 12px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                }
+                Rectangle {
+                    width: 1px;
+                    height: 14px;
+                    background: Theme.toolbar-divider;
+                }
+                Text {
+                    text: @tr("TftpdR is already running");
+                    color: Theme.toolbar-label;
+                    font-size: 12px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                }
+
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+
+                Rectangle {
+                    width: 40px;
+                    height: 30px;
+                    border-radius: 4px;
+                    background: close-touch.pressed
+                        ? Theme.window-close-pressed
+                        : close-touch.has-hover
+                            ? Theme.window-close-hover
+                            : transparent;
+
+                    MaterialIcon {
+                        path-data: Icons.close;
+                        tint: close-touch.has-hover || close-touch.pressed
+                            ? Theme.on-accent
+                            : Theme.toolbar-icon;
+                        icon-size: 14px;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                    }
+
+                    close-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.cancel-requested(); }
+                    }
+                }
+            }
+        }
+
+        // Body: the same three choices as before, without a full-panel scrim.
+        VerticalLayout {
+            padding: 12px;
+            Rectangle {
+                vertical-stretch: 1;
+                background: Theme.panel-bg;
+                border-radius: 10px;
+                border-width: 1px;
+                border-color: Theme.panel-border-strong;
+
+                VerticalLayout {
+                    padding: 18px;
+                    spacing: 10px;
+
+                    HorizontalLayout {
+                        cross-axis-alignment: center;
+                        spacing: 8px;
+                        MaterialIcon {
+                            path-data: Icons.dns;
+                            tint: Theme.accent;
+                            icon-size: 20px;
+                        }
+                        Text {
+                            text: @tr("Another TftpdR panel is running");
+                            color: Theme.text-strong;
+                            font-size: 15px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        if root.pid > 0 : Text {
+                            text: @tr("PID {}", root.pid);
+                            color: Theme.text-faint;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle { height: 1px; background: Theme.panel-border; }
+
+                    Text {
+                        text: @tr("Another TftpdR panel is already running. Activate its window, start a new instance on purpose, or cancel this launch.");
+                        color: Theme.text;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+
+                    Text {
+                        text: @tr("Starting a new instance leaves the running panel and its server untouched; two panels then share this user's state files.");
+                        color: Theme.text-muted;
+                        font-size: 11px;
+                        wrap: word-wrap;
+                    }
+
+                    Rectangle { vertical-stretch: 1; background: transparent; }
+
+                    Text {
+                        visible: root.status-text != "";
+                        text: root.status-text;
+                        color: Theme.warn-text;
+                        font-size: 11px;
+                        wrap: word-wrap;
+                    }
+
+                    HorizontalLayout {
+                        alignment: end;
+                        spacing: 8px;
+                        SmallButton {
+                            label: @tr("Cancel");
+                            button-width: 78px;
+                            clicked => { root.cancel-requested(); }
+                        }
+                        SmallButton {
+                            label: @tr("New instance");
+                            button-width: 108px;
+                            available: !root.waiting;
+                            clicked => { root.new-instance-requested(); }
+                        }
+                        SmallButton {
+                            label: @tr("Show program window");
+                            primary: true;
+                            button-width: 128px;
+                            available: !root.waiting;
+                            clicked => { root.activate-requested(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

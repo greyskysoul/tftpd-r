@@ -47,16 +47,18 @@ Windows 和 Linux 的 x64、arm64 预编译压缩包可在[最新 Release](https
 - 会话总数及单 peer 并发数、传输时长、文件大小和事件环均有上限。
 - 无头 daemon：TOML 配置、`check-config`、`print-default-config`、结构化日志以及 Ctrl-C / Ctrl-Break / SIGTERM 优雅关闭。
 - 原生 Slint GUI：服务状态、启动/停止、设置、活动日志、传输列表和最近目录选择；使用相同配置校验规则。设置面板用左侧导航把服务端设置与外观/语言设置分开；面板支持英文和简体中文（默认跟随系统，也可在“外观”页固定选择），并提供跟随系统/浅色/深色主题；GUI 默认不预设根目录，并记忆最近成功启动或保存的根目录。
-- 产品图标采用 Material `dns` 图形，用于面板与任务栏。图标来源与许可说明见 [`ui/icons/README.md`](crates/tftpd-r-gui-slint/ui/icons/README.md)。
+- 重复启动面板时不会静默再开一个实例：检测到已有面板在运行会先询问“显示程序窗口 / 启动新实例 / 取消”。询问窗口是独立的小窗口，不会闪出完整面板；显示程序窗口通过本地状态目录中的一次性请求/应答完成，不新增网络监听；`--new-instance` 可跳过询问，`--activate-only` 只显示已有窗口后退出（[ADR 0017](docs/adr/0017-single-instance-prompt.md)、[ADR 0018](docs/adr/0018-tray-icon-and-close-choice.md)）。
+- 关闭窗口时若服务端仍在运行，会提示“关闭并退出 / 在后台运行 / 取消”。选择后台运行会隐藏窗口并保留服务，通知区域出现图标，可从中恢复窗口或退出；后台实例同样能被重复启动检测和 `--activate-only` 呼出（[ADR 0018](docs/adr/0018-tray-icon-and-close-choice.md)）。
+- 产品图标采用 Material `dns` 图形，用于面板与任务栏。标题栏、关于对话框、窗口/任务栏图标和两个 exe 的 PE 图标使用同一套几何（256 圆角 56、字形框 192）和同一层顶部高光；面板内标记由 Slint 向量重绘并按 75% 视窗（可见墨迹 56.25%）缩放。图标来源与许可说明见 [`ui/icons/README.md`](crates/tftpd-r-gui-slint/ui/icons/README.md)。
 
 本版本刻意不实现（详见 `docs/adr/`）：
 
 - **WRQ 上传**：配置 `allow_upload = true` 会被拒绝，服务端对 WRQ 返回 ERROR 2。上传需先完成单独安全评审与原子临时文件设计。
 - **IPC / GUI 托管 daemon**：GUI 以嵌入模式运行服务，尚无 named-pipe 协议（[ADR 0004](docs/adr/0004-embedded-only.md)）。
-- Windows Service 注册、系统托盘、自动更新、远程管理与用户/角色管理。
+- Windows Service 注册、自动更新、远程管理与用户/角色管理。通知区域图标依赖桌面环境：Windows 使用 `Shell_NotifyIcon`，Linux/BSD 使用 StatusNotifierItem（需要支持该规范的桌面或扩展，例如 GNOME 的 AppIndicator 扩展）；尚未在 Linux 桌面验证。
 - `netascii` 模式（[ADR 0006](docs/adr/0006-octet-only.md)）。
 
-默认端口 69、多地址监听及 GUI 的首次运行行为分别见 [ADR 0007](docs/adr/0007-default-port-69.md)、[ADR 0008](docs/adr/0008-multiple-bind-addresses.md)、[ADR 0009](docs/adr/0009-gui-first-run-and-auto-restart.md)。GUI 根目录记忆、日志导出、目录选择器预热以及多语言/主题决策分别见 [ADR 0012](docs/adr/0012-gui-root-selection-and-memory.md)、[ADR 0013](docs/adr/0013-gui-activity-log.md)、[ADR 0014](docs/adr/0014-prewarmed-folder-picker-helper.md)、[ADR 0015](docs/adr/0015-gui-language-and-theme.md)。
+默认端口 69、多地址监听及 GUI 的首次运行行为分别见 [ADR 0007](docs/adr/0007-default-port-69.md)、[ADR 0008](docs/adr/0008-multiple-bind-addresses.md)、[ADR 0009](docs/adr/0009-gui-first-run-and-auto-restart.md)。GUI 根目录记忆、日志导出、目录选择器预热、多语言/主题决策、重复启动检测以及通知区域/关闭选择分别见 [ADR 0012](docs/adr/0012-gui-root-selection-and-memory.md)、[ADR 0013](docs/adr/0013-gui-activity-log.md)、[ADR 0014](docs/adr/0014-prewarmed-folder-picker-helper.md)、[ADR 0015](docs/adr/0015-gui-language-and-theme.md)、[ADR 0017](docs/adr/0017-single-instance-prompt.md)、[ADR 0018](docs/adr/0018-tray-icon-and-close-choice.md)。
 
 ## 系统要求
 
@@ -73,7 +75,7 @@ cargo build --workspace --release  # release binaries in target\release
 
 `target\release` 下生成 `tftpd-r-server`（daemon）和 `tftpd-r`（面板）；Windows 上带 `.exe` 后缀。
 
-Release 使用优先减小体积的配置（`opt-level = "z"`、fat LTO、`panic = "abort"` 和符号剥离）。GNU x64 验证构建的 daemon 约 1.01 MiB、GUI 约 8.62 MiB。Release 中 panic 会终止进程，Debug 和测试构建仍使用默认 unwind。daemon 的日志过滤避免引入 `regex` 引擎，详见 [ADR 0010](docs/adr/0010-size-first-release-profile.md) 和 [ADR 0016](docs/adr/0016-log-filter-without-env-filter.md)。
+Release 使用优先减小体积的配置（`opt-level = "z"`、fat LTO、`panic = "abort"` 和符号剥离）。GNU x64 验证构建的 daemon 约 1.01 MiB、GUI 约 8.81 MiB。Release 中 panic 会终止进程，Debug 和测试构建仍使用默认 unwind。daemon 的日志过滤避免引入 `regex` 引擎，详见 [ADR 0010](docs/adr/0010-size-first-release-profile.md) 和 [ADR 0016](docs/adr/0016-log-filter-without-env-filter.md)。
 
 工作区包含三个运行时 crate 和一个构建期辅助 crate：
 
@@ -125,11 +127,40 @@ GUI 的可执行文件名为 `tftpd-r`。如果当前目录存在 `config.toml`�
 
 GUI **没有默认根目录**。选择目录前，状态栏显示 `No root directory` / `未指定根目录`，设置栏位保持空白；启动或保存时会要求先选择目录，而不是使用 `tftp-root` 之类占位目录。最近一次成功启动或在设置中保存的根目录，会记录到 Windows `%APPDATA%\TftpdR\last-root.txt`（其他系统使用 XDG 配置目录），下次启动时在没有有效 `config.toml` 根目录配置的情况下恢复。有效 `config.toml` 始终优先，适合部署时固定根目录。
 
+### 重复启动
+
+如果已经有一个面板在运行，再次启动会先显示一个模态询问，而不是直接开出第二个窗口：
+
+- **显示程序窗口**（默认）：请求已运行的面板取消最小化并显示到前台，当前进程随即退出。Windows 可能只让任务栏按钮闪烁而不强制抢焦点，此时点击任务栏中的面板即可。
+- **启动新实例**：仍启动第二个面板（两个面板共用当前用户的状态文件，但各自拥有独立的嵌入服务与日志）。第二次选择“启动新实例”后，该进程也会登记，后续启动仍会看到询问。
+- **取消**：不启动服务，直接退出。
+
+只有已运行面板在 15 秒内有心跳（界面每 3 秒刷新一次锁文件）才会被识别为“正在运行”；崩溃后遗留的锁文件会在之后的下一次启动中被忽略并清理。没有可写状态目录时检测会被跳过并记录 WARN，面板照常启动。
+
+命令行参数：
+
+```text
+tftpd-r --new-instance    # 跳过“已在运行”询问，直接启动新面板
+tftpd-r --activate-only   # 只请求已有面板显示窗口，然后退出（不创建窗口）
+```
+
+`--help` 会列出这两个参数。详细设计见 [ADR 0017](docs/adr/0017-single-instance-prompt.md)。
+
+### 关闭、后台运行与通知区域
+
+服务端处于启动中或运行中时，点击标题栏关闭按钮或按 `Alt+F4` 不会立即退出，而是显示三个选择：
+
+- **关闭并退出**：停止服务并退出程序（仍受 `shutdown_grace_secs` 的优雅关闭时限约束）。
+- **在后台运行**：隐藏主窗口但继续提供 TFTP 服务；通知区域出现程序图标。左键单击图标或选择“显示程序窗口”恢复窗口，选择“退出”结束进程。后台实例仍持有单实例心跳，因此再次启动程序、`--activate-only` 或“显示程序窗口”都能把它呼出。
+- **取消**：关闭提示，窗口与服务保持原状。
+
+服务端未运行（已停止或启动失败）时，关闭窗口直接退出。关闭提示是主窗口内的模态覆盖层；重复启动检测的提示则是独立的小窗口，两者不共用完整面板。通知区域图标使用 Slint 的 `SystemTrayIcon`：Windows 使用 `Shell_NotifyIcon`，Linux/BSD 使用 StatusNotifierItem（需要桌面支持），macOS 使用 `NSStatusItem`。桌面不支持托盘时，隐藏最后一个窗口会让进程退出，而不会留下没有恢复入口的后台进程；可通过再次启动程序呼出窗口。详见 [ADR 0018](docs/adr/0018-tray-icon-and-close-choice.md)。
+
 ### 语言
 
 面板支持**英文和简体中文**。打开设置 → **外观** → **语言**，可选择“跟随系统”“English”或“简体中文”；默认跟随系统：简体中文 locale（`zh`、`zh-CN`、`zh_CN`、`zh-Hans*`、`zh-SG`）显示中文；其他语言（包括繁体中文 `zh-TW`、`zh-HK`、`zh-MO`、`zh-Hant*`）和无法读取 locale 时显示**英文**。
 
-语言选择会立即写入 `ui-prefs.txt`，但当前进程保持启动时的语言——活动日志中的既有行和原生目录/保存对话框标题不会变成另一种语言——**重启面板后生效**，设置页会显示该提示。英文为 `@tr(...)` 源文案，简体中文翻译内嵌于程序，不需要在可执行文件旁部署翻译文件。关于窗口会显示当前语言。`TFTPD_R_GUI_LANGUAGE=en|zh-CN` 仅用于开发测试，不会显示在界面上，并优先于持久化选择。
+语言选择会立即写入 `ui-prefs.txt`，但当前进程保持启动时的语言——活动日志中的既有行和原生目录/保存对话框标题不会变成另一种语言——**重启面板后生效**，设置页会显示该提示。英文为 `@tr(...)` 源文案，简体中文翻译内嵌于程序，不需要在可执行文件旁部署翻译文件。关于窗口会显示当前语言、可点击的 GitHub 仓库地址（取自 Cargo 包元数据，点击后由系统默认浏览器打开）以及“欢迎提出 issue 和 PR”的提示。`TFTPD_R_GUI_LANGUAGE=en|zh-CN` 仅用于开发测试，不会显示在界面上，并优先于持久化选择。
 
 ### 外观
 
@@ -144,11 +175,11 @@ GUI **没有默认根目录**。选择目录前，状态栏显示 `No root direc
 - **自动重启**：服务运行且无进行中传输时，保存服务端配置或切换根目录会重启服务；若传输仍在进行，则仅保存新配置并提示手动重启，避免中断下载。切换外观或语言不会重启服务。
 - **活动日志**：内存最多保留 500 条，按本地时间显示，消息会合并为单行；级别筛选只隐藏条目，不会删除数据，导出仍包含所有保留记录。导出需用户主动选择保存路径；导出文件包含本地路径和 peer 地址，请谨慎分享。
 
-最近使用的目录最多保存 8 条，存放于 Windows `%APPDATA%\TftpdR\recent-dirs.txt` 或 Unix `$XDG_CONFIG_HOME/tftpd-r/recent-dirs.txt`（默认 `~/.config/tftpd-r/`）。根目录记忆、首次运行标记、外观与语言选择分别记录于 `last-root.txt`、`ui-state.txt` 和 `ui-prefs.txt`（其中包含 `theme-mode=` 与 `language=` 两个键）。若用户配置目录不可写，程序会依次回退到可执行文件旁或当前工作目录下的 `.tftpd-r`，并记录 WARN 及实际位置。关闭窗口时会停止嵌入式服务，并在 `shutdown_grace_secs` 限制时间内等待活动传输退出。
+最近使用的目录最多保存 8 条，存放于 Windows `%APPDATA%\TftpdR\recent-dirs.txt` 或 Unix `$XDG_CONFIG_HOME/tftpd-r/recent-dirs.txt`（默认 `~/.config/tftpd-r/`）。根目录记忆、首次运行标记、外观与语言选择分别记录于 `last-root.txt`、`ui-state.txt` 和 `ui-prefs.txt`（其中包含 `theme-mode=` 与 `language=` 两个键）。若用户配置目录不可写，程序会依次回退到可执行文件旁或当前工作目录下的 `.tftpd-r`，并记录 WARN 及实际位置。关闭窗口时若服务端仍在运行会先询问“关闭并退出/在后台运行/取消”；选择关闭并退出时停止嵌入式服务，并在 `shutdown_grace_secs` 限制时间内等待活动传输退出。
 
 ## 图标
 
-工具栏、面板和对话框图标来自 [google/material-design-icons](https://github.com/google/material-design-icons)，采用 24×24 `materialicons` 样式，许可证为 Apache-2.0。向量路径以内嵌 Slint `Path` 命令绘制，可在不同尺寸保持清晰。产品图标与各图标的来源及完整许可证见 [`crates/tftpd-r-gui-slint/ui/icons/README.md`](crates/tftpd-r-gui-slint/ui/icons/README.md) 和 [`crates/tftpd-r-gui-slint/ui/icons/LICENSE`](crates/tftpd-r-gui-slint/ui/icons/LICENSE)。
+工具栏、面板和对话框图标来自 [google/material-design-icons](https://github.com/google/material-design-icons)，采用 24×24 `materialicons` 样式，许可证为 Apache-2.0。向量路径以内嵌 Slint `Path` 命令绘制，可在不同尺寸保持清晰。标题栏与关于对话框中的产品标记和 `app-icon.svg`/`.ico`/`.png`/窗口 RGBA 使用相同的圆角、字形框比例与顶部高光，因此面板内、窗口/任务栏和 exe 文件图标外观一致。产品图标与各图标的来源及完整许可证见 [`crates/tftpd-r-gui-slint/ui/icons/README.md`](crates/tftpd-r-gui-slint/ui/icons/README.md) 和 [`crates/tftpd-r-gui-slint/ui/icons/LICENSE`](crates/tftpd-r-gui-slint/ui/icons/LICENSE)。
 
 ## 配置
 
@@ -195,7 +226,7 @@ cargo test --workspace
 cargo build --workspace --release
 ```
 
-测试覆盖协议 codec、配置和路径沙箱、29 个 loopback UDP RRQ 集成测试（包括块编号回绕、关闭取消、旧客户端 `/file` 请求、多监听同端口和全有或全无绑定）、daemon CLI/配置集成测试，以及 GUI 控制器、根目录记忆、接口地址解析、目录选择器 UTF-8 协议、地址选择模型、自动重启判定、多语言翻译目录和系统主题侦测等。**不要将构建通过等同于目标机运行验证**；实际已执行检查及未覆盖项目见[测试文档](docs/testing.md)。
+测试覆盖协议 codec、配置和路径沙箱、29 个 loopback UDP RRQ 集成测试（包括块编号回绕、关闭取消、旧客户端 `/file` 请求、多监听同端口和全有或全无绑定）、daemon CLI/配置集成测试，以及 GUI 控制器、根目录记忆、接口地址解析、目录选择器 UTF-8 协议、地址选择模型、自动重启判定、多语言翻译目录、系统主题侦测、单实例锁与请求/应答协议、关闭三选一判定、独立单实例窗口与托盘菜单结构等。**不要将构建通过等同于目标机运行验证**；实际已执行检查及未覆盖项目见[测试文档](docs/testing.md)。
 
 ## 运行时依赖
 
