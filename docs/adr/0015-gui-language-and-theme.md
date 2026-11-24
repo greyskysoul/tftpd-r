@@ -89,19 +89,24 @@ Constraints from the repository:
 
 - `settings.slint` now has a left navigation bar with two entries:
   - **Server** — port, bind-address multi-select, root directory, block size,
-    timeout and maximum concurrent sessions. The footer keeps *Cancel* and
-    *Save settings*; Save runs the same `ServerConfig::validate` rules as the
-    daemon and restarts an idle running server as before.
+    timeout and maximum concurrent sessions. The page’s content ends with
+    *Cancel* and *Save settings*; Save runs the same `ServerConfig::validate`
+    rules as the daemon and restarts an idle running server as before.
   - **Appearance** — the theme choice (follow the system / light / dark) and the
-    language choice (follow the system / English / Simplified Chinese). The
-    footer shows a single *Close* button. These preferences are applied
+    language choice (follow the system / English / Simplified Chinese). The page
+    ends with a single *Close* button. These preferences are applied
     independently: the theme applies immediately, the language is stored for the
     next start, and neither touches the server configuration or restarts the
     server.
+- The actions are part of the page content rather than a card-wide footer below
+  a divider: the Server page offers Cancel/Save, the Appearance page offers
+  Close, and both sit at the bottom-right of the right-hand content pane. This
+  keeps page-specific actions visually attached to the page they act on (a
+  card-wide footer that changed with the page looked inconsistent).
 - The page is local dialog state and resets to Server each time the dialog
   opens, so the first-run flow still lands on the server fields. The validation
-  error box stays outside the pages, above the footer, so a failed Save is
-  visible regardless of the active page.
+  error box is part of the Server page content, immediately above its actions;
+  a failed Save is visible on the page that can be retried.
 
 ### Root history inside the settings form
 
@@ -207,8 +212,9 @@ Constraints from the repository:
   titles stay in the startup language, and the Appearance page says so. A
   restart is required after changing the preference.
 - The settings dialog has a fixed 780 × 500 px card with a scrollable content
-  pane, so a long error message or a future extra field does not push the footer
-  out of the window. The minimum window height (600 px) leaves room for it.
+  pane, so a long error message or a future extra field does not push the page
+  actions out of the window. The minimum window height (600 px) leaves room for
+  it.
 - The two pages share one `SettingsDialog` component and one set of properties;
   the validation path is unchanged, and Save is only offered on the Server page.
 - `TFTPD_R_GUI_LANGUAGE` still wins over the persisted preference for one run;

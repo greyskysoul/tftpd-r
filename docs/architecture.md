@@ -225,7 +225,10 @@ The GUI crate stays deliberately small:
   to apply" reminder; Save settings applies and remembers it. The Appearance page
   is the only place whose controls apply independently: the theme applies
   immediately, the language is stored for the next start, and neither restarts
-  the server. When no valid `config.toml` exists, the panel preselects `0.0.0.0`;
+  the server. The page actions live in the right content pane rather than in a
+  card-wide footer: the Server page has Cancel/Save settings and the Appearance
+  page has Close, so the buttons are grouped with the page they act on. When no
+  valid `config.toml` exists, the panel preselects `0.0.0.0`;
   the core and daemon defaults stay loopback. On the first start of a profile
   without a valid configuration the dialog opens automatically, once (see
   `src/user_state.rs`).

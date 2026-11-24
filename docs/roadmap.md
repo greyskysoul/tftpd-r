@@ -5,14 +5,21 @@ implemented. A phase is complete only when its code (where applicable), tests,
 documentation, and acceptance evidence satisfy the stated Definition of Done.
 A checklist item marked **not verified** must not be described as passed.
 
-## Current baseline: `0.3.1`
+## Current baseline: `0.4.0`
 
-`0.3.1` is a packaging and executable-rename patch release on `0.3.0`. The CLI
-daemon now builds as `tftpd-r-server` and the desktop panel as `tftpd-r`; release
+`0.4.0` is a feature release on `0.3.1`. It adds the two-page settings dialog
+with a persisted language choice and recent-root history, a duplicate-launch
+prompt with window activation, a close-time choice between exiting and running
+in the notification area, and a native system-tray icon. The panel can be
+raised again from the tray, a later launch’s prompt, or `--activate-only`.
+There is no TFTP protocol, TOML schema, read-only behaviour or
+security-default change.
+
+`0.3.1` was a packaging and executable-rename patch release on `0.3.0`. The CLI
+daemon builds as `tftpd-r-server` and the desktop panel as `tftpd-r`; release
 archives no longer include a standalone `.ico` file. Scripts and service
 definitions that started the old `tftpd-r` daemon must use `tftpd-r-server`
-instead, because `tftpd-r` now launches the GUI. There is no TFTP protocol, TOML
-schema, read-only behavior or security-default change.
+instead, because `tftpd-r` now launches the GUI.
 
 `0.3.0` was a feature release on `0.2.2`. In addition to the GUI workflow from
 0.2.2 (remembered root, recent-root menu, exportable activity log, pre-warmed
@@ -37,7 +44,7 @@ every 30 s while that mode is active, and the choice is remembered in
 `.slint` files no longer contain Chinese literals. No protocol,
 configuration-format, daemon or security-default change.
 
-### Unreleased after 0.3.1: settings navigation, language choice and root history (ADR 0015 revision)
+### In 0.4.0: settings navigation, language choice and root history (ADR 0015 revision)
 
 The settings dialog is split by a left navigation bar into **Server** (port,
 bind addresses, root, block size, timeout, sessions; validated like the daemon,
@@ -48,11 +55,14 @@ choice is **Follow system / English / Simplified Chinese**, stored as
 language and applies the new preference on the next start, so existing log lines
 and native dialog titles stay consistent. The server root field now has a
 history drop-down backed by `recent-dirs.txt`; selecting an entry only fills the
-form and keeps the inline "save the settings" reminder. No protocol,
-configuration-format, daemon or security-default change. The GNU x64 GUI grows
-from 9,036,800 B to 9,184,256 B (+1.63 %).
+form and keeps the inline "save the settings" reminder. The page actions are
+part of each page’s content (Cancel/Save on Server, Close on Appearance), so
+they no longer sit below a card-wide divider that changes with the page. No
+protocol, configuration-format, daemon or security-default change. The GNU x64
+GUI grows from 9,036,800 B (0.3.1) to 9,310,720 B (0.4.0), including the
+duplicate-launch/tray work described below.
 
-### Unreleased after 0.3.1: duplicate-launch prompt, tray icon and close choice (ADR 0017/0018)
+### In 0.4.0: duplicate-launch prompt, tray icon and close choice (ADR 0017/0018)
 
 A second launch detects the running panel through advisory files in the per-user
 state directory and asks whether to show the existing window, start another
@@ -68,8 +78,8 @@ has not been run on a Linux desktop; without a visible icon the last-window rule
 exits rather than leaving an unreachable background process. The handshake
 remains a local UI convenience, not a server-control IPC channel. No protocol,
 configuration-format, bind-default or upload change. The GNU x64 GUI grows from
-9,233,408 B to 9,309,184 B (+0.82 %); target-machine tray/close verification is
-still pending.
+9,036,800 B (0.3.1) to 9,310,720 B (0.4.0, +3.0 %); the Windows
+tray/close/settings flow was manually verified by the operator.
 
 ### In 0.3.0: daemon log filter size (ADR 0016)
 
@@ -116,6 +126,12 @@ from its working directory and does not write that file.
 
 ### Feature and patch releases
 
+- **0.4.0 — desktop workflow release.** Two-page settings with persisted
+  language choice and recent-root history; duplicate-launch detection with
+  activation; close choice, background mode and notification-area icon. No
+  protocol, configuration or security-default change. See
+  [ADR 0017](adr/0017-single-instance-prompt.md) and
+  [ADR 0018](adr/0018-tray-icon-and-close-choice.md).
 - **0.3.1 — executable rename and archive cleanup.** The CLI daemon builds as
   `tftpd-r-server` and the GUI as `tftpd-r`; release archives contain no
   standalone `.ico`. No protocol, configuration or security-default change.

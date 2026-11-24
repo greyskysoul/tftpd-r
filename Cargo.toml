@@ -12,7 +12,7 @@ authors = ["TftpdR contributors"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/greyskysoul/tftpd-r"
-version = "0.3.1"
+version = "0.4.0"
 
 [workspace.dependencies]
 tftpd-r-build-support = { path = "crates/tftpd-r-build-support" }

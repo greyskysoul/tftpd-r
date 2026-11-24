@@ -207,7 +207,7 @@ export component SettingsDialog inherits Rectangle {
                 VerticalLayout {
                     horizontal-stretch: 1;
                     vertical-stretch: 1;
-                    spacing: 0;
+                    spacing: 8px;
 
                     // --- Server settings ------------------------------------
                     if root.page == 0 : ScrollView {
@@ -421,59 +421,62 @@ export component SettingsDialog inherits Rectangle {
                             Rectangle { vertical-stretch: 1; background: transparent; }
                         }
                     }
-                }
-            }
 
-            if root.error-text != "" : Rectangle {
-                background: Theme.danger-soft;
-                border-radius: 6px;
-                border-width: 1px;
-                border-color: Theme.danger-border;
-                height: 34px;
-                HorizontalLayout {
-                    cross-axis-alignment: center;
-                    padding-left: 9px;
-                    padding-right: 9px;
-                    spacing: 6px;
-                    MaterialIcon {
-                        path-data: Icons.error;
-                        tint: Theme.danger;
-                        icon-size: 15px;
+                    // Page actions stay inside the content pane and are not
+                    // separated by a card-wide footer divider. The server page
+                    // has Cancel/Save; the appearance page applies immediately
+                    // and has only Close, so the actions follow the page they
+                    // belong to.
+                    if root.page == 0 && root.error-text != "" : Rectangle {
+                        background: Theme.danger-soft;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: Theme.danger-border;
+                        height: 34px;
+                        HorizontalLayout {
+                            cross-axis-alignment: center;
+                            padding-left: 9px;
+                            padding-right: 9px;
+                            spacing: 6px;
+                            MaterialIcon {
+                                path-data: Icons.error;
+                                tint: Theme.danger;
+                                icon-size: 15px;
+                            }
+                            Text {
+                                text: root.error-text;
+                                color: Theme.danger-text;
+                                font-size: 11px;
+                                horizontal-stretch: 1;
+                                wrap: word-wrap;
+                            }
+                        }
                     }
-                    Text {
-                        text: root.error-text;
-                        color: Theme.danger-text;
-                        font-size: 11px;
-                        horizontal-stretch: 1;
-                        wrap: word-wrap;
+
+                    HorizontalLayout {
+                        cross-axis-alignment: center;
+                        spacing: 8px;
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        if root.page == 0 : SmallButton {
+                            label: @tr("Cancel");
+                            tint: Theme.text-muted;
+                            button-width: 80px;
+                            clicked => { root.cancel-requested(); }
+                        }
+                        if root.page == 0 : SmallButton {
+                            label: @tr("Save settings");
+                            icon-data: Icons.check;
+                            primary: true;
+                            button-width: 116px;
+                            clicked => { root.apply-requested(); }
+                        }
+                        if root.page == 1 : SmallButton {
+                            label: @tr("Close");
+                            primary: true;
+                            button-width: 96px;
+                            clicked => { root.cancel-requested(); }
+                        }
                     }
-                }
-            }
-
-            Rectangle { height: 1px; background: Theme.panel-border; }
-
-            HorizontalLayout {
-                cross-axis-alignment: center;
-                spacing: 8px;
-                Rectangle { horizontal-stretch: 1; background: transparent; }
-                if root.page == 0 : SmallButton {
-                    label: @tr("Cancel");
-                    tint: Theme.text-muted;
-                    button-width: 80px;
-                    clicked => { root.cancel-requested(); }
-                }
-                if root.page == 0 : SmallButton {
-                    label: @tr("Save settings");
-                    icon-data: Icons.check;
-                    primary: true;
-                    button-width: 116px;
-                    clicked => { root.apply-requested(); }
-                }
-                if root.page == 1 : SmallButton {
-                    label: @tr("Close");
-                    primary: true;
-                    button-width: 96px;
-                    clicked => { root.cancel-requested(); }
                 }
             }
         }

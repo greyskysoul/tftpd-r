@@ -16,7 +16,7 @@ are defined in [roadmap.md](roadmap.md).
 | Linker | MinGW-w64 GCC 15.3.0 (winlibs, msvcrt runtime); `windres` 2.46.1 from the same binutils for the executable icon |
 | Slint | 1.19.0, features `std`, `backend-winit`, `renderer-software`, `software-renderer-systemfonts`, `compat-1-2`, `system-tray` (ADR 0018; native backend per platform) |
 | Release profile | `opt-level = "z"`, `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = "symbols"` (ADR 0010; measured 2026-11-21) |
-| Date | 2026-11-24 (historical runs from 2026-11-20 onward; 0.3.0 release was 2026-11-22; 0.3.1 candidate preparation added 2026-11-23; tray/close choice added 2026-11-24) |
+| Date | 2026-11-24 (historical runs from 2026-11-20 onward; 0.3.0 release was 2026-11-22; 0.3.1 candidate preparation added 2026-11-23; tray/close choice and 0.4.0 preparation added 2026-11-24) |
 
 The development environment used a portable toolchain stored in
 `.dsh-toolchain/` (git-ignored) because the agent sandbox could not perform
@@ -31,7 +31,7 @@ with network access; subsequent builds/tests ran with `--offline`.
 | `cargo fmt --all -- --check` | Pass (exit 0) |
 | `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` | Pass (exit 0, no warnings on the 0.3.1 candidate) |
 | `cargo test --workspace --locked --offline` | **235 passed, 0 failed, 1 ignored** (the ignored test opens the native folder dialog; see the eleventh run) |
-| `cargo build --workspace --release --locked --offline` | Pass (exit 0, **71.31 s** for the first build after enabling the Windows tray backend; 59.88 s for the final close-path code rebuild; 0.76 s for a no-op incremental rebuild on the same tree; 75.9 s on the single-instance tree; 89.18 s on the modal-scrim tree; 53.95 s on the About-link tree; 108.60 s on the settings-navigation/language tree; earlier builds of that tree took 92.15 s and 83.32 s; 117 s on the 0.3.1 candidate; 66.65 s on the 0.3.0 candidate; 57.16 s on the pre-0.3.0 daemon log-filter tree; 84 s on the language/theme tree; 59.04 s on the 0.2.2 final tree, 51.43 s for the GUI-only increment before the version bump, 49.08 s on the previous tree). The first full size-profile build was 116.4 s. |
+| `cargo build --workspace --release --locked --offline` | Pass (exit 0, **6m14s** for the 0.4.0 version-bump/settings-action rebuild; 71.31 s for the first build after enabling the Windows tray backend; 59.88 s for the close-path code rebuild; 0.76 s for a no-op incremental rebuild; 75.9 s on the single-instance tree; 89.18 s on the modal-scrim tree; 53.95 s on the About-link tree; 108.60 s on the settings-navigation/language tree; earlier builds of that tree took 92.15 s and 83.32 s; 117 s on the 0.3.1 candidate; 66.65 s on the 0.3.0 candidate; 57.16 s on the pre-0.3.0 daemon log-filter tree; 84 s on the language/theme tree; 59.04 s on the 0.2.2 final tree, 51.43 s for the GUI-only increment before the version bump, 49.08 s on the previous tree). The first full size-profile build was 116.4 s. |
 
 The workspace was renamed from `rust-tftpd`/`tftp-*` to TftpdR/`tftpd-r-*` on
 2026-11-20. The original `0.2.0` verification ran on 2026-11-20 (offline, GNU toolchain)
@@ -190,11 +190,12 @@ the verification machine:
   (3 build-support, 61 core unit, 29 RRQ integration, 15 daemon unit, 5 CLI
   integration, 121 GUI, 1 doctest).
 - `cargo build --workspace --release --offline` → exit 0. The first build after
-  enabling `system-tray` took **71.31 s**, the final close-path code rebuild
-  **59.88 s**, and a no-op incremental rebuild **0.76 s**. GNU x64
-  `tftpd-r-server.exe` is **1,063,936 B**
-  (unchanged); `tftpd-r.exe` is **9,309,184 B (8.88 MiB)**, +75,776 B
-  (+0.82 %) over the single-instance tree (9,233,408 B).
+  enabling `system-tray` took **71.31 s**, the close-path code rebuild
+  **59.88 s**, and a no-op incremental rebuild **0.76 s**. The 0.4.0
+  version-bump plus settings-action placement rebuild took **6m14s**. GNU x64
+  `tftpd-r-server.exe` is **1,063,936 B** (unchanged); `tftpd-r.exe` is
+  **9,310,720 B (8.88 MiB)**, +77,312 B (+0.84 %) over the single-instance tree
+  (9,233,408 B) and +273,920 B (+3.03 %) over 0.3.1 (9,036,800 B).
 - `target\release\tftpd-r.exe --smoke-test` → exit 0, printed
   `language=zh_CN language_pref=system translation=ok tagline=Rust TFTP 服务端
   theme=system dark=true`. The lazy tray creation means the smoke run does not
@@ -212,17 +213,39 @@ translated choices/callbacks and the fact that `InstancePromptWindow` is a
 `Window` outside `AppWindow`. The translation catalogue tests include the new
 `@tr(...)` strings.
 
-Tray registration and the close flow could **not** be exercised end-to-end on
-this machine: the desktop is not attached to the interactive session
-(`GetForegroundWindow` is 0 and a full-screen capture is black). An earlier
-startup-time tray creation attempt logged `Shell_NotifyIconW(NIM_ADD) failed`;
-the implementation therefore creates the tray lazily while the main window is
-still visible and hides the window on the next tick, but the actual icon,
-right-click menu, left-click restore, Alt+F4 prompt, background hide and
-single-instance/`--activate-only` restore of a hidden window are **not
-verified** here. They need a real desktop session and are listed under "Not
-verified" below. Direct unit testing of the native tray backend is not possible
-without that session.
+Tray registration and the close flow could **not** be exercised by the automated
+agent session: the desktop is not attached to that session (`GetForegroundWindow`
+is 0 and a full-screen capture is black), and an earlier startup-time tray
+creation attempt logged `Shell_NotifyIconW(NIM_ADD) failed`. The implementation
+therefore creates the tray lazily while the main window is still visible and
+hides the window on the next tick. After the build was handed over, the
+**operator manually verified** the tray icon, menu/left-click restore, Alt+F4
+close prompt, background hide/restore, `--activate-only`/second-launch restore
+and the updated settings actions on the real Windows desktop. Automated
+screenshot/PrintWindow capture of the tray notification area itself is still not
+available in this session.
+
+### Settings action placement (2026-11-24, 0.4.0)
+
+The settings dialog previously had a card-wide footer below a divider, and its
+buttons changed from Cancel/Save settings to Close when switching to the
+Appearance page. That made page-specific actions look detached from the settings.
+The actions now live inside the right-hand content pane of each page; the
+card-wide divider was removed:
+
+- Server page: Cancel and Save settings at the bottom-right of the content pane.
+- Appearance page: Close in the same content placement; theme/language still
+  apply immediately.
+
+Verification on this machine:
+
+- Captured the Server and Appearance pages with
+  `.bootstrap\gui_capture.ps1` (release `tftpd-r.exe --preview settings`, isolated
+  `APPDATA`, `PrintWindow=True`, 1120×780). Both captures show the action buttons
+  inside the content pane; no card-wide footer divider remains.
+- Replaced `docs/screenshots/settings-zh-light.png` with the new 780×500 crop.
+- The operator confirmed the placement on the real desktop. This is a visual
+  check; no unit test asserts the layout.
 
 The `0.2.0` release artifacts built on the verification machine measured
 `tftpd-r.exe` ≈ 2.07 MiB (2,174,976 bytes) and `tftpd-r-gui.exe` ≈ 12.81 MiB
@@ -248,8 +271,9 @@ daemon stayed at 1,063,936 bytes. The About-link/modal-scrim tree measured
 **9,189,888 bytes (8.76 MiB)**, and the single-instance prompt plus its
 translated strings bring the GUI to **9,233,408 bytes (8.81 MiB)**, +43,520
 bytes (+0.47 %); the daemon is still 1,063,936 bytes. The tray/close-choice
-work brings the GUI to **9,309,184 bytes (8.88 MiB)**, +75,776 bytes (+0.82 %)
-over the single-instance tree; the daemon is unchanged. The
+work brings the GUI to **9,310,720 bytes (8.88 MiB)**, +77,312 bytes (+0.84 %)
+over the single-instance tree and +273,920 bytes (+3.03 %) over 0.3.1; the
+daemon is unchanged. The
 attribution came from an unstripped build inspected with `nm --demangle` over
 the COFF symbol table (see the fifteenth run below). These figures
 are informational only; they are not an acceptance criterion and not a promise
@@ -1285,16 +1309,15 @@ overlay:
   and the arm64 MSVC binaries were not run.
 - **Linux/macOS runtime.** CI runs the full suite on Linux, but the GUI has never
   been run on a Linux desktop, and macOS is untested.
-- **Notification-area icon and background mode (ADR 0018).** The tray component,
-  close prompt, background hide and window restore are unit-tested only at the
-  state/property level. This verification session has no attached desktop, so
-  `Shell_NotifyIconW` registration, the tray menu/left-click, Alt+F4 opening the
-  close prompt, hiding to the tray, restoring from the tray or from
-  `--activate-only`, and the rendered `InstancePromptWindow` were not observed.
-  A startup-time registration attempt in this session failed with
-  `NIM_ADD`; the lazy registration while the main window is still visible is
-  intended to avoid that failure mode, but it remains unverified on a real
-  desktop.
+- **Notification-area icon and background mode (ADR 0018).** The automated agent
+  session had no attached desktop, so `Shell_NotifyIconW` registration, the tray
+  menu/left-click, Alt+F4 opening the close prompt, hiding to the tray,
+  restoring from the tray or `--activate-only`, and the rendered
+  `InstancePromptWindow` were not observed there; a startup-time registration
+  attempt in that session failed with `NIM_ADD`, which is why registration is
+  lazy. The **operator manually verified** these flows, including background
+  hide/restore and the close prompt, on the real Windows desktop before release.
+  The tray notification area itself was not captured by an automated screenshot.
 - **Linux/BSD tray backend.** The Linux build compiles Slint's `ksni`
   StatusNotifierItem backend (pure Rust, no GTK build dependency), but no Linux
   desktop was available to run it. A desktop without a StatusNotifier host will
