@@ -11,7 +11,7 @@
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
 | Phase 0–5 | ✅ 已完成 | workspace、codec/沙箱、RRQ 引擎、daemon、GUI 面板（无边框标题栏、工具栏、状态栏、日志/传输列表、设置/关于、最近根目录）、文档/ADR/CI |
-| Phase 6 目标机验证/发布收尾 | 🟡 部分完成 | 0.1.0、0.2.0、0.2.1、0.2.2、0.3.0、0.3.1 已发布（Windows/Linux × x64/arm64）；Windows/Linux CI 已通过；真实/老式客户端、LAN/防火墙、Linux GUI、RDP、IME、其他 DPI、目标机运行仍待完成 |
+| Phase 6 目标机验证/发布收尾 | 🟡 部分完成 | 0.1.0、0.2.0、0.2.1、0.2.2、0.3.0、0.3.1、0.4.0 已发布（Windows/Linux × x64/arm64）；Windows/Linux CI 已通过；真实/老式客户端、LAN/防火墙、Linux GUI、RDP、IME、其他 DPI、目标机运行仍待完成 |
 | Phase 7 IPC | ⏳ 未开始 | GUI 仅 Embedded 模式，无 named pipe/daemon 控制 |
 | Phase 8 WRQ 上传 | ⏳ 未开始 | 只读是默认且唯一行为，`allow_upload=true` 被校验拒绝 |
 | 0.2.0 R1/R2 | ✅ 已发布（2026-11-20） | 默认端口 69（ADR 0007）；`port` + `bind_addresses` 多监听、GUI 多选地址与目录选择器（ADR 0008）；首次启动自动设置、空闲时自动重启（ADR 0009） |
@@ -26,6 +26,7 @@
 | 多语言 + 深浅主题 | ✅ 已发布（0.3.0）；设置导航/语言选择 2026-11-23 完成 | 启动时按持久化语言偏好（默认跟随系统 locale）选简中/英文（其余语言与繁体中文→英文）；设置面板左侧“服务端/外观”导航，「外观」页提供主题（跟随系统/浅色/深色）与语言选择，系统主题值每 30 s 复检（ADR 0015 修订） |
 | 0.3.0 发布 | ✅ 已发布（2026-11-22） | release workflow 44996694989；四目标构建与 publish 全绿；x64 MSVC 归档 SHA-256 与 `SHA256SUMS`/GitHub digest 一致 |
 | 0.3.1 发布 | ✅ 已发布（2026-11-23） | release workflow 45104766450；四目标构建与 publish 全绿；四个归档 SHA-256 与 `SHA256SUMS`/GitHub digest 一致；x86_64 MSVC 归档运行检查通过 |
+| 0.4.0 发布 | ✅ 已发布（2026-11-24） | release workflow 45346735495；Windows/Linux 测试门、四目标构建与 publish 全绿；四个归档的 GitHub digest 与 `SHA256SUMS` 一致；新增设置导航/语言/根目录历史、重复启动检测/独立提示窗口、托盘/关闭选择 |
 | 重复启动检测 | ✅ 已实现（2026-11-24，未做目标机桌面验收） | 启动时检测已有面板：显示程序窗口 / 启动新实例 / 取消；提示使用**独立小窗口**；文件型心跳锁 + 请求/应答，`--new-instance` 与 `--activate-only`；ADR 0017 |
 | 关闭选择 + 通知区域 | ✅ 已实现（2026-11-24，未做目标机桌面验收） | 服务运行中关闭窗口提示“关闭并退出 / 在后台运行 / 取消”；后台模式隐藏窗口、通知区域图标（Slint `SystemTrayIcon` + `system-tray`：Windows Shell_NotifyIcon、Linux/BSD ksni/StatusNotifierItem、macOS AppKit），托盘/重复启动/`--activate-only` 均可呼出；Linux 托盘宿主未验证；ADR 0018 |
 

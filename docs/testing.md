@@ -1119,6 +1119,43 @@ path now uses the shared BOM-stripping state-file reader, so a hand-edited
   button for more than 0.5 s, release, then repeat after the history changes) is
   still required on a target desktop.
 
+### v0.4.0 release artifacts (2026-11-24, twenty-first run)
+
+Tag `v0.4.0` (commit `70976c6`) was pushed to `origin/main`; release workflow
+[45346735495](https://github.com/greyskysoul/tftpd-r/actions/runs/45346735495)
+completed successfully. Both test jobs passed (Windows 2m22s, Linux 1m19s), all
+four target builds passed (x86_64 MSVC 4m5s, aarch64 MSVC 4m18s, x86_64 Linux
+2m38s, aarch64 Linux 2m35s), and `publish GitHub Release` took 19s. The only
+annotations were the GitHub Actions Node.js 20 deprecation warnings for
+`actions/checkout@v4`, `actions/upload-artifact@v4` and
+`actions/download-artifact@v4`; they did not fail a job. The release is public,
+not a draft or prerelease:
+<https://github.com/greyskysoul/tftpd-r/releases/tag/v0.4.0> (`TftpdR v0.4.0`).
+
+| Asset | Bytes | SHA-256 (matches both `SHA256SUMS` and the GitHub asset digest) |
+| --- | ---: | --- |
+| `tftpd-r-0.4.0-aarch64-pc-windows-msvc.zip` | 4,936,776 | `370748a5c71f4485c110a4a4718b36d74ca59e1d17eac573bf11c4540219548c` |
+| `tftpd-r-0.4.0-aarch64-unknown-linux-gnu.tar.gz` | 6,642,636 | `1246f6b9ed4d7a89a9e0a43f11c8eebcff65514565c3090d4ffe018822156b81` |
+| `tftpd-r-0.4.0-x86_64-pc-windows-msvc.zip` | 5,122,093 | `c325291910c8f34a7bf7bdbb993c065c8125035ca813a58815558d412addf7fc` |
+| `tftpd-r-0.4.0-x86_64-unknown-linux-gnu.tar.gz` | 6,776,352 | `1f914513bd54028dac706e6a3dbd1935a39925a11a3277810bea40b859e23fc3` |
+| `SHA256SUMS` | 440 | `354c42940161d3e3a1246c2f0689a4d0332a12ff59a7d10efca12813b4a28921` |
+
+- **Asset digest verification.** `gh release view` reported all five uploaded
+  assets and the SHA-256 values above; the GitHub API asset `digest` fields
+  matched the `SHA256SUMS` entries exactly. A local `gh release download` started
+  but stalled at zero-byte files, so the archives were **not** independently
+  downloaded/extracted on this machine. The workflow's packaging step itself
+  checks that no `.ico` file enters an archive.
+- **Release notes.** The release uses
+  [`.github/release-notes/0.4.0.md`](../.github/release-notes/0.4.0.md), which
+  documents the settings navigation/language/root-history work, the standalone
+  duplicate-launch prompt, the tray/background close choice and the page-local
+  settings actions.
+- **Settings action placement.** The Server and Appearance pages were captured
+  with `PrintWindow` in the same tree; the action buttons are inside the right
+  content pane and the old card-wide footer divider is gone. The operator
+  confirmed the placement on the desktop. See the dedicated section above.
+
 ### v0.3.1 release artifacts (2026-11-23, twentieth run)
 
 Tag `v0.3.1` (commit `e41d8df`) was pushed to `origin/main`; release workflow
